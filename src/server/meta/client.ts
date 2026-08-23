@@ -36,13 +36,24 @@ export type MetaSendResult =
   | { ok: true; message_id: string | null; http_status: number }
   | { ok: false; error: MetaErrorInfo; http_status: number };
 
+/** ผลลัพธ์ที่ไม่รู้แน่ชัด — ใช้ตัดสินใจว่าห้าม retry */
+export function isAmbiguousResult(r: MetaSendResult): boolean {
+  return !r.ok && r.error.kind === 'ambiguous';
+}
+
 /** ตัวยิงจริง — แยกออกมาให้ชุดทดสอบสวมของปลอมเข้าไปได้ */
 export type Fetcher = typeof fetch;
 
 let _fetcher: Fetcher | null = null;
 
-/** ใช้ในชุดทดสอบเท่านั้น : สวม fetch ปลอมเข้าไปแทนของจริง */
+/**
+ * ใช้ในชุดทดสอบเท่านั้น : สวม fetch ปลอมเข้าไปแทนของจริง
+ * ⚠️ บนเครื่องจริงเรียกไม่ได้ — กันไม่ให้ใครสลับตัวยิงจริงตอนรันจริง
+ */
 export function __setFetcherForTests(f: Fetcher | null): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('__setFetcherForTests() ใช้บนเครื่องจริงไม่ได้');
+  }
   _fetcher = f;
 }
 
@@ -89,16 +100,18 @@ export async function sendToMeta(page: MetaPage, payload: MetaSendPayload): Prom
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
-    // เน็ตหลุด / timeout — ถือเป็นความขัดข้องชั่วคราว
+    // ⚠️ คำขอออกจากเครื่องเราไปแล้ว แต่ไม่ได้รับคำตอบ (timeout / เน็ตขาด / ปลายทางตัดสาย)
+    //    เราไม่มีทางรู้ว่า Meta รับข้อความไปแล้วหรือยัง
+    //    → ห้ามลองใหม่อัตโนมัติ เพราะลูกค้าอาจได้ข้อความซ้ำ แก้ไม่ได้
     return {
       ok: false,
       http_status: 0,
-      error: classifyMetaError({ message: (err as Error).message }, 503),
+      error: classifyMetaError({ message: (err as Error).message }, 0, { networkFailure: true }),
     };
   }
 
   const body = (await res.json().catch(() => null)) as
-    | { message_id?: string; error?: RawMetaError }
+    | { message_id?: string; error?: RawMetaError; message_id_?: string }
     | null;
 
   if (!res.ok || body?.error) {

@@ -20,8 +20,8 @@ export async function GET() {
   // 1) env ครบไหม
   try {
     const { assertEnv } = await import('@/config/env');
-    assertEnv();
-    checks.env = { ok: true, message_th: 'ตั้งค่า environment ครบ' };
+    await assertEnv();
+    checks.env = { ok: true, message_th: 'ตั้งค่า environment และกฎ Policy Engine ถูกต้อง' };
   } catch (err) {
     checks.env = { ok: false, message_th: (err as Error).message.trim() };
     return NextResponse.json({ ok: false, checks }, { status: 503 });

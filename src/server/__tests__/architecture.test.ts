@@ -200,3 +200,95 @@ describe('adapter ต้องตรงกับตารางที่ engine 
     }
   });
 });
+
+
+/* ================================================================== */
+/* รอบ 2.1 — ลดช่องทางที่จะข้าม sendMessage() ได้                        */
+/* ================================================================== */
+describe('🔴 sendMessage() ต้องเป็นทางเข้าเดียวของการส่งข้อความ', () => {
+  /** โฟลเดอร์ที่มีสิทธิ์แตะ Meta client / adapter ได้จริง */
+  const META_ALLOWED = ['server/meta/', 'server/transports/base.ts'];
+  const ADAPTER_ALLOWED = ['server/transports/', 'server/messaging/'];
+
+  it('โค้ดฝั่งฟีเจอร์ (app / components / lib) ห้ามแตะ Meta client เลย', () => {
+    const featureFiles = CODE_FILES.filter((f) => {
+      const r = rel(f);
+      return r.startsWith('app/') || r.startsWith('components/') || r.startsWith('lib/');
+    });
+    const offenders = featureFiles.filter((f) => read(f).includes('@/server/meta/')).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ไฟล์ที่ import Meta client แบบไม่ใช่ชนิดข้อมูล ต้องอยู่ในรายชื่อที่อนุญาต', () => {
+    const offenders = CODE_FILES.filter((f) => {
+      const r = rel(f);
+      if (META_ALLOWED.some((a) => r.startsWith(a))) return false;
+      const src = read(f);
+      // อนุญาตเฉพาะ `import type { ... } from '@/server/meta/client'`
+      const nonTypeImport = /^import\s+(?!type\s)[^;]*from\s+['"]@\/server\/meta\/client['"]/m;
+      return nonTypeImport.test(src);
+    }).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('หยิบ adapter มาใช้เองได้เฉพาะใน transports และ messaging', () => {
+    const offenders = CODE_FILES.filter((f) => {
+      const r = rel(f);
+      if (ADAPTER_ALLOWED.some((a) => r.startsWith(a))) return false;
+      return /\bgetAdapter\b|\ballAdapters\b/.test(read(f));
+    }).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('เรียก sendToMeta() ได้เฉพาะใน transports/base.ts', () => {
+    const offenders = CODE_FILES.filter((f) => {
+      const r = rel(f);
+      if (r.startsWith('server/meta/') || r === 'server/transports/base.ts') return false;
+      return /\bsendToMeta\b/.test(read(f));
+    }).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ห้ามเชื่อคำอ้างว่า "เป็นคนพิมพ์เอง" จากผู้เรียก', () => {
+  it('ไม่มีฟิลด์ human_typed ที่ผู้เรียกกำหนดเองหลงเหลืออยู่ในสัญญาของ engine', () => {
+    const types = CODE_FILES.find((f) => rel(f) === 'server/policy/types.ts');
+    expect(types).toBeDefined();
+    // ต้องไม่มีฟิลด์ human_typed ใน SendContext อีกแล้ว (ถูกแทนด้วย provenance)
+    expect(read(types!)).not.toMatch(/^\s*human_typed\s*:/m);
+  });
+
+  it('สร้าง provenance ได้จากไฟล์เดียวเท่านั้น', () => {
+    const offenders = CODE_FILES.filter((f) => {
+      const r = rel(f);
+      if (r === 'server/messaging/provenance.ts') return false;
+      return /human_authored\s*:\s*true/.test(read(f));
+    })
+      .map(rel)
+      // หน้าตรวจสถานะสร้างบริบทจำลองเพื่อ "ลองถาม" เท่านั้น ส่งจริงไม่ได้ (ไม่มีตราประทับ)
+      .filter((r) => r !== 'app/api/policy/preview/route.ts');
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 คำตอบของ Meta ห้ามไปแก้ประวัติข้อความจริง', () => {
+  it('ไม่มีโค้ดที่เขียนทับ last_customer_message_at นอกเส้นทางรับข้อความเข้า', () => {
+    const offenders = CODE_FILES.filter((f) => {
+      const src = read(f);
+      // จับรูปแบบ update ... last_customer_message_at
+      return /update\([^)]*last_customer_message_at/.test(src.replace(/\n/g, ' '));
+    }).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ชั้นบันทึกข้อสังเกตต้องไม่แตะตาราง conversations / customers', () => {
+    const store = CODE_FILES.find((f) => rel(f) === 'server/messaging/store.ts');
+    expect(store).toBeDefined();
+    const src = read(store!);
+    const observationBlock = src.slice(src.indexOf('recordPolicyObservation'));
+    expect(observationBlock).not.toContain("from('conversations')");
+    expect(observationBlock).not.toContain("from('customers')");
+  });
+});

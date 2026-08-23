@@ -20,7 +20,14 @@ const eslintConfig = defineConfig([
    *  แต่ eslint จะเตือนตั้งแต่ตอนพิมพ์ ไม่ต้องรอรันเทสต์)
    * ------------------------------------------------------------------- */
   {
-    files: ["src/app/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}", "src/lib/**/*.{ts,tsx}"],
+    // ครอบ src ทั้งหมด แล้วยกเว้นเฉพาะโฟลเดอร์ที่มีสิทธิ์แตะของพวกนี้จริง ๆ
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/server/transports/**",
+      "src/server/messaging/**",
+      "src/server/meta/**",
+      "src/**/__tests__/**",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -38,9 +45,15 @@ const eslintConfig = defineConfig([
                 "ห้ามเรียก transport adapter ตรง ๆ — การส่งข้อความทุกกรณีต้องผ่าน sendMessage() ใน @/server/messaging/send-message",
             },
             {
-              group: ["@/server/meta/client"],
+              group: ["@/server/meta/client", "@/server/meta/*"],
               message:
-                "ห้ามเรียก Meta API ตรง ๆ จากหน้าเว็บหรือ API route — ต้องผ่าน sendMessage() เท่านั้น",
+                "ห้ามเรียก Meta API ตรง ๆ — การส่งข้อความทุกกรณีต้องผ่าน sendMessage() ใน @/server/messaging/send-message",
+            },
+            {
+              group: ["@/server/transports/registry"],
+              importNames: ["getAdapter", "allAdapters"],
+              message:
+                "ห้ามหยิบ adapter มาใช้เอง — ต้องผ่าน sendMessage() (transportChannelSupport() อ่านอย่างเดียวใช้ได้)",
             },
           ],
         },

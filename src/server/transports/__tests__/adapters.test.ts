@@ -9,7 +9,17 @@ import { utilityAdapter } from '../utility';
 import { marketingAdapter } from '../marketing';
 import { allAdapters, getAdapter, transportChannelSupport } from '../registry';
 import { resetPolicyConfigCache } from '@/server/policy/config';
-import type { SendContext } from '@/server/policy/types';
+import { HUMAN_PROVENANCE_KIND, type SendContext, type SendProvenance } from '@/server/policy/types';
+
+const HUMAN: SendProvenance = {
+  kind: HUMAN_PROVENANCE_KIND, triggered_by: 'admin', human_authored: true, admin_id: 'admin-1',
+};
+const KEYWORD_BOT: SendProvenance = {
+  kind: 'keyword_bot', triggered_by: 'bot', human_authored: false, admin_id: null,
+};
+const SCHEDULER: SendProvenance = {
+  kind: 'scheduler', triggered_by: 'scheduler', human_authored: false, admin_id: null,
+};
 
 const PSID = 'psid-1234';
 
@@ -20,9 +30,7 @@ function ctx(overrides: Partial<SendContext> = {}): SendContext {
     page_id: 'page-1',
     channel: 'messenger',
     message_type: 'inquiry_response',
-    triggered_by: 'admin',
-    human_typed: true,
-    admin_id: 'admin-1',
+    provenance: HUMAN,
     content: { text: 'สวัสดีค่ะ' },
     ...overrides,
   };
@@ -76,14 +84,30 @@ describe('🔴 HUMAN_AGENT adapter — ตาข่ายกันพลาด�
   });
 
   it('บอทเรียก adapter ตรง ๆ โดยข้าม engine → ยังถูกปฏิเสธ', () => {
-    const built = humanAgentAdapter.build(ctx({ triggered_by: 'bot', human_typed: false }), PSID);
+    const built = humanAgentAdapter.build(ctx({ provenance: KEYWORD_BOT }), PSID);
     expect(built.ok).toBe(false);
     if (built.ok) return;
     expect(built.reason_th).toContain('แอดมินพิมพ์เอง');
   });
 
   it('scheduler เรียก adapter ตรง ๆ → ยังถูกปฏิเสธ', () => {
-    const built = humanAgentAdapter.build(ctx({ triggered_by: 'scheduler', human_typed: false }), PSID);
+    const built = humanAgentAdapter.build(ctx({ provenance: SCHEDULER }), PSID);
+    expect(built.ok).toBe(false);
+  });
+
+  it('บอทตั้ง human_authored=true เองแล้วเรียก adapter ตรง ๆ → ยังถูกปฏิเสธ', () => {
+    const built = humanAgentAdapter.build(
+      ctx({ provenance: { kind: 'keyword_bot', triggered_by: 'bot', human_authored: true, admin_id: null } }),
+      PSID,
+    );
+    expect(built.ok).toBe(false);
+  });
+
+  it('ปลอม kind เป็นของคนแต่ triggered_by ยังเป็น scheduler → ยังถูกปฏิเสธ', () => {
+    const built = humanAgentAdapter.build(
+      ctx({ provenance: { kind: HUMAN_PROVENANCE_KIND, triggered_by: 'scheduler', human_authored: true, admin_id: null } }),
+      PSID,
+    );
     expect(built.ok).toBe(false);
   });
 

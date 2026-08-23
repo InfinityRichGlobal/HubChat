@@ -18,6 +18,7 @@
  *   → ทดสอบทุกเงื่อนไขได้ครบโดยไม่ต้องรอเวลาจริงและไม่ต้องมี Meta App
  */
 import {
+  HUMAN_PROVENANCE_KIND,
   REASON,
   REASON_TH,
   TRANSPORT_PRIORITY,
@@ -141,16 +142,34 @@ function evaluateTransport(args: {
   }
 
   // 5) ⭐ ด่านสำคัญที่สุด : HUMAN_AGENT ต้องเป็นข้อความที่คนพิมพ์จริงเท่านั้น
-  //    บอทคีย์เวิร์ดและ scheduler ตกด่านนี้เสมอ ไม่มีทางลัด
+  //    ตรวจจาก "แหล่งที่มาที่ยืนยันแล้ว" ไม่ใช่จากคำอ้างของผู้เรียก
+  //    ต้องครบทั้งสามอย่าง :
+  //      • kind เป็น human_admin_reply (ออกจากโรงงานที่ตรวจ session แอดมินแล้วเท่านั้น)
+  //      • human_authored เป็น true
+  //      • triggered_by เป็น admin
+  //    บอทคีย์เวิร์ด / scheduler / งานเป็นชุด ตกด่านนี้เสมอ ไม่มีทางลัด
   if (capability.requires_human_typed) {
-    if (ctx.triggered_by !== 'admin' || !ctx.human_typed) {
-      return REASON.REQUIRES_HUMAN_TYPED;
-    }
+    const p = ctx.provenance;
+    const isRealHuman =
+      p.kind === HUMAN_PROVENANCE_KIND && p.human_authored === true && p.triggered_by === 'admin';
+    if (!isRealHuman) return REASON.REQUIRES_HUMAN_TYPED;
   }
 
   // 6) กรอบเวลา — นับจากข้อความล่าสุดที่ "ลูกค้า" ส่งมา
   if (capability.window_hours !== null) {
     if (!state.last_customer_message_at) return REASON.NO_CUSTOMER_MESSAGE_YET;
+
+    // ⭐ ถ้า Meta เคยบอกว่าส่งไม่ได้ "หลังจาก" ข้อความล่าสุดของลูกค้า
+    //    ให้เชื่อ Meta มากกว่าการคำนวณของเราเอง (fail closed)
+    //    แต่ถ้าลูกค้าทักกลับมาทีหลัง ข้อสังเกตเก่าถือว่าใช้ไม่ได้แล้ว
+    //    ⚠️ ตรงนี้ "อ่าน" สิ่งที่สังเกตเห็นเท่านั้น ไม่มีการแก้ประวัติข้อความจริง
+    if (
+      state.window_closed_observed_at &&
+      state.window_closed_observed_at.getTime() >= state.last_customer_message_at.getTime()
+    ) {
+      return REASON.WINDOW_CLOSED_BY_META;
+    }
+
     const ageHours = hoursBetween(state.last_customer_message_at, state.now);
     if (ageHours >= capability.window_hours) return REASON.OUTSIDE_WINDOW;
   }

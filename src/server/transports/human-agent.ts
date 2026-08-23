@@ -12,7 +12,7 @@ import 'server-only';
  * ตาข่ายชั้นนี้จะกันไว้ให้ ดีกว่าปล่อยผ่านแล้วโดนระงับ
  */
 import { policyConfig } from '@/server/policy/config';
-import type { Channel, SendContext } from '@/server/policy/types';
+import { HUMAN_PROVENANCE_KIND, type Channel, type SendContext } from '@/server/policy/types';
 import type { MetaPage, MetaSendPayload, MetaSendResult } from '@/server/meta/client';
 import { baseEnvelope, dispatch, requireBody } from './base';
 import type { BuildResult, TransportAdapter } from './types';
@@ -30,7 +30,9 @@ export const humanAgentAdapter: TransportAdapter = {
       return { ok: false as const, reason_th: 'ช่องทางนี้ใช้กับแพลตฟอร์มนี้ไม่ได้' };
     }
     // ⭐ ด่านกันบอทและ scheduler แอบใช้ทางลัด
-    if (ctx.triggered_by !== 'admin' || !ctx.human_typed) {
+    //    ตรวจจาก "แหล่งที่มาที่ยืนยันแล้ว" ไม่ใช่จากคำอ้างของผู้เรียก
+    const p = ctx.provenance;
+    if (p.kind !== HUMAN_PROVENANCE_KIND || !p.human_authored || p.triggered_by !== 'admin') {
       return {
         ok: false as const,
         reason_th: 'ช่องทางนี้ใช้ได้เฉพาะข้อความที่แอดมินพิมพ์เองเท่านั้น ระบบอัตโนมัติใช้ไม่ได้',

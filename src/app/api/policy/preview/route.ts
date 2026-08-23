@@ -17,7 +17,23 @@ import { ok, fail, toErrorResponse } from '@/lib/api';
 import { decide, summariseForAdmin } from '@/server/policy/engine';
 import { policyConfig } from '@/server/policy/config';
 import { transportChannelSupport } from '@/server/transports/registry';
-import { messageTypeForAdminChatReply, type Channel, type MessageType } from '@/server/policy/types';
+import {
+  HUMAN_PROVENANCE_KIND,
+  messageTypeForAdminChatReply,
+  type Channel,
+  type MessageType,
+  type SendProvenance,
+} from '@/server/policy/types';
+
+/**
+ * แหล่งที่มาจำลองสำหรับ "การลองถาม" เท่านั้น
+ * ⚠️ ไม่มีตราประทับ จึงส่งข้อความจริงด้วยตัวนี้ไม่ได้ (sendMessage จะปฏิเสธ)
+ *    ที่ต้องมีเพราะ engine ต้องรู้บริบทถึงจะตอบได้ว่า "ถ้าแอดมินกดส่งตอนนี้จะส่งได้ไหม"
+ *    ตัวจริงที่ใช้ส่งอยู่ที่ @/server/messaging/provenance
+ */
+function previewProvenance(adminId: string): SendProvenance {
+  return { kind: HUMAN_PROVENANCE_KIND, triggered_by: 'admin', human_authored: true, admin_id: adminId };
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,13 +67,18 @@ export async function GET(req: NextRequest) {
       return fail('forbidden', 'คุณไม่มีสิทธิ์เข้าถึงเพจของแชทนี้', 403);
     }
 
-    const [{ data: customer }, { data: page }] = await Promise.all([
+    const [{ data: customer }, { data: page }, { data: observedState }] = await Promise.all([
       db()
         .from('customers')
         .select('id,psid,marketing_eligible,marketing_checked_at,last_customer_message_at')
         .eq('id', conversation.customer_id as string)
         .maybeSingle(),
       db().from('pages').select('id,platform').eq('id', conversation.page_id as string).maybeSingle(),
+      db()
+        .from('conversation_policy_state')
+        .select('window_closed_observed_at')
+        .eq('conversation_id', conversation.id as string)
+        .maybeSingle(),
     ]);
 
     if (!customer || !page) return fail('not_found', 'ข้อมูลลูกค้าหรือเพจไม่ครบ', 404);
@@ -77,9 +98,7 @@ export async function GET(req: NextRequest) {
         page_id: conversation.page_id as string,
         channel,
         message_type: messageType,
-        triggered_by: 'admin',
-        human_typed: true,
-        admin_id: admin.id,
+        provenance: previewProvenance(admin.id),
         // ใส่ข้อความสมมติสั้น ๆ เพราะ engine ต้องมีเนื้อหาถึงจะตัดสินได้
         // ตัวนี้ไม่ถูกส่งออกไปไหน เป็นการ "ลองถาม" เท่านั้น
         content: { text: '—', template_name: messageType === 'inquiry_response' ? undefined : 'preview' },
@@ -89,6 +108,9 @@ export async function GET(req: NextRequest) {
         marketing_eligible: Boolean(customer.marketing_eligible),
         marketing_checked_at: customer.marketing_checked_at
           ? new Date(customer.marketing_checked_at as string)
+          : null,
+        window_closed_observed_at: observedState?.window_closed_observed_at
+          ? new Date(observedState.window_closed_observed_at as string)
           : null,
         now,
       },

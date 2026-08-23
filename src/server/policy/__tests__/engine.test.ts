@@ -11,7 +11,29 @@
 import { describe, it, expect } from 'vitest';
 import { decide, DEFAULT_CHANNEL_SUPPORT, summariseForAdmin } from '../engine';
 import { loadPolicyConfig, type PolicyConfig } from '../config';
-import { REASON, type MessageType, type PolicyState, type SendContext, type Channel } from '../types';
+import {
+  HUMAN_PROVENANCE_KIND,
+  REASON,
+  type Channel,
+  type MessageType,
+  type PolicyState,
+  type SendContext,
+  type SendProvenance,
+} from '../types';
+
+/* แหล่งที่มาแบบต่าง ๆ ที่ engine จะเจอจริง */
+const HUMAN: SendProvenance = {
+  kind: HUMAN_PROVENANCE_KIND, triggered_by: 'admin', human_authored: true, admin_id: 'admin-1',
+};
+const KEYWORD_BOT: SendProvenance = {
+  kind: 'keyword_bot', triggered_by: 'bot', human_authored: false, admin_id: null,
+};
+const SCHEDULER: SendProvenance = {
+  kind: 'scheduler', triggered_by: 'scheduler', human_authored: false, admin_id: null,
+};
+const BULK_JOB: SendProvenance = {
+  kind: 'bulk_job', triggered_by: 'admin', human_authored: false, admin_id: 'admin-1',
+};
 
 /* ---------------------------------------------------------------- */
 /* ตัวช่วยสร้างข้อมูลทดสอบ                                             */
@@ -29,6 +51,7 @@ function state(overrides: Partial<PolicyState> = {}): PolicyState {
     last_customer_message_at: hoursAgo(1),
     marketing_eligible: false,
     marketing_checked_at: null,
+    window_closed_observed_at: null,
     now: NOW,
     ...overrides,
   };
@@ -41,9 +64,7 @@ function ctx(overrides: Partial<SendContext> = {}): SendContext {
     page_id: 'page-1',
     channel: 'messenger',
     message_type: 'inquiry_response',
-    triggered_by: 'admin',
-    human_typed: true,
-    admin_id: 'admin-1',
+    provenance: HUMAN,
     content: { text: 'สวัสดีค่ะ' },
     ...overrides,
   };
@@ -190,7 +211,7 @@ describe('HUMAN_AGENT : ใช้ได้เฉพาะข้อความ�
 
   it('🔴 บอทคีย์เวิร์ดใช้ HUMAN_AGENT ไม่ได้เด็ดขาด', () => {
     const d = run(
-      ctx({ triggered_by: 'bot', human_typed: false }),
+      ctx({ provenance: KEYWORD_BOT }),
       outsideStandard,
       HUMAN_AGENT_ON,
     );
@@ -203,7 +224,7 @@ describe('HUMAN_AGENT : ใช้ได้เฉพาะข้อความ�
 
   it('🔴 scheduler ส่ง follow-up ใช้ HUMAN_AGENT ไม่ได้เด็ดขาด', () => {
     const d = run(
-      ctx({ triggered_by: 'scheduler', human_typed: false, message_type: 'inquiry_response' }),
+      ctx({ provenance: SCHEDULER, message_type: 'inquiry_response' }),
       outsideStandard,
       HUMAN_AGENT_ON,
     );
@@ -214,7 +235,7 @@ describe('HUMAN_AGENT : ใช้ได้เฉพาะข้อความ�
   });
 
   it('🔴 แอดมินอ้างว่าพิมพ์เอง แต่ triggered_by เป็นบอท → ยังใช้ไม่ได้', () => {
-    const d = run(ctx({ triggered_by: 'bot', human_typed: true }), outsideStandard, HUMAN_AGENT_ON);
+    const d = run(ctx({ provenance: { ...KEYWORD_BOT, human_authored: true } }), outsideStandard, HUMAN_AGENT_ON);
     expect(d.allowed).toBe(false);
   });
 
@@ -253,7 +274,7 @@ describe('UTILITY : ข้อความแจ้งข้อมูลล้ว
 
   it('แจ้งเลขพัสดุ + มีเทมเพลต + อนุมัติแล้ว → ส่งได้', () => {
     const d = run(
-      ctx({ message_type: 'shipping_update', triggered_by: 'scheduler', human_typed: false, content: { text: 'x', template_name: 'shipping_update_v1' } }),
+      ctx({ message_type: 'shipping_update', provenance: SCHEDULER, content: { text: 'x', template_name: 'shipping_update_v1' } }),
       outside,
       UTILITY_ON,
     );
@@ -263,7 +284,7 @@ describe('UTILITY : ข้อความแจ้งข้อมูลล้ว
 
   it('ไม่มีเทมเพลต → ส่งไม่ได้', () => {
     const d = run(
-      ctx({ message_type: 'shipping_update', triggered_by: 'scheduler', human_typed: false }),
+      ctx({ message_type: 'shipping_update', provenance: SCHEDULER }),
       outside,
       UTILITY_ON,
     );
@@ -302,8 +323,7 @@ describe('MARKETING : ข้อความขาย เสียเงินร
   const outside = state({ last_customer_message_at: hoursAgo(200) });
   const promo = ctx({
     message_type: 'promotion',
-    triggered_by: 'scheduler',
-    human_typed: false,
+    provenance: SCHEDULER,
     content: { text: 'โปรใหม่', template_name: 'promo_v1' },
   });
 
@@ -360,7 +380,7 @@ describe('🔴 ข้อความขายต้องไม่มีทา�
   for (const type of ['promotion', 'upsell'] as MessageType[]) {
     it(`${type} : เปิดทุกช่องทาง แต่ลูกค้าไม่เข้าเกณฑ์ → ต้องส่งไม่ได้ ไม่ใช่ตกไปช่องอื่น`, () => {
       const d = run(
-        ctx({ message_type: type, triggered_by: 'admin', human_typed: true, content: { text: 'ลดราคา', template_name: 'promo_v1' } }),
+        ctx({ message_type: type, provenance: HUMAN, content: { text: 'ลดราคา', template_name: 'promo_v1' } }),
         outside,
         allTransportsOn,
       );
@@ -494,4 +514,126 @@ describe('ลำดับการเลือกช่องทาง', () => {
       expect(d.transport).toBe('STANDARD');
     });
   }
+});
+
+
+/* ================================================================== */
+/* 12. 🔴 รอบ 2.1 : automation ปลอมเป็นคนไม่ได้                         */
+/* ================================================================== */
+describe('🔴 HUMAN_AGENT : ต้องมาจากแหล่งที่มาที่ยืนยันแล้วเท่านั้น', () => {
+  const outside = state({ last_customer_message_at: hoursAgo(30) });
+
+  it('บอทคีย์เวิร์ดตั้ง human_authored=true เองก็ยังใช้ไม่ได้ (kind ไม่ใช่ของคน)', () => {
+    const d = run(
+      ctx({ provenance: { kind: 'keyword_bot', triggered_by: 'bot', human_authored: true, admin_id: 'admin-1' } }),
+      outside,
+      HUMAN_AGENT_ON,
+    );
+    expect(d.allowed).toBe(false);
+    expect(d.evaluated.find((e) => e.transport === 'HUMAN_AGENT')?.reason_code).toBe(
+      REASON.REQUIRES_HUMAN_TYPED,
+    );
+  });
+
+  it('scheduler ปลอม kind เป็นของคน แต่ triggered_by ยังเป็น scheduler → ใช้ไม่ได้', () => {
+    const d = run(
+      ctx({ provenance: { kind: HUMAN_PROVENANCE_KIND, triggered_by: 'scheduler', human_authored: true, admin_id: null } }),
+      outside,
+      HUMAN_AGENT_ON,
+    );
+    expect(d.allowed).toBe(false);
+  });
+
+  it('งานส่งเป็นชุดที่แอดมินกดยืนยัน ก็ยังไม่ใช่ "คนพิมพ์เอง"', () => {
+    const d = run(ctx({ provenance: BULK_JOB }), outside, HUMAN_AGENT_ON);
+    expect(d.allowed).toBe(false);
+    expect(d.evaluated.find((e) => e.transport === 'HUMAN_AGENT')?.reason_code).toBe(
+      REASON.REQUIRES_HUMAN_TYPED,
+    );
+  });
+
+  it('แอดมินตัวจริงพิมพ์เองเท่านั้นที่ผ่าน', () => {
+    const d = run(ctx({ provenance: HUMAN }), outside, HUMAN_AGENT_ON);
+    expect(d.allowed).toBe(true);
+    expect(d.transport).toBe('HUMAN_AGENT');
+  });
+
+  it('ถึงจะเป็นคนจริง แต่ถ้าช่องทางยังไม่ได้รับอนุมัติ ก็ยังส่งไม่ได้ (fail closed)', () => {
+    const d = run(ctx({ provenance: HUMAN }), outside, {
+      POLICY_MESSENGER_HUMAN_AGENT_ENABLED: 'true',
+    });
+    expect(d.allowed).toBe(false);
+    expect(d.evaluated.find((e) => e.transport === 'HUMAN_AGENT')?.reason_code).toBe(
+      REASON.TRANSPORT_UNVERIFIED,
+    );
+  });
+});
+
+/* ================================================================== */
+/* 13. 🔴 รอบ 2.1 : เคารพสิ่งที่ Meta บอก โดยไม่แตะประวัติข้อความจริง     */
+/* ================================================================== */
+describe('🔴 ข้อสังเกตจาก Meta', () => {
+  it('Meta เคยบอกว่าส่งไม่ได้ หลังข้อความล่าสุดของลูกค้า → ไม่ส่ง (fail closed)', () => {
+    const d = run(
+      ctx(),
+      state({
+        last_customer_message_at: hoursAgo(2),
+        window_closed_observed_at: hoursAgo(1), // สังเกตเห็นทีหลัง
+      }),
+    );
+    expect(d.allowed).toBe(false);
+    expect(d.evaluated.find((e) => e.transport === 'STANDARD')?.reason_code).toBe(
+      REASON.WINDOW_CLOSED_BY_META,
+    );
+  });
+
+  it('ลูกค้าทักกลับมาหลังจากนั้น → ข้อสังเกตเก่าใช้ไม่ได้แล้ว ส่งได้ตามปกติ', () => {
+    const d = run(
+      ctx(),
+      state({
+        last_customer_message_at: hoursAgo(1), // ทักใหม่
+        window_closed_observed_at: hoursAgo(5), // สังเกตไว้ก่อนหน้า
+      }),
+    );
+    expect(d.allowed).toBe(true);
+    expect(d.transport).toBe('STANDARD');
+  });
+
+  it('ประวัติข้อความจริงยังอยู่ครบ — engine แค่อ่าน ไม่ได้แก้', () => {
+    const original = hoursAgo(2);
+    const s = state({ last_customer_message_at: original, window_closed_observed_at: hoursAgo(1) });
+    run(ctx(), s);
+    expect(s.last_customer_message_at).toBe(original);
+  });
+});
+
+/* ================================================================== */
+/* 14. 🔴 รอบ 2.1 : เครื่องจริงห้ามเปิดช่องทางที่ยังไม่ยืนยัน             */
+/* ================================================================== */
+describe('🔴 ตัวกันพลาดตอนตั้งค่าเครื่องจริง', () => {
+  it('production + allow_unverified=true → ไม่ยอมให้ระบบสตาร์ต', () => {
+    expect(() =>
+      config({ NODE_ENV: 'production', POLICY_ALLOW_UNVERIFIED_TRANSPORTS: 'true' }),
+    ).toThrow(/POLICY_ALLOW_UNVERIFIED_TRANSPORTS/);
+  });
+
+  it('production + allow_unverified=false → ปกติดี', () => {
+    expect(() => config({ NODE_ENV: 'production' })).not.toThrow();
+    expect(config({ NODE_ENV: 'production' }).allow_unverified).toBe(false);
+  });
+
+  it('ตอนพัฒนา/ทดสอบยังเปิดได้ตามเดิม', () => {
+    expect(config({ NODE_ENV: 'test', POLICY_ALLOW_UNVERIFIED_TRANSPORTS: 'true' }).allow_unverified).toBe(true);
+    expect(config({ NODE_ENV: 'development', POLICY_ALLOW_UNVERIFIED_TRANSPORTS: 'true' }).allow_unverified).toBe(true);
+  });
+
+  it('ต่อให้เปิด allow_unverified ตอนทดสอบ ช่องทางที่ยังปิดอยู่ก็ยังใช้ไม่ได้', () => {
+    const d = run(ctx(), state({ last_customer_message_at: hoursAgo(30) }), {
+      POLICY_ALLOW_UNVERIFIED_TRANSPORTS: 'true',
+    });
+    expect(d.allowed).toBe(false);
+    expect(d.evaluated.find((e) => e.transport === 'HUMAN_AGENT')?.reason_code).toBe(
+      REASON.TRANSPORT_DISABLED,
+    );
+  });
 });

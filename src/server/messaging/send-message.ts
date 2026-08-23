@@ -8,241 +8,332 @@ import 'server-only';
  *    • scheduler ส่ง follow-up
  *    • ระบบแจ้งเลขพัสดุ
  *
- * ห้ามมีที่ไหนในระบบเรียก adapter หรือ Meta API ตรง ๆ
- * (ชุดทดสอบมีข้อที่ไล่ตรวจทั้งโปรเจกต์ ถ้ามีจะ fail ทันที)
+ * ลำดับการทำงาน (รอบ 2.1) :
  *
- * ลำดับการทำงาน :
- *   1. กันส่งซ้ำด้วย idempotency_key
- *   2. ดึงข้อเท็จจริงจากฐานข้อมูล (ลูกค้าทักล่าสุดเมื่อไหร่ ฯลฯ)
- *   3. ถาม Policy Engine ว่าส่งได้ไหม และต้องส่งด้วยช่องทางไหน
- *   4. ถ้าส่งไม่ได้ → บันทึก send_attempts แล้วคืนเหตุผลภาษาไทย (ไม่ยิงออกไป)
- *   5. ถ้าส่งได้ → ประกอบ payload ด้วย adapter แล้วยิงผ่าน Meta client กลาง
- *   6. retry เฉพาะ error ชั่วคราวเท่านั้น (กฎเหล็กข้อ 3)
- *   7. บันทึกผลลง send_attempts ทุกครั้ง ทั้งสำเร็จและไม่สำเร็จ
- *   8. ถ้า Meta บอกว่ากรอบเวลาปิดแล้วทั้งที่เราคิดว่าเปิด → แก้ข้อมูลให้ตรงความจริง
+ *   1. ตรวจตราประทับของ provenance
+ *        ผู้เรียกอ้างว่า "เป็นคนพิมพ์เอง" ลอย ๆ ไม่ได้ ต้องเป็นของที่ออกจากโรงงานจริง
+ *
+ *   2. ดึงบริบทจากฐานข้อมูลจาก "รหัสห้องแชท" อย่างเดียว
+ *        ลูกค้าคนไหน เพจไหน ช่องทางไหน psid อะไร — เราอ่านเอง ไม่เชื่อผู้เรียก
+ *        แล้วตรวจว่าทุกอย่างสัมพันธ์กันจริง ไม่ตรงเมื่อไหร่ = ไม่ส่ง
+ *
+ *   3. ⭐ จองสิทธิ์ส่งกับฐานข้อมูล (atomic claim)
+ *        ถ้ามีคำขออื่นถือกุญแจเดียวกันอยู่ เราจะรู้ทันทีและไม่ยิงซ้ำ
+ *        เดิมใช้วิธี "SELECT ดูก่อนแล้วค่อยยิง" ซึ่งสองคำขอพร้อมกันผ่านได้ทั้งคู่
+ *
+ *   4. ถาม Policy Engine — ถ้าส่งไม่ได้ ปิดงานทันที ไม่ยิงออกไปเลย
+ *
+ *   5. ยิงผ่าน adapter + Meta client กลาง
+ *        บันทึกทุกครั้งที่ยิงเป็นคนละแถว (ประวัติ retry ต้องอยู่ครบ)
+ *
+ *   6. ⭐ retry เฉพาะกรณีที่ "แน่ใจว่า Meta ไม่ได้รับ" เท่านั้น
+ *        ถ้าไม่ได้รับคำตอบเลย (timeout / เน็ตขาด) = ไม่รู้ผล → หยุด ให้คนมาตรวจ
+ *        ยอมส่งขาด ดีกว่าส่งซ้ำแล้วแก้ไม่ได้
+ *
+ *   7. ⭐ คำตอบจาก Meta บันทึกเป็น "ข้อสังเกต" คนละตารางกับประวัติข้อความจริง
+ *        ห้ามเอา error ของ Meta ไปลบ last_customer_message_at เด็ดขาด
  */
-import { db } from '@/lib/supabase/admin';
+import { randomUUID } from 'node:crypto';
 import { decide } from '@/server/policy/engine';
 import { policyConfig } from '@/server/policy/config';
 import { transportChannelSupport, getAdapter } from '@/server/transports/registry';
-import { backoffMs, isRetryable } from '@/server/meta/errors';
-import type { MetaPage } from '@/server/meta/client';
+import { backoffMs, isOutcomeUnknown, isRetryable } from '@/server/meta/errors';
+import { isTrustedProvenance, type Provenance } from './provenance';
+import {
+  claimSend,
+  finishSend,
+  recordAttempt,
+  recordPolicyObservation,
+  recordSendVerified,
+  resolveSendContext,
+  type ContextExpectation,
+  type SendStatus,
+} from './store';
 import {
   REASON,
   REASON_TH,
   TRANSPORT_BADGE_TH,
   BLOCKED_BADGE_TH,
+  type MessageType,
   type PolicyDecision,
-  type PolicyState,
   type ReasonCode,
+  type SendContent,
   type SendContext,
 } from '@/server/policy/types';
+
+/* ------------------------------------------------------------------------ */
+/* สิ่งที่ผู้เรียกส่งเข้ามา — น้อยที่สุดเท่าที่จำเป็น                              */
+/* ------------------------------------------------------------------------ */
+
+export type SendRequest = {
+  /** ⭐ รหัสห้องแชท — ตัวเดียวที่เรารับจากผู้เรียก ที่เหลือดึงจากฐานข้อมูลเอง */
+  conversation_id: string;
+
+  /** ประเภทข้อความ มาจากบริบท ห้ามเดาจากเนื้อข้อความ */
+  message_type: MessageType;
+
+  /** ที่มาที่เชื่อถือได้ — สร้างได้จาก @/server/messaging/provenance เท่านั้น */
+  provenance: Provenance;
+
+  content: SendContent;
+
+  /** กุญแจกันส่งซ้ำ — ไม่ใส่ก็ได้ ระบบจะสร้างให้เอง */
+  idempotency_key?: string | null;
+
+  /**
+   * (ไม่บังคับ) ความคาดหวังของผู้เรียกว่าเป็นลูกค้า/เพจ/ช่องทางไหน
+   * ถ้าใส่มาแล้วไม่ตรงกับของจริงในฐานข้อมูล ระบบจะปฏิเสธทันที
+   * ใช้เป็นตาข่ายกันเคสที่โค้ดเรียกผิดห้องแชท
+   */
+  expect?: ContextExpectation;
+};
 
 export type SendResult = {
   /** ส่งออกไปถึงลูกค้าจริงหรือไม่ */
   sent: boolean;
+  /** ⚠️ true = ยิงออกไปแล้วแต่ไม่รู้ผล ต้องให้คนตรวจก่อนส่งใหม่ */
+  outcome_unknown: boolean;
   decision: PolicyDecision;
   reason_code: ReasonCode;
   reason_th: string;
-  /** ป้ายที่โชว์ใต้ข้อความในห้องแชท */
   badge_th: string;
   meta_message_id: string | null;
-  send_attempt_id: string | null;
+  fbtrace_id: string | null;
+  /** รหัสของ "การส่งหนึ่งครั้ง" ในเชิงตรรกะ — ใช้ตามรอยย้อนหลัง */
+  message_send_id: string | null;
+  idempotency_key: string;
   estimated_cost: number | null;
-  /** จำนวนครั้งที่ยิงออกไปจริง (รวม retry) */
+  /** จำนวนครั้งที่ยิงออกไปหา Meta จริง */
   attempts: number;
 };
 
 export type SendOptions = {
-  /** จำนวนครั้งสูงสุดที่ยอมให้ลองใหม่เมื่อเจอ error ชั่วคราว */
   maxRetries?: number;
-  /** ใช้ในชุดทดสอบ : ฟังก์ชันหน่วงเวลา */
   sleep?: (ms: number) => Promise<void>;
-  /** ใช้ในชุดทดสอบ : ตรึงเวลาปัจจุบัน */
   now?: Date;
+  /** อายุการจองสิทธิ์ (วินาที) — ถ้า process ตายกลางทาง งานจะถูกทำเครื่องหมายว่าไม่ทราบผล */
+  claimTtlSeconds?: number;
 };
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /* ------------------------------------------------------------------------ */
-/* ข้อมูลที่ต้องดึงจากฐานข้อมูลก่อนตัดสินใจ                                     */
-/* ------------------------------------------------------------------------ */
-
-type LoadedContext = {
-  page: MetaPage & { platform: 'facebook' | 'instagram' };
-  recipient_psid: string;
-  state: PolicyState;
-};
-
-async function loadContext(ctx: SendContext, now: Date): Promise<LoadedContext | { error_th: string }> {
-  const supabase = db();
-
-  const [{ data: customer }, { data: page }] = await Promise.all([
-    supabase
-      .from('customers')
-      .select('id,psid,page_id,marketing_eligible,marketing_checked_at,last_customer_message_at')
-      .eq('id', ctx.customer_id)
-      .maybeSingle(),
-    supabase
-      .from('pages')
-      .select('id,platform,page_id,access_token,is_active')
-      .eq('id', ctx.page_id)
-      .maybeSingle(),
-  ]);
-
-  if (!customer) return { error_th: 'ไม่พบข้อมูลลูกค้ารายนี้' };
-  if (!page) return { error_th: 'ไม่พบเพจต้นทาง' };
-  if (!page.is_active) return { error_th: 'เพจนี้ถูกปิดใช้งานอยู่' };
-
-  // ใช้เวลาจากห้องแชทเป็นหลัก ถ้าไม่มีค่อยใช้ของลูกค้า
-  const { data: conversation } = await supabase
-    .from('conversations')
-    .select('id,last_customer_message_at')
-    .eq('id', ctx.conversation_id)
-    .maybeSingle();
-
-  const lastCustomerMessageAt =
-    (conversation?.last_customer_message_at as string | null) ??
-    (customer.last_customer_message_at as string | null);
-
-  return {
-    page: {
-      id: page.id as string,
-      platform: page.platform as 'facebook' | 'instagram',
-      page_id: page.page_id as string,
-      access_token: page.access_token as string | null,
-    },
-    recipient_psid: customer.psid as string,
-    state: {
-      last_customer_message_at: lastCustomerMessageAt ? new Date(lastCustomerMessageAt) : null,
-      marketing_eligible: Boolean(customer.marketing_eligible),
-      marketing_checked_at: customer.marketing_checked_at
-        ? new Date(customer.marketing_checked_at as string)
-        : null,
-      now,
-    },
-  };
-}
-
-/* ------------------------------------------------------------------------ */
 /* ตัวหลัก                                                                    */
 /* ------------------------------------------------------------------------ */
 
-export async function sendMessage(ctx: SendContext, options: SendOptions = {}): Promise<SendResult> {
+export async function sendMessage(req: SendRequest, options: SendOptions = {}): Promise<SendResult> {
   const now = options.now ?? new Date();
-  const maxRetries = options.maxRetries ?? 3;
+  const maxRetries = Math.max(1, options.maxRetries ?? 3);
   const sleep = options.sleep ?? defaultSleep;
+  const claimTtl = options.claimTtlSeconds ?? 120;
+  const idempotencyKey = req.idempotency_key?.trim() || `auto:${randomUUID()}`;
 
-  // ---- 1) กันส่งซ้ำ ------------------------------------------------------
-  if (ctx.idempotency_key) {
-    const { data: already } = await db()
-      .from('send_attempts')
-      .select('id,selected_transport')
-      .eq('idempotency_key', ctx.idempotency_key)
-      .eq('success', true)
-      .maybeSingle();
+  // ---- 1) ตรวจตราประทับของแหล่งที่มา ------------------------------------
+  //      ถ้าใครเขียน object หน้าตาเหมือน provenance เองแล้วยัดเข้ามา จะตกด่านนี้
+  if (!isTrustedProvenance(req.provenance)) {
+    const decision = blockedDecision(REASON.UNTRUSTED_PROVENANCE, REASON_TH.UNTRUSTED_PROVENANCE);
+    return earlyFailure(decision, idempotencyKey);
+  }
+  const prov = req.provenance;
 
-    if (already) {
-      return {
-        sent: false,
-        decision: skippedDecision(),
-        reason_code: REASON.DUPLICATE_SKIPPED,
-        reason_th: REASON_TH.DUPLICATE_SKIPPED,
-        badge_th: TRANSPORT_BADGE_TH[(already.selected_transport as 'STANDARD') ?? 'STANDARD'],
-        meta_message_id: null,
-        send_attempt_id: already.id as string,
-        estimated_cost: null,
-        attempts: 0,
-      };
-    }
+  // ---- 2) ดึงบริบทจากฐานข้อมูล + ตรวจความสัมพันธ์ -------------------------
+  const resolved = await resolveSendContext(req.conversation_id, now, req.expect ?? {});
+  if ('error_code' in resolved) {
+    const code =
+      resolved.error_code === 'mismatch' ? REASON.CONTEXT_MISMATCH : REASON.CONTEXT_NOT_FOUND;
+    const decision = blockedDecision(code, resolved.error_th);
+    return earlyFailure(decision, idempotencyKey);
   }
 
-  // ---- 2) ดึงข้อเท็จจริง --------------------------------------------------
-  const loaded = await loadContext(ctx, now);
-  if ('error_th' in loaded) {
-    const decision = blockedDecision(REASON.CONTEXT_NOT_FOUND, loaded.error_th);
-    const id = await recordAttempt(ctx, decision, null, null, loaded.error_th);
-    return failure(decision, id, loaded.error_th, REASON.CONTEXT_NOT_FOUND);
+  // ---- 3) ⭐ จองสิทธิ์ส่งกับฐานข้อมูล ------------------------------------
+  const claim = await claimSend({
+    idempotency_key: idempotencyKey,
+    customer_id: resolved.customer_id,
+    conversation_id: resolved.conversation_id,
+    page_id: resolved.page_id,
+    channel: resolved.channel,
+    message_type: req.message_type,
+    triggered_by: prov.triggered_by,
+    provenance_kind: prov.kind,
+    human_authored: prov.human_authored,
+    admin_id: prov.admin_id,
+    claim_ttl_seconds: claimTtl,
+  });
+
+  // แพ้การจอง = มีคำขออื่นดูแลอยู่แล้ว ห้ามยิงซ้ำเด็ดขาด
+  if (!claim.won) {
+    return alreadyHandled(claim, idempotencyKey);
   }
 
-  // ---- 3) ถาม Policy Engine ----------------------------------------------
-  const decision = decide(ctx, loaded.state, {
+  // ตั้งแต่บรรทัดนี้ไป เราคือเจ้าของงานนี้แต่เพียงผู้เดียว
+  const ctx: SendContext = {
+    customer_id: resolved.customer_id,
+    conversation_id: resolved.conversation_id,
+    page_id: resolved.page_id,
+    channel: resolved.channel,
+    message_type: req.message_type,
+    provenance: prov,
+    content: req.content,
+    idempotency_key: idempotencyKey,
+  };
+
+  // ---- 4) ถาม Policy Engine ----------------------------------------------
+  const decision = decide(ctx, resolved.state, {
     config: policyConfig(),
     channelSupport: transportChannelSupport(),
   });
 
-  // ---- 4) ส่งไม่ได้ → บันทึกแล้วจบ ห้ามยิงออกไป ----------------------------
   if (!decision.allowed || !decision.transport) {
-    const id = await recordAttempt(ctx, decision, null, null, null);
-    return failure(decision, id, decision.reason_th, decision.reason_code);
+    return await closeWithoutDispatch(ctx, claim.send_id, decision, idempotencyKey);
   }
 
   const adapter = getAdapter(decision.transport);
   if (!adapter || !adapter.enabled(ctx.channel)) {
-    const blocked = blockedDecision(
-      REASON.ADAPTER_NOT_CONFIGURED,
-      REASON_TH.ADAPTER_NOT_CONFIGURED,
-      decision,
-    );
-    const id = await recordAttempt(ctx, blocked, null, null, null);
-    return failure(blocked, id, blocked.reason_th, blocked.reason_code);
+    const blocked = blockedDecision(REASON.ADAPTER_NOT_CONFIGURED, REASON_TH.ADAPTER_NOT_CONFIGURED, decision);
+    return await closeWithoutDispatch(ctx, claim.send_id, blocked, idempotencyKey);
   }
 
-  // ตาข่ายชั้นสุดท้ายของ adapter เอง
+  // ตาข่ายชั้นสุดท้ายของ adapter เอง (เผื่อมีใครข้าม engine มา)
   const eligibility = adapter.isEligible(ctx);
   if (!eligibility.ok) {
     const blocked = blockedDecision(REASON.MESSAGE_TYPE_NOT_ALLOWED, eligibility.reason_th, decision);
-    const id = await recordAttempt(ctx, blocked, null, null, null);
-    return failure(blocked, id, blocked.reason_th, blocked.reason_code);
+    return await closeWithoutDispatch(ctx, claim.send_id, blocked, idempotencyKey);
   }
 
-  const built = adapter.build(ctx, loaded.recipient_psid);
+  const built = adapter.build(ctx, resolved.recipient_psid);
   if (!built.ok) {
     const blocked = blockedDecision(REASON.EMPTY_CONTENT, built.reason_th, decision);
-    const id = await recordAttempt(ctx, blocked, null, null, null);
-    return failure(blocked, id, blocked.reason_th, blocked.reason_code);
+    return await closeWithoutDispatch(ctx, claim.send_id, blocked, idempotencyKey);
   }
 
-  // ---- 5-6) ยิงจริง + retry เฉพาะ error ชั่วคราว --------------------------
+  // ---- 5-6) ยิงจริง -------------------------------------------------------
   let attempts = 0;
-  let lastError: Awaited<ReturnType<typeof adapter.send>> | null = null;
+  let lastResult: Awaited<ReturnType<typeof adapter.send>> | null = null;
 
-  while (attempts < Math.max(1, maxRetries)) {
+  while (attempts < maxRetries) {
     attempts += 1;
-    const result = await adapter.send(loaded.page, built.payload);
+    const result = await adapter.send(resolved.page, built.payload);
+    lastResult = result;
 
+    /* ---- สำเร็จ ---- */
     if (result.ok) {
-      const id = await recordAttempt(ctx, decision, result.message_id, result.http_status, null, true);
+      await recordAttempt({
+        message_send_id: claim.send_id,
+        attempt_no: attempts,
+        customer_id: ctx.customer_id,
+        conversation_id: ctx.conversation_id,
+        channel: ctx.channel,
+        message_type: ctx.message_type,
+        selected_transport: decision.transport,
+        policy_reason_code: REASON.SENT_OK,
+        policy_reason_th: REASON_TH.SENT_OK,
+        policy_decision: decision,
+        meta_response_code: result.http_status,
+        meta_error_subcode: null,
+        meta_error_message: null,
+        meta_message_id: result.message_id,
+        fbtrace_id: null,
+        success: true,
+        estimated_cost: decision.estimated_cost,
+        triggered_by: prov.triggered_by,
+        human_typed: prov.human_authored,
+        admin_id: prov.admin_id,
+        idempotency_key: idempotencyKey,
+      });
+
+      await finishSend({
+        send_id: claim.send_id,
+        status: 'succeeded',
+        selected_transport: decision.transport,
+        policy_reason_code: REASON.SENT_OK,
+        policy_reason_th: REASON_TH.SENT_OK,
+        policy_decision: decision,
+        meta_message_id: result.message_id,
+        fbtrace_id: null,
+        network_attempts: attempts,
+      });
+
+      // ส่งได้จริง = ล้างสถานะ "เคยถูกปฏิเสธ" ของห้องแชทนี้
+      await recordSendVerified(ctx.conversation_id);
+
       return {
         sent: true,
+        outcome_unknown: false,
         decision,
         reason_code: REASON.SENT_OK,
         reason_th: REASON_TH.SENT_OK,
         badge_th: TRANSPORT_BADGE_TH[decision.transport],
         meta_message_id: result.message_id,
-        send_attempt_id: id,
+        fbtrace_id: null,
+        message_send_id: claim.send_id,
+        idempotency_key: idempotencyKey,
         estimated_cost: decision.estimated_cost,
         attempts,
       };
     }
 
-    lastError = result;
+    /* ---- ล้มเหลว : บันทึกครั้งนี้เป็นแถวของตัวเอง ---- */
+    const err = result.error;
+    const attemptReason: ReasonCode =
+      err.kind === 'transient'
+        ? REASON.META_TRANSIENT_ERROR
+        : err.kind === 'policy'
+          ? REASON.META_POLICY_ERROR
+          : err.kind === 'ambiguous'
+            ? REASON.META_OUTCOME_UNKNOWN
+            : REASON.META_UNKNOWN_ERROR;
 
-    // ⭐ กฎเหล็กข้อ 3 : error เชิงนโยบายห้าม retry เด็ดขาด
-    if (!isRetryable(result.error)) break;
+    await recordAttempt({
+      message_send_id: claim.send_id,
+      attempt_no: attempts,
+      customer_id: ctx.customer_id,
+      conversation_id: ctx.conversation_id,
+      channel: ctx.channel,
+      message_type: ctx.message_type,
+      selected_transport: decision.transport,
+      policy_reason_code: attemptReason,
+      policy_reason_th: err.message_th,
+      policy_decision: decision,
+      meta_response_code: err.code ?? result.http_status,
+      meta_error_subcode: err.subcode,
+      meta_error_message: err.message,
+      meta_message_id: null,
+      fbtrace_id: err.fbtrace_id,
+      success: false,
+      estimated_cost: decision.estimated_cost,
+      triggered_by: prov.triggered_by,
+      human_typed: prov.human_authored,
+      admin_id: prov.admin_id,
+      idempotency_key: idempotencyKey,
+    });
+
+    // ⭐ ไม่รู้ผล → หยุดทันที ห้ามลองใหม่ (ลูกค้าอาจได้ข้อความไปแล้ว)
+    if (isOutcomeUnknown(err)) break;
+    // ⭐ error เชิงนโยบาย/ถาวร → หยุดทันทีเช่นกัน
+    if (!isRetryable(err)) break;
     if (attempts >= maxRetries) break;
     await sleep(backoffMs(attempts));
   }
 
-  // ---- 7-8) บันทึกผล + แก้ข้อมูลให้ตรงความจริง ----------------------------
-  const err = lastError && !lastError.ok ? lastError.error : null;
+  /* ---- ปิดงานแบบล้มเหลว ---- */
+  const err = lastResult && !lastResult.ok ? lastResult.error : null;
+  const unknown = err ? isOutcomeUnknown(err) : false;
+
   const reasonCode: ReasonCode = !err
     ? REASON.META_UNKNOWN_ERROR
-    : err.kind === 'transient'
-      ? REASON.META_TRANSIENT_ERROR
-      : err.kind === 'policy'
-        ? REASON.META_POLICY_ERROR
-        : REASON.META_UNKNOWN_ERROR;
+    : unknown
+      ? REASON.META_OUTCOME_UNKNOWN
+      : err.kind === 'transient'
+        ? REASON.META_TRANSIENT_ERROR
+        : err.kind === 'policy'
+          ? REASON.META_POLICY_ERROR
+          : REASON.META_UNKNOWN_ERROR;
+
+  const status: SendStatus = unknown
+    ? 'outcome_unknown'
+    : err?.kind === 'transient'
+      ? 'retryable_failed'
+      : 'permanent_failed';
 
   const failedDecision: PolicyDecision = {
     ...decision,
@@ -251,106 +342,161 @@ export async function sendMessage(ctx: SendContext, options: SendOptions = {}): 
     reason_th: err?.message_th ?? REASON_TH.META_UNKNOWN_ERROR,
   };
 
-  const id = await recordAttempt(
-    ctx,
-    failedDecision,
-    null,
-    lastError && !lastError.ok ? lastError.http_status : null,
-    null,
-    false,
-    err,
-  );
+  await finishSend({
+    send_id: claim.send_id,
+    status,
+    selected_transport: decision.transport,
+    policy_reason_code: reasonCode,
+    policy_reason_th: failedDecision.reason_th,
+    policy_decision: failedDecision,
+    meta_message_id: null,
+    fbtrace_id: err?.fbtrace_id ?? null,
+    network_attempts: attempts,
+  });
 
-  // feedback loop : Meta บอกว่ากรอบเวลาปิดแล้ว ทั้งที่เราคำนวณว่ายังเปิด
-  // → แก้ข้อมูลในฐานข้อมูลให้ตรงความจริงทันที ไม่ปล่อยให้คำนวณผิดซ้ำ ๆ
-  if (err?.window_actually_closed) {
-    await markWindowClosed(ctx);
+  // ---- 7) ⭐ บันทึกสิ่งที่ Meta บอกเป็น "ข้อสังเกต" ------------------------
+  //      ไม่แตะ last_customer_message_at ของ conversations/customers เด็ดขาด
+  if (err && (err.kind === 'policy' || err.window_actually_closed)) {
+    await recordPolicyObservation({
+      conversation_id: ctx.conversation_id,
+      window_closed: err.window_actually_closed,
+      error_code: err.code,
+      error_subcode: err.subcode,
+      reason_code: reasonCode,
+      reason_th: err.message_th,
+      fbtrace_id: err.fbtrace_id,
+    });
   }
 
   return {
     sent: false,
+    outcome_unknown: unknown,
     decision: failedDecision,
     reason_code: reasonCode,
     reason_th: failedDecision.reason_th,
     badge_th: BLOCKED_BADGE_TH,
     meta_message_id: null,
-    send_attempt_id: id,
+    fbtrace_id: err?.fbtrace_id ?? null,
+    message_send_id: claim.send_id,
+    idempotency_key: idempotencyKey,
     estimated_cost: null,
     attempts,
   };
 }
 
 /* ------------------------------------------------------------------------ */
-/* บันทึกลง send_attempts — ต้องบันทึก "ทุกครั้งที่พยายามส่ง"                   */
+/* ตัวช่วย                                                                    */
 /* ------------------------------------------------------------------------ */
 
-async function recordAttempt(
+/** ปฏิเสธก่อนถึงขั้นจองสิทธิ์ — ยังไม่มี message_send ให้บันทึก */
+function earlyFailure(decision: PolicyDecision, idempotencyKey: string): SendResult {
+  return {
+    sent: false,
+    outcome_unknown: false,
+    decision,
+    reason_code: decision.reason_code,
+    reason_th: decision.reason_th,
+    badge_th: BLOCKED_BADGE_TH,
+    meta_message_id: null,
+    fbtrace_id: null,
+    message_send_id: null,
+    idempotency_key: idempotencyKey,
+    estimated_cost: null,
+    attempts: 0,
+  };
+}
+
+/** Policy ปฏิเสธ — ปิดงานโดยไม่ยิงออกไปแม้แต่ครั้งเดียว */
+async function closeWithoutDispatch(
   ctx: SendContext,
+  sendId: string,
   decision: PolicyDecision,
-  metaMessageId: string | null,
-  httpStatus: number | null,
-  overrideReasonTh: string | null,
-  success = false,
-  err: { code: number | null; subcode: number | null; message: string; fbtrace_id: string | null } | null = null,
-): Promise<string | null> {
-  try {
-    const { data, error } = await db()
-      .from('send_attempts')
-      .insert({
-        customer_id: ctx.customer_id,
-        conversation_id: ctx.conversation_id,
-        channel: ctx.channel,
-        message_type: ctx.message_type,
-        selected_transport: decision.transport,
-        policy_reason_code: decision.reason_code,
-        policy_reason_th: overrideReasonTh ?? decision.reason_th,
-        policy_decision: decision as unknown as Record<string, unknown>,
-        meta_response_code: err?.code ?? httpStatus,
-        meta_error_subcode: err?.subcode ?? null,
-        meta_error_message: err?.message ?? null,
-        fbtrace_id: err?.fbtrace_id ?? null,
-        success,
-        estimated_cost: decision.estimated_cost,
-        triggered_by: ctx.triggered_by,
-        human_typed: ctx.human_typed,
-        admin_id: ctx.admin_id ?? null,
-        idempotency_key: ctx.idempotency_key ?? null,
-        sent_at: success ? new Date().toISOString() : null,
-      })
-      .select('id')
-      .single();
+  idempotencyKey: string,
+): Promise<SendResult> {
+  await recordAttempt({
+    message_send_id: sendId,
+    attempt_no: 0, // 0 = ไม่ได้ยิงออกไปเลย
+    customer_id: ctx.customer_id,
+    conversation_id: ctx.conversation_id,
+    channel: ctx.channel,
+    message_type: ctx.message_type,
+    selected_transport: decision.transport,
+    policy_reason_code: decision.reason_code,
+    policy_reason_th: decision.reason_th,
+    policy_decision: decision,
+    meta_response_code: null,
+    meta_error_subcode: null,
+    meta_error_message: null,
+    meta_message_id: null,
+    fbtrace_id: null,
+    success: false,
+    estimated_cost: decision.estimated_cost,
+    triggered_by: ctx.provenance.triggered_by,
+    human_typed: ctx.provenance.human_authored,
+    admin_id: ctx.provenance.admin_id,
+    idempotency_key: idempotencyKey,
+  });
 
-    if (error) {
-      console.error('[send-message] บันทึก send_attempts ไม่สำเร็จ:', error.message);
-      return null;
-    }
-    void metaMessageId;
-    return data.id as string;
-  } catch (e) {
-    // บันทึกไม่ได้ต้องไม่ทำให้การส่งพัง แต่ต้องเห็นใน log
-    console.error('[send-message] บันทึก send_attempts ไม่สำเร็จ:', e);
-    return null;
-  }
+  await finishSend({
+    send_id: sendId,
+    status: 'blocked_by_policy',
+    selected_transport: decision.transport,
+    policy_reason_code: decision.reason_code,
+    policy_reason_th: decision.reason_th,
+    policy_decision: decision,
+    meta_message_id: null,
+    fbtrace_id: null,
+    network_attempts: 0,
+  });
+
+  return {
+    sent: false,
+    outcome_unknown: false,
+    decision,
+    reason_code: decision.reason_code,
+    reason_th: decision.reason_th,
+    badge_th: BLOCKED_BADGE_TH,
+    meta_message_id: null,
+    fbtrace_id: null,
+    message_send_id: sendId,
+    idempotency_key: idempotencyKey,
+    estimated_cost: null,
+    attempts: 0,
+  };
 }
 
-/**
- * แก้ข้อมูลให้ตรงความจริงเมื่อ Meta บอกว่ากรอบเวลาปิดแล้ว
- * ล้าง last_customer_message_at ทิ้ง เพื่อไม่ให้ engine คำนวณว่ายังส่งได้อีก
- */
-async function markWindowClosed(ctx: SendContext): Promise<void> {
-  try {
-    await Promise.all([
-      db().from('conversations').update({ last_customer_message_at: null }).eq('id', ctx.conversation_id),
-      db().from('customers').update({ last_customer_message_at: null }).eq('id', ctx.customer_id),
-    ]);
-  } catch (e) {
-    console.error('[send-message] อัปเดตสถานะกรอบเวลาไม่สำเร็จ:', e);
-  }
-}
+/** มีคำขออื่นดูแลกุญแจนี้อยู่แล้ว — รายงานสถานะปัจจุบันโดยไม่ยิงซ้ำ */
+function alreadyHandled(
+  claim: { send_id: string; status: SendStatus; selected_transport: string | null; meta_message_id: string | null; network_attempts: number },
+  idempotencyKey: string,
+): SendResult {
+  const isUnknown = claim.status === 'outcome_unknown';
+  const code: ReasonCode = isUnknown
+    ? REASON.META_OUTCOME_UNKNOWN
+    : claim.status === 'claimed'
+      ? REASON.SEND_IN_PROGRESS
+      : REASON.DUPLICATE_SKIPPED;
 
-/* ------------------------------------------------------------------------ */
-/* ตัวช่วยสร้างผลลัพธ์                                                         */
-/* ------------------------------------------------------------------------ */
+  const decision = blockedDecision(code, REASON_TH[code]);
+
+  return {
+    sent: false,
+    outcome_unknown: isUnknown,
+    decision,
+    reason_code: code,
+    reason_th: REASON_TH[code],
+    badge_th:
+      claim.status === 'succeeded' && claim.selected_transport
+        ? TRANSPORT_BADGE_TH[claim.selected_transport as keyof typeof TRANSPORT_BADGE_TH]
+        : BLOCKED_BADGE_TH,
+    meta_message_id: claim.meta_message_id,
+    fbtrace_id: null,
+    message_send_id: claim.send_id,
+    idempotency_key: idempotencyKey,
+    estimated_cost: null,
+    attempts: 0,
+  };
+}
 
 function blockedDecision(code: ReasonCode, reasonTh: string, base?: PolicyDecision): PolicyDecision {
   return {
@@ -362,28 +508,5 @@ function blockedDecision(code: ReasonCode, reasonTh: string, base?: PolicyDecisi
     estimated_cost: null,
     alternatives_th: base?.alternatives_th ?? [],
     evaluated: base?.evaluated ?? [],
-  };
-}
-
-function skippedDecision(): PolicyDecision {
-  return blockedDecision(REASON.DUPLICATE_SKIPPED, REASON_TH.DUPLICATE_SKIPPED);
-}
-
-function failure(
-  decision: PolicyDecision,
-  id: string | null,
-  reasonTh: string,
-  code: ReasonCode,
-): SendResult {
-  return {
-    sent: false,
-    decision,
-    reason_code: code,
-    reason_th: reasonTh,
-    badge_th: BLOCKED_BADGE_TH,
-    meta_message_id: null,
-    send_attempt_id: id,
-    estimated_cost: null,
-    attempts: 0,
   };
 }

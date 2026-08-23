@@ -122,8 +122,14 @@ export function serverEnv(): ServerEnv {
   return _serverEnv;
 }
 
-/** ตรวจ env ทั้งหมดทีเดียว ใช้ตอนสตาร์ตเซิร์ฟเวอร์หรือในสคริปต์ */
-export function assertEnv(): void {
+/**
+ * ตรวจ env ทั้งหมดทีเดียว ใช้ตอนสตาร์ตเซิร์ฟเวอร์หรือในสคริปต์
+ * รวมถึงกฎของ Message Policy Engine ด้วย
+ * (บนเครื่องจริงถ้าเปิด allow_unverified ไว้ ตัวนี้จะโยน error ทันที)
+ */
+export async function assertEnv(): Promise<void> {
   publicEnv();
   serverEnv();
+  const { loadPolicyConfig } = await import('@/server/policy/config');
+  loadPolicyConfig();
 }

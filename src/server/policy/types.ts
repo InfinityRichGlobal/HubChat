@@ -43,6 +43,28 @@ export type SendContent = {
   template_params?: Record<string, string>;
 };
 
+/**
+ * ที่มาของคำสั่งส่ง — มุมมองเชิงโครงสร้างที่ engine ใช้ตัดสิน
+ * ⚠️ ตัวจริงที่มีตราประทับอยู่ที่ src/server/messaging/provenance.ts
+ *    ที่แยกไว้เพราะ engine ต้องเป็นฟังก์ชันบริสุทธิ์ ทดสอบได้โดยไม่ต้องมี session
+ *    การตรวจว่า "ของจริงหรือของปลอม" เกิดที่ประตูทางเข้า (sendMessage) ก่อนถึง engine
+ */
+export type SendProvenance = {
+  readonly kind: string;
+  readonly triggered_by: TriggeredBy;
+  /** true ได้เฉพาะข้อความที่แอดมินตัวจริงพิมพ์เองผ่าน session ที่ตรวจแล้ว */
+  readonly human_authored: boolean;
+  readonly admin_id: string | null;
+};
+
+/** ชื่อ kind ที่ถือว่าเป็น "คนพิมพ์เอง" — มีตัวเดียวโดยตั้งใจ */
+export const HUMAN_PROVENANCE_KIND = 'human_admin_reply';
+
+/**
+ * บริบทที่ engine ใช้ตัดสิน
+ * ⚠️ ทุกฟิลด์ในนี้ต้องถูก "ดึงมาจากฐานข้อมูล" โดย sendMessage
+ *    ไม่ใช่รับมาจากผู้เรียกตรง ๆ (กันการส่งข้ามลูกค้า/ข้ามเพจ)
+ */
 export type SendContext = {
   customer_id: string;
   conversation_id: string;
@@ -52,22 +74,12 @@ export type SendContext = {
   /** มาจากบริบทเท่านั้น ห้ามเดาจากเนื้อข้อความ */
   message_type: MessageType;
 
-  /** ใครสั่งให้ส่ง — ใช้กันไม่ให้บอท/scheduler แอบใช้ HUMAN_AGENT */
-  triggered_by: TriggeredBy;
-
-  /**
-   * แอดมินเป็นคนพิมพ์ข้อความนี้เองจริง ๆ หรือไม่
-   * ⚠️ ต้องเป็น true เฉพาะตอนที่คนพิมพ์สดในห้องแชทเท่านั้น
-   *    ข้อความจากชุดคำตอบสำเร็จรูปที่แอดมินกดส่งเองก็นับว่า "คนส่ง"
-   *    แต่บอทคีย์เวิร์ดและ follow-up อัตโนมัติ = false เสมอ
-   */
-  human_typed: boolean;
-
-  admin_id?: string | null;
+  /** ที่มาที่เชื่อถือได้ — ผู้เรียกทั่วไปสร้างเองไม่ได้ */
+  provenance: SendProvenance;
 
   content: SendContent;
 
-  /** กันส่งซ้ำ — ถ้าเคยส่งด้วยกุญแจนี้สำเร็จแล้ว จะไม่ส่งซ้ำอีก */
+  /** กันส่งซ้ำ — ฐานข้อมูลเป็นคนบังคับ ไม่ใช่โค้ด */
   idempotency_key?: string | null;
 };
 
@@ -86,6 +98,12 @@ export type PolicyState = {
   /** ผลการเช็ค eligibility ของ Marketing Messages รายบุคคล */
   marketing_eligible: boolean;
   marketing_checked_at: Date | null;
+  /**
+   * ครั้งล่าสุดที่ "Meta บอกเรา" ว่าส่งไม่ได้แล้ว
+   * ⚠️ นี่คือสิ่งที่เราสังเกตเห็น ไม่ใช่ประวัติข้อความจริง — เก็บคนละตาราง
+   *    ถ้าลูกค้าทักกลับมาหลังเวลานี้ ถือว่าข้อสังเกตเก่าใช้ไม่ได้แล้ว
+   */
+  window_closed_observed_at: Date | null;
   /** เวลาปัจจุบัน — ฉีดเข้ามาเพื่อให้ทดสอบเวลาผ่านไปได้ */
   now: Date;
 };
@@ -140,6 +158,9 @@ export const REASON = {
   MARKETING_ELIGIBILITY_STALE: 'MARKETING_ELIGIBILITY_STALE',
   TEMPLATE_REQUIRED: 'TEMPLATE_REQUIRED',
   EMPTY_CONTENT: 'EMPTY_CONTENT',
+  WINDOW_CLOSED_BY_META: 'WINDOW_CLOSED_BY_META',
+  UNTRUSTED_PROVENANCE: 'UNTRUSTED_PROVENANCE',
+  CONTEXT_MISMATCH: 'CONTEXT_MISMATCH',
 
   // ผลลัพธ์ตอนส่งจริง (ไม่ได้มาจาก decide แต่ใช้ code เดียวกันใน send_attempts)
   SENT_OK: 'SENT_OK',
@@ -149,6 +170,8 @@ export const REASON = {
   ADAPTER_NOT_CONFIGURED: 'ADAPTER_NOT_CONFIGURED',
   CONTEXT_NOT_FOUND: 'CONTEXT_NOT_FOUND',
   DUPLICATE_SKIPPED: 'DUPLICATE_SKIPPED',
+  META_OUTCOME_UNKNOWN: 'META_OUTCOME_UNKNOWN',
+  SEND_IN_PROGRESS: 'SEND_IN_PROGRESS',
 } as const;
 
 export type ReasonCode = (typeof REASON)[keyof typeof REASON];
@@ -171,6 +194,9 @@ export const REASON_TH: Record<ReasonCode, string> = {
   MARKETING_ELIGIBILITY_STALE: 'ผลการตรวจสิทธิ์รับข้อความการตลาดเก่าเกินไป ต้องตรวจใหม่ก่อนส่ง',
   TEMPLATE_REQUIRED: 'ช่องทางนี้ต้องใช้เทมเพลตที่ได้รับอนุมัติ',
   EMPTY_CONTENT: 'ไม่มีเนื้อหาที่จะส่ง',
+  WINDOW_CLOSED_BY_META: 'Meta เคยแจ้งว่าส่งหาลูกค้ารายนี้ไม่ได้แล้ว ต้องรอให้ลูกค้าทักกลับมาก่อน',
+  UNTRUSTED_PROVENANCE: 'คำสั่งส่งนี้ไม่ผ่านการยืนยันแหล่งที่มา จึงถูกปฏิเสธ',
+  CONTEXT_MISMATCH: 'ข้อมูลลูกค้า ห้องแชท และเพจไม่สัมพันธ์กัน จึงไม่ส่งเพื่อความปลอดภัย',
 
   SENT_OK: 'ส่งสำเร็จ',
   META_TRANSIENT_ERROR: 'ระบบของ Meta ขัดข้องชั่วคราว ระบบจะลองใหม่ให้อัตโนมัติ',
@@ -179,6 +205,8 @@ export const REASON_TH: Record<ReasonCode, string> = {
   ADAPTER_NOT_CONFIGURED: 'ยังไม่ได้ตั้งค่าการเชื่อมต่อกับ Meta',
   CONTEXT_NOT_FOUND: 'ข้อมูลตั้งต้นไม่ครบ จึงยังส่งไม่ได้',
   DUPLICATE_SKIPPED: 'ข้อความนี้เคยส่งไปแล้ว ระบบข้ามให้เพื่อไม่ให้ลูกค้าได้รับซ้ำ',
+  META_OUTCOME_UNKNOWN: 'ส่งออกไปแล้วแต่ไม่ได้รับคำตอบจาก Meta จึงไม่ทราบว่าถึงลูกค้าหรือไม่ — ระบบจะไม่ส่งซ้ำอัตโนมัติ กรุณาตรวจสอบในแชทก่อนส่งใหม่',
+  SEND_IN_PROGRESS: 'ข้อความนี้กำลังถูกส่งอยู่โดยคำขออื่น ระบบจึงไม่ส่งซ้ำ',
 };
 
 /**

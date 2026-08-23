@@ -3,7 +3,7 @@
  * "ห้าม retry มั่ว" — error เชิงนโยบายห้ามลองใหม่เด็ดขาด
  */
 import { describe, it, expect } from 'vitest';
-import { classifyMetaError, isRetryable, backoffMs } from '../errors';
+import { classifyMetaError, isRetryable, isOutcomeUnknown, backoffMs } from '../errors';
 
 describe('error ชั่วคราว → ลองใหม่ได้', () => {
   it('เซิร์ฟเวอร์ Meta ล่ม (5xx)', () => {
@@ -20,9 +20,47 @@ describe('error ชั่วคราว → ลองใหม่ได้', ()
     expect(isRetryable(classifyMetaError({ code }, 400))).toBe(true);
   });
 
-  it('เน็ตหลุด/timeout ถือว่าชั่วคราว', () => {
-    const e = classifyMetaError({ message: 'The operation was aborted' }, 503);
+  it('5xx ที่มีคำตอบของ Meta ชัดเจน = Meta ประมวลผลแล้วและไม่รับ → ลองใหม่ได้', () => {
+    const e = classifyMetaError({ code: 2, message: 'temporary' }, 503);
     expect(e.kind).toBe('transient');
+    expect(isRetryable(e)).toBe(true);
+  });
+});
+
+describe('🔴 ไม่รู้ผล (ambiguous) → ห้ามลองใหม่เด็ดขาด', () => {
+  it('คำขอออกไปแล้วแต่ไม่ได้รับคำตอบ (timeout/เน็ตขาด)', () => {
+    const e = classifyMetaError({ message: 'aborted' }, 0, { networkFailure: true });
+    expect(e.kind).toBe('ambiguous');
+    expect(isRetryable(e)).toBe(false);
+    expect(isOutcomeUnknown(e)).toBe(true);
+  });
+
+  it('gateway timeout 504 — คำขอน่าจะถึง Meta แล้วแต่คำตอบไม่กลับมา', () => {
+    const e = classifyMetaError(null, 504);
+    expect(e.kind).toBe('ambiguous');
+    expect(isRetryable(e)).toBe(false);
+  });
+
+  it('408 request timeout ก็ถือว่าไม่รู้ผล', () => {
+    expect(classifyMetaError(null, 408).kind).toBe('ambiguous');
+  });
+
+  it('5xx ที่อ่านคำตอบไม่ออกเลย → ไม่รู้ผล ปลอดภัยไว้ก่อน', () => {
+    const e = classifyMetaError(null, 500);
+    expect(e.kind).toBe('ambiguous');
+    expect(isRetryable(e)).toBe(false);
+  });
+
+  it('ข้อความภาษาไทยต้องบอกให้คนไปตรวจเอง ไม่ใช่บอกว่าจะลองใหม่ให้', () => {
+    const e = classifyMetaError({ message: 'aborted' }, 0, { networkFailure: true });
+    expect(e.message_th).toContain('ไม่ทราบ');
+    expect(e.message_th).toContain('ตรวจสอบ');
+    expect(e.message_th).not.toContain('จะลองส่งใหม่ให้อัตโนมัติ');
+  });
+
+  it('ไม่รู้ผล ต้องไม่ถูกตีความว่ากรอบเวลาปิด (ไม่ไปแตะข้อสังเกตเชิงนโยบาย)', () => {
+    const e = classifyMetaError({ error_subcode: 2018278 }, 0, { networkFailure: true });
+    expect(e.window_actually_closed).toBe(false);
   });
 });
 

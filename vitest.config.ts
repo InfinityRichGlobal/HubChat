@@ -14,5 +14,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // ชุดที่ต้องใช้ PostgreSQL จริงอยู่คนละไฟล์ตั้งค่า (npm run test:pg)
+    exclude: ['tests/pg/**'],
   },
 });

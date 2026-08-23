@@ -237,15 +237,32 @@ function instagramPolicy(env: EnvBag): ChannelPolicy {
   };
 }
 
-/** อ่านกฎทั้งหมดจาก env — ส่ง env จำลองเข้ามาได้ตอนทดสอบ */
+/**
+ * อ่านกฎทั้งหมดจาก env — ส่ง env จำลองเข้ามาได้ตอนทดสอบ
+ *
+ * 🔴 ตัวกันพลาดสำคัญ : บนเครื่องจริง (production) ห้ามเปิด allow_unverified เด็ดขาด
+ *    เพราะสวิตช์นี้ข้ามด่าน "ยืนยันกับเอกสาร Meta แล้วหรือยัง" ทั้งหมด
+ *    ถ้าเผลอตั้งไว้บนเครื่องจริง ระบบจะไม่ยอมสตาร์ต ดีกว่าปล่อยให้ส่งผิดนโยบายเงียบ ๆ
+ */
 export function loadPolicyConfig(env: EnvBag = process.env): PolicyConfig {
+  const allowUnverified = bool(env, 'POLICY_ALLOW_UNVERIFIED_TRANSPORTS', false);
+  const nodeEnv = (env.NODE_ENV ?? '').trim().toLowerCase();
+
+  if (allowUnverified && nodeEnv === 'production') {
+    throw new Error(
+      '\n[ตั้งค่าผิดพลาดร้ายแรง] POLICY_ALLOW_UNVERIFIED_TRANSPORTS=true บนเครื่องจริง\n' +
+        '  สวิตช์นี้ข้ามด่านตรวจว่าได้รับอนุมัติจาก Meta แล้วหรือยัง ใช้ได้เฉพาะตอนทดสอบในเครื่อง\n' +
+        '  ให้ลบบรรทัดนี้ออกจาก environment ของเครื่องจริง แล้วสตาร์ตใหม่\n',
+    );
+  }
+
   return {
     channels: {
       messenger: messengerPolicy(env),
       instagram: instagramPolicy(env),
     },
     marketing_eligibility_max_age_hours: num(env, 'POLICY_MARKETING_ELIGIBILITY_MAX_AGE_HOURS', 24),
-    allow_unverified: bool(env, 'POLICY_ALLOW_UNVERIFIED_TRANSPORTS', false),
+    allow_unverified: allowUnverified,
   };
 }
 
