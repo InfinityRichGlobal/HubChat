@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ค่าตั้งระบบที่มีความลับ — ห้ามขึ้น GitHub
+.env
+.env.local
+.env*.local
