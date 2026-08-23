@@ -44,3 +44,7 @@ next-env.d.ts
 .env
 .env.local
 .env*.local
+
+# แต่ไฟล์ตัวอย่าง (ไม่มีค่าจริง) ต้องขึ้น GitHub
+# ไม่งั้นคนที่ clone ไปจะไม่มีแม่แบบให้คัดลอก
+!.env.example

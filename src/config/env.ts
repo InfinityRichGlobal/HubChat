@@ -9,22 +9,6 @@
  */
 import { z } from 'zod';
 
-/**
- * แปลงข้อความใน env เป็น boolean
- * ห้ามใช้ z.coerce.boolean() เด็ดขาด เพราะมันแปลงคำว่า "false" เป็น true
- * (ข้อความที่ไม่ว่างถือเป็น true หมด) — เคยพลาดกันมาเยอะ
- */
-const boolFromEnv = (defaultValue: boolean) =>
-  z
-    .preprocess((v) => {
-      if (v === undefined || v === '') return defaultValue;
-      if (typeof v === 'boolean') return v;
-      const s = String(v).trim().toLowerCase();
-      if (['true', '1', 'yes', 'on'].includes(s)) return true;
-      if (['false', '0', 'no', 'off'].includes(s)) return false;
-      return v; // ค่าอื่น → ให้ zod ฟ้องว่าผิด
-    }, z.boolean())
-    .default(defaultValue);
 
 /* -------------------------------------------------------------------------
  * ฝั่งเบราว์เซอร์ — ต้องขึ้นต้นด้วย NEXT_PUBLIC_ เท่านั้น
@@ -89,12 +73,9 @@ const futureSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
 
-  // Transport adapter เปิด-ปิดจาก config ได้โดยไม่ต้องแก้โค้ด (สเปกหัวข้อ 6.1)
-  // ยังไม่ใช้ในรอบนี้ แต่ประกาศไว้ก่อนเพื่อไม่ให้ลืม
-  TRANSPORT_STANDARD_ENABLED: boolFromEnv(true),
-  TRANSPORT_HUMAN_AGENT_ENABLED: boolFromEnv(false),
-  TRANSPORT_UTILITY_ENABLED: boolFromEnv(false),
-  TRANSPORT_MARKETING_ENABLED: boolFromEnv(false),
+  // หมายเหตุ : ค่าตั้งของ Message Policy Engine (กรอบเวลา / เปิด-ปิด transport)
+  // ไม่ได้อยู่ที่นี่โดยตั้งใจ — อยู่ที่ src/server/policy/config.ts ที่เดียว
+  // เพราะเป็น "กฎของ Meta" ไม่ใช่ค่าตั้งทั่วไปของแอป และต้องหาเจอง่ายเวลากฎเปลี่ยน
 });
 
 type PublicEnv = z.infer<typeof publicSchema>;
