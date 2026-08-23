@@ -52,6 +52,7 @@ npm install
 4. ต้องขึ้น `Success. No rows returned`
 5. ทำซ้ำกับไฟล์ `supabase/migrations/0002_policy_engine.sql`
 6. ทำซ้ำกับไฟล์ `supabase/migrations/0003_messaging_hardening.sql`
+7. ทำซ้ำกับไฟล์ `supabase/migrations/0004_function_search_path.sql`
 
 > ไฟล์พวกนี้รันซ้ำได้ ไม่พัง ถ้าไม่แน่ใจว่ารันครบ กด Run ใหม่ได้เลย
 
