@@ -41,9 +41,19 @@ export async function fetchCustomerProfile(page: MetaPage, psid: string): Promis
 
   if (!result.ok) {
     // ไม่ throw โดยตั้งใจ — การไม่รู้ชื่อลูกค้าต้องไม่ทำให้ข้อความหาย
-    console.warn(
-      `[meta/profile] ดึงโปรไฟล์ไม่ได้ (psid=${psid}, ${result.error.kind}): ${result.error.message_th}`,
-    );
+    //
+    // ⚠️ ต้องจด "ข้อความดิบจาก Meta" ไว้ด้วย
+    //    เดิมจดแค่ข้อความไทยกลาง ๆ ("ส่งไม่สำเร็จ กรุณาแจ้งผู้ดูแลระบบ")
+    //    ซึ่งอ่านแล้วไม่รู้เลยว่าขาดสิทธิ์อะไร ไล่ปัญหาต่อไม่ได้
+    console.warn('[meta/profile] ดึงโปรไฟล์ไม่ได้', {
+      psid,
+      platform: page.platform,
+      kind: result.error.kind,
+      code: result.error.code,
+      subcode: result.error.subcode,
+      message: result.error.message,
+      fbtrace_id: result.error.fbtrace_id,
+    });
     return null;
   }
 
