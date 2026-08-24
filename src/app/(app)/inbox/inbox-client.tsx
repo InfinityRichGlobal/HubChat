@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ClipboardCopy, Copy, Loader2, Lock, MapPin, MessageSquareOff,
-  Megaphone, Quote, Search, Send, Tag as TagIcon, X,
+  Megaphone, Quote, Search, Send, ShoppingCart, Tag as TagIcon, X,
 } from 'lucide-react';
+import OrderDialog from './order-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -149,11 +150,14 @@ export default function InboxClient({
   me,
   canReply,
   initialConversations,
+  initialConversationId,
   pages,
 }: {
   me: { id: string; name: string };
   canReply: boolean;
   initialConversations: ConversationRow[];
+  /** เปิดห้องนี้ทันที — มาจาก /inbox?c=... ที่หน้าออเดอร์ลิงก์มา */
+  initialConversationId?: string | null;
   pages: InboxPage[];
 }) {
   const [conversations, setConversations] = useState(initialConversations);
@@ -162,7 +166,13 @@ export default function InboxClient({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
+  // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
+  const [activeId, setActiveId] = useState<string | null>(
+    initialConversationId && initialConversations.some((c) => c.id === initialConversationId)
+      ? initialConversationId
+      : null,
+  );
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -480,6 +490,7 @@ function ChatRoom({
   const [menuFor, setMenuFor] = useState<MessageRow | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [contactSource, setContactSource] = useState<string | null>(null);
+  const [orderOpen, setOrderOpen] = useState(false);
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   /** กด Escape เพื่อซ่อนรายการชุดคำตอบชั่วคราวโดยไม่ต้องลบข้อความที่พิมพ์ไว้ */
   const [dismissedCanned, setDismissedCanned] = useState(false);
@@ -681,9 +692,15 @@ function ChatRoom({
         </div>
 
         {canReply && (
-          <Button variant="ghost" size="icon" aria-label="แท็ก" onClick={() => setTagsOpen(true)}>
-            <TagIcon />
-          </Button>
+          <>
+            {/* ⭐ สร้างออเดอร์จากในห้องแชท (สเปก 5.3) — ไม่ส่งข้อความหาลูกค้าเอง */}
+            <Button variant="ghost" size="icon" aria-label="สร้างออเดอร์" onClick={() => setOrderOpen(true)}>
+              <ShoppingCart />
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="แท็ก" onClick={() => setTagsOpen(true)}>
+              <TagIcon />
+            </Button>
+          </>
         )}
         {policy && (
           <Badge variant={policy.can_send ? 'outline' : 'destructive'} className="shrink-0">
@@ -832,6 +849,15 @@ function ChatRoom({
         attached={c.tag_ids}
         conversationId={c.id}
         onChanged={onChanged}
+      />
+
+      {/* ---------- กล่องสร้างออเดอร์ ---------- */}
+      {/* key = เปิดใหม่ทุกครั้ง เพื่อไม่ให้ค้างของที่เลือกไว้จากลูกค้าคนก่อน */}
+      <OrderDialog
+        key={orderOpen ? `order-${c.id}` : 'order-closed'}
+        conversationId={orderOpen ? c.id : null}
+        onClose={() => setOrderOpen(false)}
+        onCreated={onChanged}
       />
 
       {/* ---------- ฟอร์มที่อยู่ ---------- */}

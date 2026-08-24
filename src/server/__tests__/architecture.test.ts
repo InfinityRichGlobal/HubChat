@@ -497,3 +497,122 @@ describe('🔴 ตัวดึงที่อยู่ต้องเป็น�
     expect(offenders).toEqual([]);
   });
 });
+
+/* ================================================================== */
+/* รอบ 5 — ออเดอร์ / สินค้า / โปรโมชัน                                   */
+/* ================================================================== */
+describe('🔴 ชั้นออเดอร์ต้องไม่กลายเป็นทางลัดในการส่งข้อความ', () => {
+  const orderFiles = CODE_FILES.filter((f) => rel(f).startsWith('server/orders/'));
+  const orderApis = CODE_FILES.filter(
+    (f) =>
+      rel(f).startsWith('app/api/orders/') ||
+      rel(f).startsWith('app/api/products/') ||
+      rel(f).startsWith('app/api/promotions/'),
+  );
+
+  it('มีไฟล์ในโฟลเดอร์ orders และ API ให้ตรวจจริง', () => {
+    expect(orderFiles.length).toBeGreaterThan(0);
+    expect(orderApis.length).toBeGreaterThan(0);
+  });
+
+  it('ชั้นออเดอร์ห้ามเรียก sendMessage หรือแตะ Meta / transport เลย', () => {
+    // การแจ้งเลขพัสดุให้ลูกค้าเป็นงานของรอบถัดไป และต้องผ่าน Policy Engine
+    // ถ้าเปิดทางไว้ตรงนี้ วันหนึ่งจะมีคนต่อสาย "บันทึกเลขพัสดุแล้วส่งเลย" เข้ามา
+    const offenders = [...orderFiles, ...orderApis]
+      .filter((f) => /sendMessage|@\/server\/meta\/|@\/server\/transports\/|@\/server\/messaging\//.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it("ชั้นออเดอร์ห้าม select('*') และห้ามแตะ access_token", () => {
+    const offenders = orderFiles
+      .filter((f) => /\.select\(\s*['"]\*['"]\s*\)/.test(read(f)) || read(f).includes('access_token'))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ชั้นออเดอร์ต้องประกาศ server-only', () => {
+    const service = CODE_FILES.find((f) => rel(f) === 'server/orders/service.ts');
+    expect(service, 'ไม่พบ server/orders/service.ts').toBeDefined();
+    expect(read(service!)).toContain("import 'server-only'");
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ตัวคิดราคาต้องเป็นฟังก์ชันบริสุทธิ์ และมีที่เดียว', () => {
+  const PRICING = 'server/orders/pricing.ts';
+
+  it('ตัวคิดราคาห้ามต่อฐานข้อมูล ห้ามยิงเน็ต ห้ามอ่านเวลาปัจจุบัน', () => {
+    // ราคาต้องคิดได้จาก input อย่างเดียว ถึงจะทดสอบให้ครบทุกกรณีได้
+    const file = CODE_FILES.find((f) => rel(f) === PRICING);
+    expect(file, `ไม่พบไฟล์ ${PRICING}`).toBeDefined();
+    const src = read(file!);
+    expect(src).not.toMatch(/supabase|db\(\)|fetch\(|Date\.now\(\)|new Date\(\)/);
+  });
+
+  it('🔴 เบราว์เซอร์ห้ามคิดราคาเอง — สูตรราคาต้องมีที่เดียว', () => {
+    // ถ้าหน้าเว็บคูณเลขเองด้วย จะมีสูตรสองที่ วันที่ไม่ตรงกัน
+    // แอดมินจะเห็นราคาหนึ่ง แต่ระบบบันทึกอีกราคาหนึ่ง โดยไม่มีใครรู้ตัว
+    const clientFiles = CODE_FILES.filter((f) => read(f).slice(0, 200).includes("'use client'"));
+    const offenders = clientFiles
+      .filter((f) => /calculateOrder|requiredPickCount|@\/server\/orders\/pricing/.test(read(f)))
+      .map(rel)
+      // อนุญาตให้ import "ชนิดข้อมูล" ของราคามาแสดงผลได้ (import type เท่านั้น)
+      .filter((r) => {
+        const file = CODE_FILES.find((x) => rel(x) === r)!;
+        const src = read(file);
+        const nonTypeImport = /^import\s+(?!type\s)[^;]*from\s+['"]@\/server\/orders\/pricing['"]/m;
+        return nonTypeImport.test(src) || /calculateOrder\(|requiredPickCount\(/.test(src);
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  it('เรียก calculateOrder() ได้เฉพาะฝั่งเซิร์ฟเวอร์', () => {
+    const offenders = CODE_FILES.filter((f) => {
+      const r = rel(f);
+      if (r.startsWith('server/orders/')) return false;
+      if (!/\bcalculateOrder\(/.test(read(f))) return false;
+      // API route ฝั่งเซิร์ฟเวอร์เรียกได้
+      return !r.startsWith('app/api/');
+    }).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ตัวเลขที่ใช้วัดผลต้องปลอมจากหน้าเว็บไม่ได้', () => {
+  it('API สร้างออเดอร์ต้องไม่รับ referral / first_contact / page_id / customer_id จาก body', () => {
+    // ตัวเลขพวกนี้ใช้ตัดสินว่าแอดคนไหนคุ้ม และแอดมินคนไหนปิดการขายเก่ง
+    // ถ้ารับมาจากเบราว์เซอร์ได้ = แก้ตัวเลขวัดผลของตัวเองได้
+    const file = CODE_FILES.find((f) => rel(f) === 'app/api/orders/route.ts');
+    expect(file, 'ไม่พบ app/api/orders/route.ts').toBeDefined();
+    const src = read(file!);
+
+    // ดูเฉพาะ "แบบฟอร์มที่รับจาก body" (createSchema) เท่านั้น
+    // ตัวกรองของ GET ใช้ page_id ได้ตามปกติ — นั่นคือการอ่าน ไม่ใช่การเขียน
+    const start = src.indexOf('const createSchema');
+    expect(start, 'ไม่พบ createSchema').toBeGreaterThan(-1);
+    const schema = src.slice(start, src.indexOf('});', start));
+
+    for (const forbidden of ['referral_ad_id', 'referral_post_id', 'first_contact_at', 'page_id', 'customer_id']) {
+      expect(schema, `${forbidden} ต้องไม่อยู่ในสิ่งที่รับจาก body`).not.toContain(forbidden);
+    }
+  });
+
+  it('API แก้ออเดอร์ต้องไม่ยอมให้แก้เลขออเดอร์ / ที่มา / ผู้สร้าง', () => {
+    const file = CODE_FILES.find((f) => rel(f) === 'app/api/orders/[id]/route.ts');
+    expect(file, 'ไม่พบ app/api/orders/[id]/route.ts').toBeDefined();
+    const src = read(file!);
+    for (const forbidden of ['order_no', 'referral_ad_id', 'created_by_admin_id', 'conversation_id']) {
+      expect(src, `${forbidden} ต้องแก้จากหน้าเว็บไม่ได้`).not.toContain(forbidden);
+    }
+  });
+
+  it('ฟิลด์ที่ยอมให้แก้ ต้องอยู่ในรายชื่อปิด (OrderPatch) ไม่ใช่รับอะไรก็ได้', () => {
+    const service = CODE_FILES.find((f) => rel(f) === 'server/orders/service.ts');
+    const src = read(service!);
+    expect(src).toMatch(/export type OrderPatch/);
+    // ต้องไม่มีการโยน object ทั้งก้อนจากผู้เรียกเข้าไปเป็น patch แบบไม่กรอง
+    expect(src).not.toMatch(/p_patch:\s*await\s/);
+  });
+});

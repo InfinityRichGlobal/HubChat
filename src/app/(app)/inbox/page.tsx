@@ -11,17 +11,25 @@ import InboxClient from './inbox-client';
  */
 export const dynamic = 'force-dynamic';
 
-export default async function InboxPage() {
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>;
+}) {
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
 
-  const { conversations, pages } = await listConversations(result.admin);
+  const [{ conversations, pages }, sp] = await Promise.all([
+    listConversations(result.admin),
+    searchParams,
+  ]);
 
   return (
     <InboxClient
       me={{ id: result.admin.id, name: result.admin.name }}
       canReply={can(result.admin.role, 'chat.reply')}
       initialConversations={conversations}
+      initialConversationId={sp.c ?? null}
       pages={pages}
     />
   );

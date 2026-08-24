@@ -1,13 +1,33 @@
-import PlaceholderPage from '@/components/placeholder-page';
+import { redirect } from 'next/navigation';
+import { getCurrentAdmin } from '@/lib/auth/current-admin';
+import { listOrders } from '@/server/orders/service';
+import { db } from '@/lib/supabase/admin';
+import OrdersClient from './orders-client';
 
-/** ออเดอร์ — สเปกหัวข้อ 5.3 */
-export default function OrdersPage() {
+/** หน้าออเดอร์ — สเปกหัวข้อ 5.3 */
+export const dynamic = 'force-dynamic';
+
+export default async function OrdersPage() {
+  const result = await getCurrentAdmin();
+  if (!result.ok) redirect('/login');
+
+  const [orders, { data: pages }] = await Promise.all([
+    listOrders(result.admin),
+    db().from('pages').select('id,display_name,page_name,tag_color').order('created_at'),
+  ]);
+
   return (
-    <PlaceholderPage
-      title="ออเดอร์"
-      round="รอบ 5"
-      description="ตารางฐานข้อมูลพร้อมแล้ว หน้าจอจะทำหลังหน้าแชท"
-      items={['ลิสต์ + ฟิลเตอร์', 'รายละเอียด + ประวัติแก้ไข', 'ปุ่มคัดลอกที่อยู่', 'นำเข้าเลขพัสดุ']}
+    <OrdersClient
+      canEdit={result.admin.role !== 'viewer'}
+      initialOrders={orders}
+      pages={
+        (pages ?? []) as Array<{
+          id: string;
+          display_name: string | null;
+          page_name: string;
+          tag_color: string;
+        }>
+      }
     />
   );
 }

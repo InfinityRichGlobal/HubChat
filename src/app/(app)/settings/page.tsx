@@ -39,6 +39,13 @@ export default async function SettingsPage() {
       show: can(admin.role, 'content.view'),
     },
     {
+      href: '/settings/catalog',
+      icon: Package,
+      title: 'สินค้า + โปรโมชัน',
+      description: 'สี/ราคาสินค้า และรูปแบบโปร (เดี่ยว / แพ็ก / ซื้อ X แถม Y / บ็อกซ์เซ็ต)',
+      show: can(admin.role, 'content.view'),
+    },
+    {
       href: '/settings/activity',
       icon: ScrollText,
       title: 'ประวัติการใช้งาน',
@@ -48,8 +55,7 @@ export default async function SettingsPage() {
   ].filter((i) => i.show);
 
   const upcoming = [
-    { icon: MessageSquareText, title: 'กฎคีย์เวิร์ดตอบอัตโนมัติ', round: 'รอบ 5' },
-    { icon: Package, title: 'สินค้า / โปรโมชัน / ค่าส่ง', round: 'รอบ 5' },
+    { icon: MessageSquareText, title: 'กฎคีย์เวิร์ดตอบอัตโนมัติ', round: 'รอบ 6' },
     { icon: Bell, title: 'แจ้งเตือน (PWA + Telegram)', round: 'รอบ 7' },
   ];
 
