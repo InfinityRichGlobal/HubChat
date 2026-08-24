@@ -55,6 +55,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       idempotency_key: body.idempotency_key,
     });
 
+    // ⭐ จดผลลงล็อกของเซิร์ฟเวอร์ด้วย
+    //    เดิมเหตุผลที่ส่งไม่ออกอยู่แค่ใน toast บนหน้าจอ ซึ่งต้องทันเห็นเท่านั้น
+    //    เวลาไล่ปัญหาเราต้องเห็นย้อนหลังได้จากเทอร์มินัล
+    //    ⚠️ จดเฉพาะ "ผลลัพธ์" ห้ามจดเนื้อข้อความของลูกค้าลงล็อกเด็ดขาด
+    const line =
+      `[reply] conv=${id} sent=${result.sent} unknown=${result.outcome_unknown} ` +
+      `reason=${result.reason_code} attempts=${result.attempts} ` +
+      `transport=${result.decision.transport ?? '-'} fbtrace=${result.fbtrace_id ?? '-'}`;
+    if (result.sent) {
+      console.log(`${line} ✅`);
+    } else {
+      console.error(`${line} ❌ ${result.reason_th}`);
+      if (result.decision.alternatives_th.length > 0) {
+        console.error(`[reply] ทางเลือกที่ทำได้: ${result.decision.alternatives_th.join(' · ')}`);
+      }
+    }
+
     return ok({
       sent: result.sent,
       outcome_unknown: result.outcome_unknown,
