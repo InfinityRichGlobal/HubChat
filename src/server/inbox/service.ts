@@ -16,6 +16,7 @@ import 'server-only';
  */
 import { db } from '@/lib/supabase/admin';
 import { canSeePage } from '@/lib/auth/permissions';
+import { conversationIdsWithTags, tagsForConversations } from '@/server/content/service';
 import type { Platform, PublicAdmin, ReferralSource } from '@/types/db';
 
 /** ปลดล็อกอัตโนมัติเมื่อไม่มีความเคลื่อนไหวเกินเวลานี้ (สเปก 5.1 : 3 นาที) */
@@ -50,6 +51,8 @@ export type ConversationRow = {
   /** ชื่อแอดมินที่กำลังเปิดห้องนี้อยู่ (null = ว่าง) */
   locked_by_name: string | null;
   locked_by_admin_id: string | null;
+  /** แท็กที่ติดอยู่กับห้องนี้ (เก็บเป็น id ให้หน้าเว็บไปจับคู่กับสีเอง) */
+  tag_ids: string[];
 };
 
 export type MessageRow = {
@@ -68,6 +71,8 @@ export type ListFilters = {
   page_ids?: string[];
   search?: string;
   unread_only?: boolean;
+  /** กรองเฉพาะห้องที่ติดแท็กใดแท็กหนึ่งในรายการนี้ */
+  tag_ids?: string[];
   limit?: number;
 };
 
@@ -148,6 +153,13 @@ export async function listConversations(
     if (customerIdFilter.length === 0) return { conversations: [], pages: [...pages.values()] };
   }
 
+  /* --- ตัวกรองแท็ก : หาว่าห้องไหนติดแท็กที่เลือกไว้บ้าง --- */
+  let conversationIdFilter: string[] | null = null;
+  if (filters.tag_ids && filters.tag_ids.length > 0) {
+    conversationIdFilter = await conversationIdsWithTags(filters.tag_ids);
+    if (conversationIdFilter.length === 0) return { conversations: [], pages: [...pages.values()] };
+  }
+
   let query = db()
     .from('conversations')
     .select(
@@ -160,6 +172,7 @@ export async function listConversations(
 
   if (filters.unread_only) query = query.eq('is_read', false);
   if (customerIdFilter) query = query.in('customer_id', customerIdFilter);
+  if (conversationIdFilter) query = query.in('id', conversationIdFilter);
 
   const { data: convRows, error } = await query;
   if (error) throw new Error(`อ่านลิสต์แชทไม่สำเร็จ: ${error.message}`);
@@ -181,12 +194,13 @@ export async function listConversations(
 
   if (rows.length === 0) return { conversations: [], pages: [...pages.values()] };
 
-  const [customers, names] = await Promise.all([
+  const [customers, names, tagMap] = await Promise.all([
     db()
       .from('customers')
       .select('id,name,profile_pic_url,psid,phone')
       .in('id', [...new Set(rows.map((r) => r.customer_id))]),
     adminNames(rows.map((r) => r.locked_by_admin_id).filter((v): v is string => Boolean(v))),
+    tagsForConversations(rows.map((r) => r.id)),
   ]);
 
   const customerMap = new Map(
@@ -229,6 +243,7 @@ export async function listConversations(
         referral_ref: r.referral_ref,
         locked_by_admin_id: lockAlive ? r.locked_by_admin_id : null,
         locked_by_name: lockAlive ? (names.get(r.locked_by_admin_id!) ?? 'แอดมินคนอื่น') : null,
+        tag_ids: tagMap.get(r.id) ?? [],
       },
     ];
   });
@@ -355,4 +370,67 @@ export async function releaseLock(admin: PublicAdmin, conversationId: string): P
     p_admin_id: admin.id,
   });
   if (error) console.error('[inbox] ปล่อยล็อกไม่สำเร็จ:', error.message);
+}
+
+/* ------------------------------------------------------------------------ */
+/* 4) เปิดให้ route อื่นตรวจสิทธิ์ห้องแชทได้                                     */
+/* ------------------------------------------------------------------------ */
+
+/** โยน InboxAccessError ถ้าแอดมินคนนี้ไม่มีสิทธิ์แตะห้องแชทนี้ */
+export async function assertConversationAccess(
+  admin: PublicAdmin,
+  conversationId: string,
+): Promise<{ id: string; customer_id: string; page_id: string }> {
+  return requireConversationAccess(admin, conversationId);
+}
+
+/* ------------------------------------------------------------------------ */
+/* 5) บันทึกที่อยู่/เบอร์ของลูกค้า (สเปกหัวข้อ 5.2)                              */
+/* ------------------------------------------------------------------------ */
+
+export type CustomerContact = {
+  recipient_name?: string | null;
+  phone?: string | null;
+  postcode?: string | null;
+  address?: string | null;
+};
+
+/**
+ * บันทึกข้อมูลติดต่อของลูกค้า
+ * ⭐ ค่าที่ส่งเข้ามาต้องเป็นค่าที่ "แอดมินตรวจแล้ว" เสมอ (สเปก 5.2)
+ *    ระบบไม่เขียนทับข้อมูลลูกค้าจากตัวดึงอัตโนมัติเองเด็ดขาด
+ *
+ * ⚠️ แก้ได้เฉพาะ 4 ช่องนี้เท่านั้น ห้ามให้เขียนช่องอื่น
+ *    โดยเฉพาะ last_customer_message_at ที่ Policy Engine ใช้ตัดสิน
+ */
+export async function updateCustomerContact(
+  admin: PublicAdmin,
+  conversationId: string,
+  contact: CustomerContact,
+): Promise<void> {
+  const conv = await requireConversationAccess(admin, conversationId);
+
+  const patch: Record<string, unknown> = {};
+  if (contact.recipient_name !== undefined) patch.recipient_name = contact.recipient_name?.trim() || null;
+  if (contact.phone !== undefined) patch.phone = contact.phone?.trim() || null;
+  if (contact.postcode !== undefined) patch.postcode = contact.postcode?.trim() || null;
+  if (contact.address !== undefined) patch.address = contact.address?.trim() || null;
+  if (Object.keys(patch).length === 0) return;
+
+  const { error } = await db().from('customers').update(patch).eq('id', conv.customer_id);
+  if (error) throw new Error(`บันทึกข้อมูลลูกค้าไม่สำเร็จ: ${error.message}`);
+}
+
+/** ข้อมูลติดต่อปัจจุบันของลูกค้าในห้องนี้ — ใช้เติมฟอร์มให้แอดมินตรวจ */
+export async function getCustomerContact(
+  admin: PublicAdmin,
+  conversationId: string,
+): Promise<CustomerContact> {
+  const conv = await requireConversationAccess(admin, conversationId);
+  const { data } = await db()
+    .from('customers')
+    .select('recipient_name,phone,postcode,address')
+    .eq('id', conv.customer_id)
+    .maybeSingle();
+  return (data as CustomerContact | null) ?? {};
 }

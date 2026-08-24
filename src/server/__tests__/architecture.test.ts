@@ -441,3 +441,59 @@ describe('🔴 ชั้นข้อมูลอินบ็อกซ์ต้�
     expect(offenders).toEqual([]);
   });
 });
+
+/* ================================================================== */
+/* รอบ 4 — เครื่องมือแอดมิน                                             */
+/* ================================================================== */
+describe('🔴 เครื่องมือแอดมินต้องไม่กลายเป็นการตอบอัตโนมัติ', () => {
+  const contentFiles = CODE_FILES.filter((f) => rel(f).startsWith('server/content/'));
+
+  it('มีไฟล์ในโฟลเดอร์ content ให้ตรวจจริง', () => {
+    expect(contentFiles.length).toBeGreaterThan(0);
+  });
+
+  it('ชั้นชุดคำตอบ/แท็ก ห้ามเรียก sendMessage หรือแตะ Meta เลย', () => {
+    // ชุดคำตอบคือ "ข้อความสำเร็จรูปที่วางในช่องพิมพ์" ไม่ใช่การตอบอัตโนมัติ
+    // ถ้าวันหนึ่งมีคนต่อสายส่งเข้ามาตรงนี้ = ระบบส่งข้อความเองโดยไม่มีคนกด
+    const offenders = contentFiles
+      .filter((f) => /sendMessage|@\/server\/meta\/|@\/server\/transports\//.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('API ของชุดคำตอบ/แท็ก ห้ามเรียก sendMessage', () => {
+    const apis = CODE_FILES.filter(
+      (f) => rel(f).startsWith('app/api/canned/') || rel(f).startsWith('app/api/tags/'),
+    );
+    expect(apis.length).toBeGreaterThan(0);
+    const offenders = apis.filter((f) => /sendMessage/.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ตัวดึงที่อยู่ต้องเป็นฟังก์ชันบริสุทธิ์ และไม่เขียนทับข้อมูลลูกค้าเอง', () => {
+  const extractFiles = CODE_FILES.filter((f) => rel(f).startsWith('server/extract/'));
+
+  it('มีไฟล์ในโฟลเดอร์ extract ให้ตรวจจริง', () => {
+    expect(extractFiles.length).toBeGreaterThan(0);
+  });
+
+  it('ห้ามต่อฐานข้อมูล ห้ามยิงเน็ต ห้ามอ่านเวลาปัจจุบัน', () => {
+    const offenders = extractFiles
+      .filter((f) => /supabase|db\(\)|fetch\(|Date\.now\(\)|new Date\(\)/.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ไม่มีเส้นทางไหนเอาผลจากตัวดึงไปเขียนลง customers โดยตรง', () => {
+    // ค่าที่บันทึกต้องมาจากฟอร์มที่แอดมินตรวจแล้วเท่านั้น (สเปก 5.2)
+    const offenders = CODE_FILES.filter((f) => {
+      const src = read(f).replace(/\n/g, ' ');
+      if (!src.includes('extractAddress')) return false;
+      // ไฟล์ที่เรียกตัวดึง ต้องไม่มีการเขียนตาราง customers อยู่ในไฟล์เดียวกัน
+      return /from\(['"]customers['"]\)[^;]*\.update\(/.test(src);
+    }).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});

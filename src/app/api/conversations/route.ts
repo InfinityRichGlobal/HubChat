@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
 
     const result = await listConversations(admin, {
       page_ids: params.get('page_ids')?.split(',').filter(Boolean),
+      tag_ids: params.get('tag_ids')?.split(',').filter(Boolean),
       search: params.get('search') ?? undefined,
       unread_only: params.get('unread') === '1',
       limit: params.get('limit') ? Number(params.get('limit')) : undefined,

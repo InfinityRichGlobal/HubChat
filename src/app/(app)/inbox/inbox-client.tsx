@@ -2,28 +2,37 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, Loader2, Lock, MessageSquareOff, Megaphone, Search, Send, X,
+  ArrowLeft, ClipboardCopy, Copy, Loader2, Lock, MapPin, MessageSquareOff,
+  Megaphone, Quote, Search, Send, Tag as TagIcon, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { ConversationRow, InboxPage, MessageRow } from '@/server/inbox/service';
+import type { CannedResponse, Tag } from '@/server/content/service';
+import type { ExtractedAddress } from '@/server/extract/address';
 
 /**
- * หน้าอินบ็อกซ์ (ฝั่งหน้าเว็บ) — สเปกหัวข้อ 5.1
+ * หน้าอินบ็อกซ์ (ฝั่งหน้าเว็บ) — สเปกหัวข้อ 5.1 + 5.2
  * ===========================================================================
  * มือถือ   : 2 ชั้น — ลิสต์แชท → แตะเข้าห้องแชท
  * เดสก์ท็อป : 2 คอลัมน์ — ลิสต์ซ้าย ห้องแชทขวา
- *            (คอลัมน์ที่ 3 "ข้อมูลลูกค้า" มาพร้อมออเดอร์ในรอบ 5)
  *
  * ⭐ กฎที่ห้ามลืม (สเปกหัวข้อ 6.1) :
  *    หน้านี้มี "ปุ่มส่งปุ่มเดียว" เท่านั้น
  *    ไม่มีที่ไหนให้แอดมินเลือก transport หรือ message tag ได้เลย
- *    ฝั่งเซิร์ฟเวอร์เป็นคนตัดสินทั้งหมด หน้านี้แค่แสดงผลว่าส่งด้วยช่องทางไหน
+ *
+ * ⭐ กฎของรอบ 4 (สเปกหัวข้อ 5.2) :
+ *    ตัวดึงที่อยู่เป็นแค่ "ตัวช่วยกรอก" — แอดมินต้องตรวจและกดบันทึกเองเสมอ
+ *    ระบบไม่เขียนทับข้อมูลลูกค้าเองเด็ดขาด
  */
 
 /* ---------------------------------------------------------------- */
@@ -41,22 +50,19 @@ function clockTh(iso: string): string {
 
 function dayTh(iso: string): string {
   const d = new Date(iso);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
+  const sameDay = d.toDateString() === new Date().toDateString();
   if (sameDay) return clockTh(iso);
   return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
 }
 
 /**
- * นาฬิกานับถอยหลังกรอบ 24 ชม. (สเปก 5.1 : ไอคอนนาฬิกาในลิสต์แชท)
- * ⚠️ ตัวเลข 24 ที่นี่เป็น "การแสดงผลคร่าว ๆ" ให้แอดมินรู้สึกถึงเวลาเท่านั้น
- *    การตัดสินว่าส่งได้จริงไหม เป็นของ Policy Engine ฝั่งเซิร์ฟเวอร์เสมอ
- *    (หัวห้องแชทโชว์คำตอบจริงจาก engine อีกที)
+ * นาฬิกานับถอยหลังกรอบ 24 ชม. (สเปก 5.1)
+ * ⚠️ เป็น "การแสดงผลคร่าว ๆ" เท่านั้น การตัดสินว่าส่งได้จริงไหม
+ *    เป็นของ Policy Engine ฝั่งเซิร์ฟเวอร์เสมอ (หัวห้องแชทโชว์คำตอบจริง)
  */
 function windowHint(lastCustomerMessageAt: string | null): { text: string; tone: 'ok' | 'warn' | 'over' } | null {
   if (!lastCustomerMessageAt) return null;
-  const hours = (Date.now() - new Date(lastCustomerMessageAt).getTime()) / 3_600_000;
-  const left = 24 - hours;
+  const left = 24 - (Date.now() - new Date(lastCustomerMessageAt).getTime()) / 3_600_000;
   if (left <= 0) return { text: 'พ้นกรอบ', tone: 'over' };
   if (left < 3) return { text: `เหลือ ${Math.max(1, Math.round(left * 60))} นาที`, tone: 'warn' };
   return { text: `เหลือ ${Math.floor(left)} ชม.`, tone: 'ok' };
@@ -71,20 +77,41 @@ const REFERRAL_LABEL: Record<string, string> = {
 
 /**
  * สร้างกุญแจกันส่งซ้ำ
- * ⚠️ ห้ามเรียก crypto.randomUUID() ตรง ๆ
- *    เบราว์เซอร์จะให้ใช้เฉพาะตอนเปิดผ่าน https หรือ localhost เท่านั้น
- *    ถ้าแอดมินเปิดจากมือถือผ่านเลข IP ในวง LAN (http://192.168.x.x:3000)
- *    ตัวนี้จะไม่มีอยู่ แล้วหน้าจอจะพังเงียบ ๆ ตั้งแต่ตอนเรนเดอร์
+ * ⚠️ ห้ามเรียก crypto.randomUUID() ตรง ๆ — เบราว์เซอร์ให้ใช้เฉพาะ https หรือ localhost
+ *    ถ้าเปิดจากมือถือผ่านเลข IP ในวง LAN ตัวนี้จะไม่มี แล้วหน้าจอพังเงียบ ๆ
  */
 function newIdempotencyKey(): string {
   try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   } catch {
-    /* ตกไปใช้ทางสำรองด้านล่าง */
+    /* ตกไปใช้ทางสำรอง */
   }
   return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** คัดลอกข้อความ — มีทางสำรองสำหรับเบราว์เซอร์ที่ไม่มี clipboard API */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* ตกไปใช้ทางสำรอง */
+  }
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 type PolicyStatus = {
@@ -93,6 +120,28 @@ type PolicyStatus = {
   hours_left: number | null;
   alternatives_th: string[];
 };
+
+/** ตัวช่วยเรียก API ที่ "ไม่ปล่อยให้ error หายเงียบ" */
+async function apiCall<T>(url: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      toast.error(json?.error?.message_th ?? 'ทำรายการไม่สำเร็จ');
+      return null;
+    }
+    return json.data as T;
+  } catch (err) {
+    console.error('[inbox] เรียก API ไม่สำเร็จ:', url, err);
+    toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้', {
+      description: err instanceof Error ? err.message : undefined,
+    });
+    return null;
+  }
+}
 
 /* ================================================================== */
 
@@ -108,7 +157,9 @@ export default function InboxClient({
   pages: InboxPage[];
 }) {
   const [conversations, setConversations] = useState(initialConversations);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -118,14 +169,27 @@ export default function InboxClient({
     [conversations, activeId],
   );
 
+  const tagById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
+
+  /* ---- โหลดรายชื่อแท็กครั้งเดียวตอนเปิดหน้า ---- */
+  useEffect(() => {
+    let alive = true;
+    void apiCall<{ tags: Tag[] }>('/api/tags').then((d) => {
+      if (alive && d) setTags(d.tags);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   /* ---- ดึงลิสต์แชทซ้ำเป็นระยะ ------------------------------------ *
    * ⚠️ ตัวดึงข้อมูล "คืนค่า" อย่างเดียว ไม่ตั้ง state เอง
-   *    ผู้เรียกเป็นคนตั้ง state ใน .then() — ทำให้ไม่มีการตั้ง state
-   *    ทันทีในตัว effect ซึ่งทำให้ React เรนเดอร์ซ้อนกันเป็นทอด ๆ ได้
+   *    ผู้เรียกตั้ง state ใน .then() — กันการเรนเดอร์ซ้อนกันเป็นทอด ๆ
    */
   const fetchList = useCallback(async (): Promise<ConversationRow[] | null> => {
     const params = new URLSearchParams();
     if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
+    if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
     if (search.trim()) params.set('search', search.trim());
     if (unreadOnly) params.set('unread', '1');
 
@@ -134,10 +198,10 @@ export default function InboxClient({
       const json = await res.json();
       return json.ok ? (json.data.conversations as ConversationRow[]) : null;
     } catch {
-      // เน็ตสะดุดชั่วคราว — ไม่ต้องรบกวนแอดมิน เดี๋ยวรอบหน้าก็ได้เอง
+      // เน็ตสะดุดชั่วคราว — เดี๋ยวรอบหน้าก็ได้เอง ไม่ต้องรบกวนแอดมิน
       return null;
     }
-  }, [selectedPages, search, unreadOnly]);
+  }, [selectedPages, selectedTags, search, unreadOnly]);
 
   const loadList = useCallback(async () => {
     const rows = await fetchList();
@@ -160,21 +224,15 @@ export default function InboxClient({
     };
   }, [fetchList]);
 
-  function togglePage(id: string) {
-    setSelectedPages((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
-  }
+  const toggle = (setter: React.Dispatch<React.SetStateAction<string[]>>) => (id: string) =>
+    setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const unreadCount = conversations.filter((c) => !c.is_read).length;
 
   return (
     <div className="flex h-[calc(100dvh-9rem)] w-full gap-3 md:h-[calc(100dvh-6rem)]">
       {/* ---------------- ลิสต์แชท ---------------- */}
-      <div
-        className={cn(
-          'flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm',
-          activeId && 'hidden md:flex',
-        )}
-      >
+      <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', activeId && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -187,31 +245,30 @@ export default function InboxClient({
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => setUnreadOnly((v) => !v)}
-              className={cn(
-                'rounded-full border px-2.5 py-1 text-xs',
-                unreadOnly ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground',
-              )}
-            >
+            <FilterChip active={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
               ยังไม่ตอบ{unreadCount > 0 ? ` (${unreadCount})` : ''}
-            </button>
+            </FilterChip>
+
             {pages.map((p) => (
-              <button
+              <FilterChip
                 key={p.id}
-                type="button"
-                onClick={() => togglePage(p.id)}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
-                  selectedPages.includes(p.id)
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'text-muted-foreground',
-                )}
+                active={selectedPages.includes(p.id)}
+                onClick={() => toggle(setSelectedPages)(p.id)}
+                dotColor={p.tag_color}
               >
-                <span className="size-2 rounded-full" style={{ backgroundColor: p.tag_color }} />
                 {p.name}
-              </button>
+              </FilterChip>
+            ))}
+
+            {tags.map((t) => (
+              <FilterChip
+                key={t.id}
+                active={selectedTags.includes(t.id)}
+                onClick={() => toggle(setSelectedTags)(t.id)}
+                dotColor={t.color}
+              >
+                {t.name}
+              </FilterChip>
             ))}
           </div>
         </div>
@@ -227,6 +284,7 @@ export default function InboxClient({
                   conversation={c}
                   isActive={c.id === activeId}
                   meId={me.id}
+                  tagById={tagById}
                   onSelect={() => setActiveId(c.id)}
                 />
               ))}
@@ -243,6 +301,7 @@ export default function InboxClient({
             conversation={active}
             canReply={canReply}
             meId={me.id}
+            tags={tags}
             onBack={() => setActiveId(null)}
             onChanged={loadList}
           />
@@ -257,6 +316,32 @@ export default function InboxClient({
 }
 
 /* ================================================================== */
+
+function FilterChip({
+  active,
+  onClick,
+  dotColor,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  dotColor?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
+        active ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground',
+      )}
+    >
+      {dotColor && <span className="size-2 rounded-full" style={{ backgroundColor: dotColor }} />}
+      {children}
+    </button>
+  );
+}
 
 function EmptyList({ hasPages }: { hasPages: boolean }) {
   return (
@@ -276,11 +361,13 @@ function ConversationItem({
   conversation: c,
   isActive,
   meId,
+  tagById,
   onSelect,
 }: {
   conversation: ConversationRow;
   isActive: boolean;
   meId: string;
+  tagById: Map<string, Tag>;
   onSelect: () => void;
 }) {
   const hint = windowHint(c.last_customer_message_at);
@@ -298,10 +385,7 @@ function ConversationItem({
       >
         {/* จุดแดง = ยังไม่ตอบ */}
         <span
-          className={cn(
-            'mt-2 size-2 shrink-0 rounded-full',
-            c.is_read ? 'bg-transparent' : 'bg-[var(--destructive)]',
-          )}
+          className={cn('mt-2 size-2 shrink-0 rounded-full', c.is_read ? 'bg-transparent' : 'bg-[var(--destructive)]')}
           aria-label={c.is_read ? undefined : 'ยังไม่ตอบ'}
         />
 
@@ -310,9 +394,7 @@ function ConversationItem({
             <span className={cn('truncate text-sm', !c.is_read && 'font-semibold')}>
               {c.customer_name || `ลูกค้า ${c.psid.slice(-6)}`}
             </span>
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
-              {dayTh(c.last_message_at)}
-            </span>
+            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
           </div>
 
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -339,9 +421,25 @@ function ConversationItem({
             )}
           </div>
 
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {c.last_message_preview ?? '—'}
-          </p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{c.last_message_preview ?? '—'}</p>
+
+          {c.tag_ids.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {c.tag_ids.map((id) => {
+                const t = tagById.get(id);
+                if (!t) return null;
+                return (
+                  <span
+                    key={id}
+                    className="rounded-full border px-1.5 py-0.5 text-[10px]"
+                    style={{ borderColor: t.color, color: t.color }}
+                  >
+                    {t.name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
           {lockedByOther && (
             <p className="mt-1 flex items-center gap-1 text-[11px] text-[var(--warning,#b45309)]">
@@ -363,12 +461,14 @@ function ChatRoom({
   conversation: c,
   canReply,
   meId,
+  tags,
   onBack,
   onChanged,
 }: {
   conversation: ConversationRow;
   canReply: boolean;
   meId: string;
+  tags: Tag[];
   onBack: () => void;
   onChanged: () => void;
 }) {
@@ -377,8 +477,14 @@ function ChatRoom({
   const [lockedBy, setLockedBy] = useState<{ name: string; id: string } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [menuFor, setMenuFor] = useState<MessageRow | null>(null);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [contactSource, setContactSource] = useState<string | null>(null);
+  const [canned, setCanned] = useState<CannedResponse[]>([]);
+  /** กด Escape เพื่อซ่อนรายการชุดคำตอบชั่วคราวโดยไม่ต้องลบข้อความที่พิมพ์ไว้ */
+  const [dismissedCanned, setDismissedCanned] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  /** กุญแจกันส่งซ้ำของข้อความที่กำลังพิมพ์อยู่ */
+  const inputRef = useRef<HTMLInputElement>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 
   /* ---- ตัวดึงข้อมูล : คืนค่าอย่างเดียว ไม่ตั้ง state เอง ---- */
@@ -388,11 +494,10 @@ function ChatRoom({
       const json = await res.json();
       return json.ok ? (json.data.messages as MessageRow[]) : null;
     } catch {
-      return null; /* เงียบไว้ เดี๋ยวรอบหน้าลองใหม่ */
+      return null;
     }
   }, [c.id]);
 
-  /* ---- สถานะช่องทางส่งจาก Policy Engine (สเปก 5.1 หัวห้องแชท) ---- */
   const fetchPolicy = useCallback(async (): Promise<PolicyStatus | null> => {
     if (!canReply) return null;
     try {
@@ -404,7 +509,6 @@ function ChatRoom({
     }
   }, [c.id, canReply]);
 
-  /* ---- ล็อกกันแอดมินชน ---- */
   const fetchLock = useCallback(async (): Promise<{ name: string; id: string } | null> => {
     try {
       const res = await fetch(`/api/conversations/${c.id}/lock`, { method: 'POST' });
@@ -433,7 +537,6 @@ function ChatRoom({
   /* ---- เปิดห้อง : อ่านแล้ว + โหลดทุกอย่าง + จับล็อก ---- */
   useEffect(() => {
     let alive = true;
-
     void fetch(`/api/conversations/${c.id}/read`, { method: 'POST' }).then(onChanged).catch(() => {});
 
     const pullMessages = () => {
@@ -454,8 +557,7 @@ function ChatRoom({
     });
 
     const msgTimer = setInterval(pullMessages, 4000);
-    // ต่ออายุล็อกทุก 45 วินาที — สั้นกว่าอายุล็อก 3 นาทีพอสมควร
-    // เผื่อเน็ตสะดุดหนึ่งรอบแล้วยังไม่หลุดล็อก
+    // ต่ออายุล็อกทุก 45 วินาที — สั้นกว่าอายุล็อก 3 นาทีพอสมควร เผื่อเน็ตสะดุดหนึ่งรอบ
     const lockTimer = setInterval(pullLock, 45_000);
 
     return () => {
@@ -471,6 +573,45 @@ function ChatRoom({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
+
+  /* ---- ชุดคำตอบ : พิมพ์ / แล้วค้นทันที (สเปก 5.1) ---- */
+  const slashQuery = text.startsWith('/') ? text.slice(1).trim() : null;
+
+  useEffect(() => {
+    if (slashQuery === null) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void apiCall<{ items: CannedResponse[] }>(
+        `/api/canned?q=${encodeURIComponent(slashQuery)}`,
+      ).then((d) => {
+        if (alive && d) setCanned(d.items.slice(0, 8));
+      });
+    }, 150); // หน่วงนิดหน่อย ไม่ให้ยิงทุกตัวอักษร
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [slashQuery]);
+
+  // ⚠️ คำนวณจาก state แทนการล้าง state ในตัว effect
+  //    (ล้างใน effect จะทำให้ React เรนเดอร์ซ้อนกันเป็นทอด ๆ)
+  const cannedVisible = slashQuery === null || dismissedCanned ? [] : canned;
+
+  /** หยิบชุดคำตอบมาวางในช่องพิมพ์ — ⚠️ ไม่ได้ส่งออกไป แอดมินต้องกดส่งเอง */
+  function applyCanned(item: CannedResponse) {
+    setText(item.text ?? '');
+    setDismissedCanned(false);
+    void apiCall(`/api/canned/${item.id}`, { method: 'POST' });
+    inputRef.current?.focus();
+  }
+
+  /** ยกข้อความมาอ้างอิงในช่องพิมพ์ (สเปก 5.1 : ปัดขวา / เมนูแตะ) */
+  function quote(m: MessageRow) {
+    const body = (m.text ?? '[ไฟล์แนบ]').split('\n').map((l) => `> ${l}`).join('\n');
+    setText((prev) => `${body}\n${prev}`);
+    setMenuFor(null);
+    inputRef.current?.focus();
+  }
 
   async function send() {
     const body = text.trim();
@@ -498,8 +639,7 @@ function ChatRoom({
 
       if (d.sent) {
         setText('');
-        // กุญแจใหม่สำหรับข้อความถัดไป
-        idempotencyKey.current = newIdempotencyKey();
+        idempotencyKey.current = newIdempotencyKey(); // กุญแจใหม่สำหรับข้อความถัดไป
         await loadMessages();
         onChanged();
       } else if (d.outcome_unknown) {
@@ -516,10 +656,7 @@ function ChatRoom({
         await loadPolicy();
       }
     } catch (err) {
-      // ⚠️ ก่อนหน้านี้ไม่มีตัวรับ error ตรงนี้
-      //    ถ้า fetch พัง หรือเซิร์ฟเวอร์ตอบมาไม่ใช่ JSON (เช่นหน้า error ของ Next)
-      //    ข้อผิดพลาดจะหายไปเงียบ ๆ แอดมินกดส่งแล้วเหมือนไม่มีอะไรเกิดขึ้นเลย
-      //    ซึ่งแย่กว่าการขึ้นข้อความว่าพังมาก
+      // ⚠️ ต้องมีตัวรับ error เสมอ ไม่งั้นกดส่งแล้วเหมือนไม่มีอะไรเกิดขึ้น
       console.error('[inbox] ส่งข้อความไม่สำเร็จ:', err);
       toast.error('ส่งข้อความไม่สำเร็จ', {
         description: err instanceof Error ? err.message : 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง',
@@ -539,11 +676,15 @@ function ChatRoom({
         </Button>
         <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: c.page.tag_color }} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
-            {c.customer_name || `ลูกค้า ${c.psid.slice(-6)}`}
-          </div>
+          <div className="truncate text-sm font-medium">{c.customer_name || `ลูกค้า ${c.psid.slice(-6)}`}</div>
           <div className="truncate text-[11px] text-muted-foreground">{c.page.name}</div>
         </div>
+
+        {canReply && (
+          <Button variant="ghost" size="icon" aria-label="แท็ก" onClick={() => setTagsOpen(true)}>
+            <TagIcon />
+          </Button>
+        )}
         {policy && (
           <Badge variant={policy.can_send ? 'outline' : 'destructive'} className="shrink-0">
             {policy.label_th}
@@ -551,14 +692,31 @@ function ChatRoom({
         )}
       </div>
 
+      {/* แท็กที่ติดอยู่ */}
+      {c.tag_ids.length > 0 && (
+        <div className="flex flex-wrap gap-1 border-b px-3 py-1.5">
+          {c.tag_ids.map((id) => {
+            const t = tags.find((x) => x.id === id);
+            if (!t) return null;
+            return (
+              <span
+                key={id}
+                className="rounded-full border px-2 py-0.5 text-[11px]"
+                style={{ borderColor: t.color, color: t.color }}
+              >
+                {t.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* ---------- เตือนว่ามีคนอื่นเปิดอยู่ ---------- */}
       {lockedBy && (
         <Alert variant="warning" className="rounded-none border-x-0 border-t-0 py-2">
           <Lock className="size-4" />
           <AlertTitle className="text-xs">{lockedBy.name} กำลังดูแลแชทนี้อยู่</AlertTitle>
-          <AlertDescription className="text-xs">
-            ตอบได้ แต่ระวังตอบซ้ำกัน — คุยกันก่อนดีกว่า
-          </AlertDescription>
+          <AlertDescription className="text-xs">ตอบได้ แต่ระวังตอบซ้ำกัน — คุยกันก่อนดีกว่า</AlertDescription>
         </Alert>
       )}
 
@@ -575,7 +733,7 @@ function ChatRoom({
         ) : (
           <div className="flex flex-col gap-2">
             {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
+              <MessageBubble key={m.id} message={m} onTap={() => setMenuFor(m)} onSwipeRight={() => quote(m)} />
             ))}
           </div>
         )}
@@ -583,7 +741,29 @@ function ChatRoom({
       </div>
 
       {/* ---------- ช่องพิมพ์ ---------- */}
-      <div className="border-t p-2">
+      <div className="relative border-t p-2">
+        {/* รายการชุดคำตอบที่ลอยขึ้นมาเมื่อพิมพ์ / */}
+        {cannedVisible.length > 0 && (
+          <div className="absolute bottom-full left-2 right-2 z-10 mb-1 max-h-64 overflow-y-auto rounded-lg border bg-popover shadow-lg">
+            {cannedVisible.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => applyCanned(item)}
+                className="flex w-full flex-col gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-accent"
+              >
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  {item.title}
+                  {item.shortcut && (
+                    <Badge variant="secondary" className="font-mono text-[10px]">/{item.shortcut}</Badge>
+                  )}
+                </span>
+                <span className="line-clamp-2 text-xs text-muted-foreground">{item.text}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {!canReply ? (
           <p className="py-2 text-center text-xs text-muted-foreground">
             บัญชีของคุณดูได้อย่างเดียว ตอบแชทไม่ได้
@@ -591,15 +771,25 @@ function ChatRoom({
         ) : (
           <div className="flex items-end gap-2">
             <Input
+              ref={inputRef}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                setDismissedCanned(false);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
+                  // กำลังเลือกชุดคำตอบอยู่ → Enter หมายถึง "เลือกอันแรก" ไม่ใช่ "ส่ง"
+                  if (cannedVisible.length > 0) {
+                    applyCanned(cannedVisible[0]);
+                    return;
+                  }
                   void send();
                 }
+                if (e.key === 'Escape') setDismissedCanned(true);
               }}
-              placeholder="พิมพ์ข้อความ… (Enter เพื่อส่ง)"
+              placeholder="พิมพ์ข้อความ… (พิมพ์ / เพื่อค้นชุดคำตอบ)"
               disabled={sending}
             />
             {/* ⭐ ปุ่มส่งปุ่มเดียว — ไม่มีตัวเลือกช่องทางให้แอดมินกดเลย */}
@@ -617,43 +807,384 @@ function ChatRoom({
           </p>
         )}
       </div>
+
+      {/* ---------- เมนูแตะข้อความ ---------- */}
+      <MessageMenu
+        message={menuFor}
+        onClose={() => setMenuFor(null)}
+        onCopyToInput={(m) => {
+          setText(m.text ?? '');
+          setMenuFor(null);
+          inputRef.current?.focus();
+        }}
+        onQuote={quote}
+        onExtract={(m) => {
+          setContactSource(m.text ?? '');
+          setMenuFor(null);
+        }}
+      />
+
+      {/* ---------- กล่องแท็ก ---------- */}
+      <TagPicker
+        open={tagsOpen}
+        onClose={() => setTagsOpen(false)}
+        tags={tags}
+        attached={c.tag_ids}
+        conversationId={c.id}
+        onChanged={onChanged}
+      />
+
+      {/* ---------- ฟอร์มที่อยู่ ---------- */}
+      <ContactDialog
+        key={contactSource ?? 'no-contact'}
+        conversationId={c.id}
+        source={contactSource}
+        onClose={() => setContactSource(null)}
+        onSaved={onChanged}
+      />
     </div>
   );
 }
 
-function MessageBubble({ message: m }: { message: MessageRow }) {
+/* ================================================================== */
+
+function MessageBubble({
+  message: m,
+  onTap,
+  onSwipeRight,
+}: {
+  message: MessageRow;
+  onTap: () => void;
+  onSwipeRight: () => void;
+}) {
   const outgoing = m.direction === 'out';
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+
+  /** ปัดขวา → ยกมาอ้างอิงทันที (สเปก 5.1) */
+  function onTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  }
+
+  function onTouchEnd(e: React.TouchEvent) {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = Math.abs(t.clientY - start.y);
+    // ต้องปัดขวาชัดเจน และไม่ใช่การเลื่อนขึ้นลง
+    if (dx > 60 && dy < 40) onSwipeRight();
+  }
 
   return (
     <div className={cn('flex flex-col gap-0.5', outgoing ? 'items-end' : 'items-start')}>
-      <div
+      <button
+        type="button"
+        onClick={onTap}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
         className={cn(
-          'max-w-[85%] rounded-2xl px-3 py-2 text-sm break-words',
+          'max-w-[85%] rounded-2xl px-3 py-2 text-left text-sm break-words',
           outgoing ? 'bg-primary text-primary-foreground' : 'bg-muted',
         )}
       >
         {m.text && <p className="whitespace-pre-wrap">{m.text}</p>}
 
         {m.attachments.map((a, i) => (
-          <div key={i} className="mt-1 text-xs opacity-80">
-            {a.url ? (
-              <a href={a.url} target="_blank" rel="noreferrer" className="underline">
-                เปิดไฟล์แนบ ({a.type})
-              </a>
-            ) : (
-              <span>[ไฟล์แนบ {a.type}]</span>
-            )}
-          </div>
+          <span key={i} className="mt-1 block text-xs opacity-80">
+            {a.url ? `ไฟล์แนบ (${a.type}) — แตะเพื่อเปิดเมนู` : `[ไฟล์แนบ ${a.type}]`}
+          </span>
         ))}
-      </div>
+      </button>
 
       <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
         <span>{clockTh(m.created_at)}</span>
         {outgoing && m.admin_name && <span>· {m.admin_name}</span>}
         {outgoing && m.sender_type === 'bot' && <span>· ตอบอัตโนมัติ</span>}
         {/* ป้ายบอกช่องทางที่ใช้ส่ง — อ่านอย่างเดียว ไม่ใช่ตัวเลือก */}
-        {m.sent_with_human_agent_tag && <Badge variant="secondary" className="h-4 px-1 text-[9px]">ตอบนอกกรอบ 24 ชม.</Badge>}
+        {m.sent_with_human_agent_tag && (
+          <Badge variant="secondary" className="h-4 px-1 text-[9px]">ตอบนอกกรอบ 24 ชม.</Badge>
+        )}
       </div>
     </div>
+  );
+}
+
+/* ================================================================== */
+
+function MessageMenu({
+  message,
+  onClose,
+  onCopyToInput,
+  onQuote,
+  onExtract,
+}: {
+  message: MessageRow | null;
+  onClose: () => void;
+  onCopyToInput: (m: MessageRow) => void;
+  onQuote: (m: MessageRow) => void;
+  onExtract: (m: MessageRow) => void;
+}) {
+  const items = message
+    ? [
+        { icon: ClipboardCopy, label: 'คัดลอกไปช่องพิมพ์', run: () => onCopyToInput(message) },
+        { icon: Quote, label: 'ยกมาอ้างอิง', run: () => onQuote(message) },
+        { icon: MapPin, label: 'ดึงที่อยู่ + เบอร์', run: () => onExtract(message) },
+        {
+          icon: Copy,
+          label: 'คัดลอกข้อความ',
+          run: async () => {
+            const ok = await copyText(message.text ?? '');
+            toast[ok ? 'success' : 'error'](ok ? 'คัดลอกแล้ว' : 'คัดลอกไม่สำเร็จ');
+            onClose();
+          },
+        },
+      ]
+    : [];
+
+  return (
+    <Dialog open={message !== null} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>ข้อความนี้</DialogTitle>
+          <DialogDescription className="line-clamp-3 whitespace-pre-wrap">
+            {message?.text ?? '(ไฟล์แนบ)'}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => void item.run()}
+              className="flex items-center gap-3 rounded-md px-2 py-3 text-left text-sm hover:bg-accent"
+            >
+              <item.icon className="size-4 shrink-0 text-muted-foreground" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {/* สร้างออเดอร์จากข้อความนี้ = รอบถัดไป จงใจยังไม่ใส่ปุ่มหลอก */}
+        <p className="text-xs text-muted-foreground">&quot;สร้างออเดอร์จากข้อความนี้&quot; จะมาพร้อมระบบออเดอร์</p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ================================================================== */
+
+function TagPicker({
+  open,
+  onClose,
+  tags,
+  attached,
+  conversationId,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tags: Tag[];
+  attached: string[];
+  conversationId: string;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function toggle(tag: Tag) {
+    setBusy(tag.id);
+    try {
+      const result = await apiCall(`/api/conversations/${conversationId}/tags`, {
+        method: 'POST',
+        body: JSON.stringify({ tag_id: tag.id, attached: !attached.includes(tag.id) }),
+      });
+      if (result) onChanged();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>แท็กของแชทนี้</DialogTitle>
+          <DialogDescription>ใช้จัดกลุ่มแล้วกรองในลิสต์แชทได้</DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap gap-1.5 py-2">
+          {tags.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              ยังไม่มีแท็ก — สร้างได้ที่ ตั้งค่า → ชุดคำตอบ + แท็ก
+            </p>
+          )}
+          {tags.map((t) => {
+            const on = attached.includes(t.id);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                disabled={busy === t.id}
+                onClick={() => void toggle(t)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm',
+                  on ? 'text-primary-foreground' : 'text-muted-foreground',
+                )}
+                style={on ? { backgroundColor: t.color, borderColor: t.color } : { borderColor: t.color }}
+              >
+                {busy === t.id ? <Loader2 className="size-3 animate-spin" /> : null}
+                {t.name}
+              </button>
+            );
+          })}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>ปิด</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ================================================================== */
+
+/**
+ * ฟอร์มที่อยู่ (สเปกหัวข้อ 5.2)
+ * 🔴 ระบบดึงค่ามาให้ "กรอกล่วงหน้า" เท่านั้น แอดมินต้องตรวจแล้วกดบันทึกเอง
+ *    ไม่มีเส้นทางไหนที่ระบบเขียนทับข้อมูลลูกค้าเองโดยไม่ผ่านปุ่มนี้
+ */
+function ContactDialog({
+  conversationId,
+  source,
+  onClose,
+  onSaved,
+}: {
+  conversationId: string;
+  source: string | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  // เริ่มที่ "กำลังโหลด" ตั้งแต่ตอนสร้างคอมโพเนนต์
+  // (ผู้เรียกใส่ key ไว้ ทำให้สร้างใหม่ทุกครั้งที่เปิดข้อความคนละอัน)
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ recipient_name: '', phone: '', postcode: '', address: '' });
+  const [confidence, setConfidence] = useState<ExtractedAddress['confidence'] | null>(null);
+
+  useEffect(() => {
+    if (source === null) return;
+    let alive = true;
+
+    void apiCall<{
+      current: { recipient_name?: string | null; phone?: string | null; postcode?: string | null; address?: string | null };
+      extracted: ExtractedAddress | null;
+    }>(`/api/conversations/${conversationId}/contact?from=${encodeURIComponent(source)}`)
+      .then((d) => {
+        if (!alive) return;
+        const ex = d?.extracted;
+        const cur = d?.current ?? {};
+        // ค่าที่ดึงได้มาก่อน แต่ถ้าดึงไม่ได้ให้ใช้ของเดิมที่มีอยู่
+        setForm({
+          recipient_name: ex?.recipient_name ?? cur.recipient_name ?? '',
+          phone: ex?.phone ?? cur.phone ?? '',
+          postcode: ex?.postcode ?? cur.postcode ?? '',
+          address: ex?.address ?? cur.address ?? '',
+        });
+        setConfidence(ex?.confidence ?? null);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [conversationId, source]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const result = await apiCall(`/api/conversations/${conversationId}/contact`, {
+        method: 'PATCH',
+        body: JSON.stringify(form),
+      });
+      if (result) {
+        toast.success('บันทึกข้อมูลลูกค้าแล้ว');
+        onSaved();
+        onClose();
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = (key: keyof typeof form, label: string, placeholder: string) => (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={key}>{label}</Label>
+      <Input
+        id={key}
+        value={form[key]}
+        placeholder={placeholder}
+        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+      />
+    </div>
+  );
+
+  return (
+    <Dialog open={source !== null} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>ที่อยู่ผู้รับ</DialogTitle>
+          <DialogDescription>
+            ระบบดึงมาให้จากข้อความ — <strong>ตรวจให้ครบก่อนกดบันทึกทุกครั้ง</strong>
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex flex-col gap-3 py-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 py-2">
+            {confidence === 'low' && (
+              <Alert variant="warning" className="py-2">
+                <AlertDescription className="text-xs">
+                  ดึงข้อมูลได้น้อยมาก — น่าจะต้องพิมพ์เองเกือบทั้งหมด
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {field('recipient_name', 'ชื่อผู้รับ', 'คุณสมหญิง ใจดี')}
+            {field('phone', 'เบอร์โทร', '0812345678')}
+            {field('postcode', 'รหัสไปรษณีย์', '10240')}
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="address">ที่อยู่</Label>
+              <textarea
+                id="address"
+                rows={4}
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                className="w-full rounded-md border bg-transparent px-3 py-2 text-base outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                placeholder="123/45 หมู่ 6 ต.บางรัก อ.เมือง จ.สมุทรปราการ"
+              />
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>ยกเลิก</Button>
+          <Button onClick={() => void save()} disabled={saving || loading}>
+            {saving && <Loader2 className="animate-spin" />}
+            บันทึก
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

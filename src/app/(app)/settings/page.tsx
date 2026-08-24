@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Tags, Package } from 'lucide-react';
+import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can, ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -32,6 +32,13 @@ export default async function SettingsPage() {
       show: can(admin.role, 'admin.manage'),
     },
     {
+      href: '/settings/content',
+      icon: MessageSquareText,
+      title: 'ชุดคำตอบ + แท็ก',
+      description: 'ข้อความสำเร็จรูปที่เรียกด้วย / และแท็กไว้จัดกลุ่มแชท',
+      show: can(admin.role, 'content.view'),
+    },
+    {
       href: '/settings/activity',
       icon: ScrollText,
       title: 'ประวัติการใช้งาน',
@@ -41,9 +48,8 @@ export default async function SettingsPage() {
   ].filter((i) => i.show);
 
   const upcoming = [
-    { icon: MessageSquareText, title: 'ชุดคำตอบ + กฎคีย์เวิร์ด', round: 'รอบ 4' },
+    { icon: MessageSquareText, title: 'กฎคีย์เวิร์ดตอบอัตโนมัติ', round: 'รอบ 5' },
     { icon: Package, title: 'สินค้า / โปรโมชัน / ค่าส่ง', round: 'รอบ 5' },
-    { icon: Tags, title: 'แท็ก', round: 'รอบ 4' },
     { icon: Bell, title: 'แจ้งเตือน (PWA + Telegram)', round: 'รอบ 7' },
   ];
 
