@@ -69,6 +69,24 @@ const REFERRAL_LABEL: Record<string, string> = {
   ORGANIC: 'ทักเอง',
 };
 
+/**
+ * สร้างกุญแจกันส่งซ้ำ
+ * ⚠️ ห้ามเรียก crypto.randomUUID() ตรง ๆ
+ *    เบราว์เซอร์จะให้ใช้เฉพาะตอนเปิดผ่าน https หรือ localhost เท่านั้น
+ *    ถ้าแอดมินเปิดจากมือถือผ่านเลข IP ในวง LAN (http://192.168.x.x:3000)
+ *    ตัวนี้จะไม่มีอยู่ แล้วหน้าจอจะพังเงียบ ๆ ตั้งแต่ตอนเรนเดอร์
+ */
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    /* ตกไปใช้ทางสำรองด้านล่าง */
+  }
+  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 type PolicyStatus = {
   can_send: boolean;
   label_th: string;
@@ -361,7 +379,7 @@ function ChatRoom({
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   /** กุญแจกันส่งซ้ำของข้อความที่กำลังพิมพ์อยู่ */
-  const idempotencyKey = useRef<string>(crypto.randomUUID());
+  const idempotencyKey = useRef<string>(newIdempotencyKey());
 
   /* ---- ตัวดึงข้อมูล : คืนค่าอย่างเดียว ไม่ตั้ง state เอง ---- */
   const fetchMessages = useCallback(async (): Promise<MessageRow[] | null> => {
@@ -481,7 +499,7 @@ function ChatRoom({
       if (d.sent) {
         setText('');
         // กุญแจใหม่สำหรับข้อความถัดไป
-        idempotencyKey.current = crypto.randomUUID();
+        idempotencyKey.current = newIdempotencyKey();
         await loadMessages();
         onChanged();
       } else if (d.outcome_unknown) {
@@ -497,6 +515,16 @@ function ChatRoom({
         });
         await loadPolicy();
       }
+    } catch (err) {
+      // ⚠️ ก่อนหน้านี้ไม่มีตัวรับ error ตรงนี้
+      //    ถ้า fetch พัง หรือเซิร์ฟเวอร์ตอบมาไม่ใช่ JSON (เช่นหน้า error ของ Next)
+      //    ข้อผิดพลาดจะหายไปเงียบ ๆ แอดมินกดส่งแล้วเหมือนไม่มีอะไรเกิดขึ้นเลย
+      //    ซึ่งแย่กว่าการขึ้นข้อความว่าพังมาก
+      console.error('[inbox] ส่งข้อความไม่สำเร็จ:', err);
+      toast.error('ส่งข้อความไม่สำเร็จ', {
+        description: err instanceof Error ? err.message : 'ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง',
+        duration: 10_000,
+      });
     } finally {
       setSending(false);
     }

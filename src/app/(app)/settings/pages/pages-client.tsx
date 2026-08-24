@@ -50,18 +50,28 @@ export default function PagesClient({ initialPages }: { initialPages: SafePage[]
   const [processing, setProcessing] = useState(false);
 
   async function call(url: string, init: RequestInit, successMsg?: string) {
-    const res = await fetch(url, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
-      toast.error(json?.error?.message_th ?? 'ทำรายการไม่สำเร็จ');
+    try {
+      const res = await fetch(url, {
+        ...init,
+        headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        toast.error(json?.error?.message_th ?? 'ทำรายการไม่สำเร็จ');
+        return null;
+      }
+      if (successMsg) toast.success(successMsg);
+      startTransition(() => router.refresh());
+      return json.data;
+    } catch (err) {
+      // ⚠️ ต้องมีตัวรับ error เสมอ ไม่งั้นความผิดพลาดจะหายเงียบ ๆ
+      //    แล้วผู้ใช้จะกดปุ่มแล้วไม่เห็นอะไรเกิดขึ้นเลย
+      console.error('[pages] ทำรายการไม่สำเร็จ:', err);
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้', {
+        description: err instanceof Error ? err.message : undefined,
+      });
       return null;
     }
-    if (successMsg) toast.success(successMsg);
-    startTransition(() => router.refresh());
-    return json.data;
   }
 
   /** ทดสอบว่า token ใช้ได้จริงไหม */
