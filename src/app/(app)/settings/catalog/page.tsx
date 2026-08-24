@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can } from '@/lib/auth/permissions';
 import { listProducts, listPromotions } from '@/server/orders/service';
+import { listShippingMethods } from '@/server/orders/shipping';
 import CatalogClient from './catalog-client';
 
 /**
@@ -15,13 +16,18 @@ export default async function CatalogPage() {
   if (!result.ok) redirect('/login');
   if (!can(result.admin.role, 'content.view')) redirect('/inbox');
 
-  const [products, promotions] = await Promise.all([listProducts(), listPromotions()]);
+  const [products, promotions, shipping] = await Promise.all([
+    listProducts(),
+    listPromotions(),
+    listShippingMethods(),
+  ]);
 
   return (
     <CatalogClient
       canManage={can(result.admin.role, 'content.manage')}
       initialProducts={products}
       initialPromotions={promotions}
+      initialShipping={shipping}
     />
   );
 }

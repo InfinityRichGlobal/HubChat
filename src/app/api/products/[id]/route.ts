@@ -18,6 +18,8 @@ const schema = z.object({
   image_url: z.string().trim().max(500).optional().nullable(),
   sort_order: z.number().int().optional(),
   is_active: z.boolean().optional(),
+  /** true = เก็บเข้ากรุ (ใช้แทนการลบ — ออเดอร์เก่าต้องไม่ขาดที่อ้างอิง) */
+  archive: z.boolean().optional(),
 });
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {

@@ -185,3 +185,75 @@ export function isMetaConfigured(): boolean {
   const env = serverEnv();
   return Boolean(env.META_APP_ID && env.META_APP_SECRET);
 }
+
+/* ------------------------------------------------------------------------ */
+/* อัปโหลดไฟล์แนบ (รอบ 6)                                                     */
+/* ------------------------------------------------------------------------ */
+
+export type MetaUploadResult =
+  | { ok: true; attachment_id: string; http_status: number }
+  | { ok: false; error: MetaErrorInfo; http_status: number };
+
+/**
+ * อัปโหลดรูปไปเก็บไว้ที่ Meta แล้วได้ attachment_id ที่ใช้ซ้ำได้
+ *
+ * ⭐ ทำไมใช้วิธีนี้ ไม่ใช่ส่งเป็น URL :
+ *    การส่งรูปด้วย URL ต้องมีที่เก็บไฟล์ที่ Meta เข้าถึงได้จากอินเทอร์เน็ต
+ *    ซึ่งเรายังไม่มี (D-17 / Cloudflare R2 ยังไม่ได้ทำ)
+ *    แต่ Attachment Upload API รับ "ตัวไฟล์" ตรง ๆ ได้เลย
+ *    → ส่งรูปออกได้จริงตั้งแต่รอบนี้ โดยไม่ต้องรอ R2
+ *
+ * ⚠️ ข้อจำกัดที่ต้องรู้ และจดไว้ใน DEFERRED_REVIEW :
+ *    วิธีนี้ทำให้ "รูปที่แอดมินส่ง" ถูกเก็บไว้ที่ Meta ไม่ใช่ที่เรา
+ *    เราเก็บแค่ attachment_id ไว้อ้างอิง ถ้าวันหนึ่งอยากได้สำเนาของตัวเอง
+ *    (เช่น ทำรายงาน หรือย้ายระบบ) ยังต้องทำ R2 อยู่ดี
+ *
+ * ⚠️ ผลลัพธ์ที่ไม่รู้แน่ชัด (เน็ตขาดกลางทาง) ถือเป็น ambiguous เหมือนการส่งข้อความ
+ *    แต่กรณีนี้ปลอดภัยกว่ามาก เพราะการอัปโหลดซ้ำไม่ได้ทำให้ลูกค้าเห็นอะไรเลย
+ */
+export async function uploadAttachmentToMeta(
+  page: MetaPage,
+  file: { bytes: ArrayBuffer; mime: string; filename: string },
+): Promise<MetaUploadResult> {
+  const env = serverEnv();
+  const token = pageToken(page);
+  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${encodeURIComponent(page.page_id)}/message_attachments`;
+
+  const form = new FormData();
+  form.append(
+    'message',
+    JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }),
+  );
+  form.append('filedata', new Blob([file.bytes], { type: file.mime }), file.filename);
+
+  let res: Response;
+  try {
+    res = await fetcher()(url, {
+      method: 'POST',
+      // ⚠️ ห้ามตั้ง Content-Type เอง — ต้องให้ fetch ใส่ boundary ของ multipart ให้
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+      signal: AbortSignal.timeout(30_000), // ไฟล์ใหญ่กว่าข้อความ ให้เวลามากกว่า
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      http_status: 0,
+      error: classifyMetaError({ message: (err as Error).message }, 0, { networkFailure: true }),
+    };
+  }
+
+  const body = (await res.json().catch(() => null)) as
+    | { attachment_id?: string; error?: RawMetaError }
+    | null;
+
+  if (!res.ok || body?.error || !body?.attachment_id) {
+    return {
+      ok: false,
+      http_status: res.status,
+      error: classifyMetaError(body?.error ?? { message: 'Meta ไม่ได้คืน attachment_id กลับมา' }, res.status),
+    };
+  }
+
+  return { ok: true, attachment_id: body.attachment_id, http_status: res.status };
+}

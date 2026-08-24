@@ -2,8 +2,8 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/current-admin';
-import { ok, toErrorResponse } from '@/lib/api';
-import { createProduct, listProducts } from '@/server/orders/service';
+import { ok, fail, toErrorResponse } from '@/lib/api';
+import { createProduct, listProducts, CatalogError } from '@/server/orders/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     const product = await createProduct(schema.parse(await req.json()));
     return ok({ product }, { status: 201 });
   } catch (err) {
+    if (err instanceof CatalogError) return fail('invalid_product', err.message, 422);
     return toErrorResponse(err);
   }
 }

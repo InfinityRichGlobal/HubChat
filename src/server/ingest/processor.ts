@@ -16,6 +16,7 @@ import { fetchCustomerProfile } from '@/server/meta/profile';
 import type { MetaPage } from '@/server/meta/client';
 import type { Platform } from '@/types/db';
 import { parseWebhookPayload } from './parse';
+import { runAutoReply } from '@/server/autoreply/runner';
 import { claimJobs, finishJob, nextStatusAfterFailure, type QueueJob } from './queue';
 import type { EchoMessageEvent, InboundMessageEvent } from './types';
 
@@ -28,6 +29,10 @@ export type ProcessSummary = {
   ignored: number;
   unknown_page: number;
   failed_jobs: number;
+  /** ตอบอัตโนมัติสำเร็จกี่ครั้ง (รอบ 6) */
+  auto_replied: number;
+  /** เข้าเงื่อนไขแต่ Policy Engine ไม่อนุญาต */
+  auto_blocked: number;
 };
 
 const EMPTY_SUMMARY: ProcessSummary = {
@@ -38,6 +43,8 @@ const EMPTY_SUMMARY: ProcessSummary = {
   ignored: 0,
   unknown_page: 0,
   failed_jobs: 0,
+  auto_replied: 0,
+  auto_blocked: 0,
 };
 
 /** ความผิดที่ลองใหม่ไปก็ไม่มีวันหาย */
@@ -174,6 +181,45 @@ async function syncProfileIfNeeded(page: PageRow, customerId: string, psid: stri
 }
 
 /* ------------------------------------------------------------------------ */
+/* ตอบอัตโนมัติด้วยคีย์เวิร์ด (รอบ 6)                                           */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * เรียกตัวตอบอัตโนมัติสำหรับข้อความขาเข้าที่ "ใหม่จริง" เท่านั้น
+ *
+ * 🔴 เงื่อนไขที่ต้องครบก่อนถึงจะพิจารณาตอบ :
+ *    • ต้องเป็นข้อความขาเข้า (ไม่ใช่ echo จากที่แอดมินตอบใน Business Suite)
+ *    • ต้องไม่ใช่ข้อความซ้ำ — ตรวจไปแล้วที่ชั้นบน (row.duplicate)
+ *    • ต้องมี message_id จริง เพราะเป็นกุญแจกันตอบซ้ำ
+ *
+ * ⚠️ ห่อด้วย try/catch เสมอ
+ *    ถ้าตัวตอบอัตโนมัติพัง ต้องไม่ทำให้ข้อความของลูกค้าหายจากอินบ็อกซ์
+ *    ข้อความของลูกค้าสำคัญกว่าคำตอบอัตโนมัติเสมอ
+ */
+async function maybeAutoReply(
+  page: PageRow,
+  row: IngestRow,
+  ev: InboundMessageEvent,
+  summary: ProcessSummary,
+): Promise<void> {
+  if (!row.message_id) return;
+
+  try {
+    const outcome = await runAutoReply({
+      message_id: row.message_id,
+      conversation_id: row.conversation_id,
+      page_id: page.id,
+      text: ev.text,
+    });
+
+    if (outcome.kind === 'sent') summary.auto_replied += 1;
+    else if (outcome.kind === 'blocked') summary.auto_blocked += 1;
+  } catch (err) {
+    console.error('[ingest] ตอบอัตโนมัติล้มเหลว (ข้ามไป ข้อความลูกค้ายังอยู่ครบ):', err);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
 /* ทำงานหนึ่งชิ้น                                                              */
 /* ------------------------------------------------------------------------ */
 
@@ -212,6 +258,7 @@ async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary):
     if (ev.kind === 'inbound_message') {
       summary.inbound_saved += 1;
       await syncProfileIfNeeded(page, row.customer_id, ev.psid);
+      await maybeAutoReply(page, row, ev, summary);
     } else {
       summary.echo_saved += 1;
     }
@@ -265,6 +312,8 @@ export async function drainWebhookQueue(maxRounds = 50, limit = 20): Promise<Pro
     total.ignored += round.ignored;
     total.unknown_page += round.unknown_page;
     total.failed_jobs += round.failed_jobs;
+    total.auto_replied += round.auto_replied;
+    total.auto_blocked += round.auto_blocked;
     if (round.jobs === 0) break;
   }
   return total;

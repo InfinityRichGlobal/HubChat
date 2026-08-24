@@ -1,0 +1,30 @@
+# ============================================================================
+#  HubChat — ตัวอย่างไฟล์ตั้งค่า Cloudflare Named Tunnel
+#
+#  วิธีใช้ :  cp tunnel/config.example.yml tunnel/config.yml
+#            แล้วแก้ 3 บรรทัดที่มีคำว่า "แก้ตรงนี้"
+#
+#  🔴 ห้าม commit tunnel/config.yml และไฟล์ .json ของ credential เด็ดขาด
+#     (.gitignore กันไว้ให้แล้ว แต่ให้รู้ไว้ด้วย)
+#
+#  ทำไมต้องใช้ Named Tunnel แทน Quick Tunnel :
+#    Quick Tunnel (cloudflared tunnel --url ...) สุ่มชื่อใหม่ทุกครั้งที่เปิด
+#    แปลว่าต้องเข้าไปแก้ Callback URL ที่ Meta ทุกครั้ง ซึ่งเสียเวลามาก
+#    และเสี่ยงลืมแก้แล้วนึกว่าระบบพัง
+#    Named Tunnel ผูกกับชื่อโดเมนของเราถาวร — ตั้งครั้งเดียวจบ
+# ============================================================================
+
+# แก้ตรงนี้ : รหัสอุโมงค์ที่ได้จากคำสั่ง `cloudflared tunnel create hubchat`
+tunnel: PUT-YOUR-TUNNEL-ID-HERE
+
+# แก้ตรงนี้ : ที่อยู่ไฟล์ credential ที่คำสั่งข้างบนสร้างให้
+#             (ปกติอยู่ที่ ~/.cloudflared/<TUNNEL-ID>.json)
+credentials-file: /Users/YOUR-NAME/.cloudflared/PUT-YOUR-TUNNEL-ID-HERE.json
+
+ingress:
+  # แก้ตรงนี้ : ชื่อโดเมนย่อยที่คุณเป็นเจ้าของใน Cloudflare
+  - hostname: hubchat.example.com
+    service: http://localhost:3000
+
+  # กฎปิดท้าย — จำเป็นเสมอ ห้ามลบ
+  - service: http_status:404

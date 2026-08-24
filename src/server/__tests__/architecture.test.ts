@@ -616,3 +616,130 @@ describe('🔴 ตัวเลขที่ใช้วัดผลต้อง�
     expect(src).not.toMatch(/p_patch:\s*await\s/);
   });
 });
+
+/* ================================================================== */
+/* รอบ 6 — ตอบอัตโนมัติด้วยคีย์เวิร์ด                                     */
+/* ================================================================== */
+describe('🔴 การตอบอัตโนมัติต้องเดินตามทางเดินกลางเสมอ', () => {
+  const autoFiles = CODE_FILES.filter((f) => rel(f).startsWith('server/autoreply/'));
+
+  it('มีไฟล์ในโฟลเดอร์ autoreply ให้ตรวจจริง', () => {
+    expect(autoFiles.length).toBeGreaterThan(0);
+  });
+
+  it('🔴 ตอบอัตโนมัติห้ามแตะ Meta client / transport adapter เลย', () => {
+    // ถ้าเปิดทางไว้ วันหนึ่งจะมีคน "แก้ให้ส่งได้" ด้วยการยิงตรง
+    // ซึ่งข้ามการตรวจกรอบ 24 ชม. ทั้งหมด = เพจโดนระงับ
+    const offenders = autoFiles
+      .filter((f) => /@\/server\/meta\/|@\/server\/transports\//.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('🔴 ตอบอัตโนมัติต้องใช้ตราประทับของบอทเท่านั้น ห้ามใช้ของคน', () => {
+    const runner = CODE_FILES.find((f) => rel(f) === 'server/autoreply/runner.ts');
+    expect(runner, 'ไม่พบ server/autoreply/runner.ts').toBeDefined();
+    const src = read(runner!);
+    expect(src).toContain('keywordBotProvenance');
+    // humanAdminReply อ่าน session ของแอดมิน — งานเบื้องหลังต้องไม่แตะเด็ดขาด
+    expect(src).not.toContain('humanAdminReply');
+    expect(src).not.toMatch(/human_authored/);
+  });
+
+  it('🔴 ตัวจับคีย์เวิร์ดต้องเป็นฟังก์ชันบริสุทธิ์', () => {
+    const matcher = CODE_FILES.find((f) => rel(f) === 'server/autoreply/matcher.ts');
+    expect(matcher, 'ไม่พบ server/autoreply/matcher.ts').toBeDefined();
+    const src = read(matcher!);
+    expect(src).not.toMatch(/supabase|db\(\)|fetch\(|Date\.now\(\)|new Date\(\)/);
+  });
+
+  it('🔴 ห้ามใช้ regex ที่แอดมินกำหนดเอง (ช่อง ReDoS)', () => {
+    // แอดมินใส่ pattern อย่าง (a+)+$ ได้เมื่อไหร่ เซิร์ฟเวอร์ค้างได้ด้วยข้อความสั้น ๆ
+    const offenders = autoFiles
+      .filter((f) => /new RegExp\(/.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('🔴 ต้องจองสิทธิ์กับฐานข้อมูลก่อนส่งเสมอ', () => {
+    const runner = CODE_FILES.find((f) => rel(f) === 'server/autoreply/runner.ts');
+    const src = read(runner!);
+    const claimAt = src.indexOf('claim_auto_reply');
+    const sendAt = src.indexOf('sendMessage(');
+    expect(claimAt, 'ไม่พบการจองสิทธิ์').toBeGreaterThan(-1);
+    expect(sendAt, 'ไม่พบการส่ง').toBeGreaterThan(-1);
+    // จองต้องมาก่อนส่ง ไม่งั้น worker สองตัวจะตอบซ้ำ
+    expect(claimAt).toBeLessThan(sendAt);
+  });
+
+  it('🔴 ผลลัพธ์ "ไม่ทราบผล" ต้องไม่ถูกลองใหม่อัตโนมัติ', () => {
+    const runner = CODE_FILES.find((f) => rel(f) === 'server/autoreply/runner.ts');
+    const src = read(runner!);
+    expect(src).toContain('outcome_unknown');
+    // งานอัตโนมัติต้องยิงรอบเดียว — ลองซ้ำ = เสี่ยงลูกค้าได้ข้อความสองครั้ง
+    expect(src).toMatch(/maxRetries:\s*1/);
+  });
+
+  it('API ของกฎห้ามเรียก sendMessage (ตั้งกฎ ≠ ส่งข้อความ)', () => {
+    const apis = CODE_FILES.filter((f) => rel(f).startsWith('app/api/autoreply/'));
+    expect(apis.length).toBeGreaterThan(0);
+    const offenders = apis.filter((f) => /sendMessage|runAutoReply/.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 การส่งรูปต้องเดินเส้นทางเดียวกับข้อความ', () => {
+  it('ชั้นส่งรูปต้องเรียก sendMessage() ไม่ใช่ยิง Meta เอง', () => {
+    const file = CODE_FILES.find((f) => rel(f) === 'server/messaging/send-image.ts');
+    expect(file, 'ไม่พบ server/messaging/send-image.ts').toBeDefined();
+    const src = read(file!);
+    expect(src).toContain('sendMessage(');
+    expect(src).not.toContain('sendToMeta');
+    expect(src).not.toContain('graph.facebook.com');
+  });
+
+  it('route ส่งรูปต้องไม่รับ transport / tag / psid จากเบราว์เซอร์', () => {
+    const file = CODE_FILES.find((f) => rel(f) === 'app/api/conversations/[id]/reply-image/route.ts');
+    expect(file, 'ไม่พบ route ส่งรูป').toBeDefined();
+    const src = read(file!);
+    expect(src).not.toMatch(/transport\s*:/);
+    expect(src).not.toMatch(/message_tag|messaging_type/);
+    expect(src).not.toMatch(/psid/);
+    // ตัวตนผู้ส่งต้องมาจาก session เท่านั้น
+    expect(src).toContain('humanAdminReply');
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ข้อมูลที่ทำให้ออเดอร์เก่าเพี้ยน ต้องปลอมจากหน้าเว็บไม่ได้', () => {
+  it('สำเนาวิธีจัดส่งต้องไม่อยู่ในฟิลด์ที่แก้ได้จากหน้าเว็บ', () => {
+    const service = CODE_FILES.find((f) => rel(f) === 'server/orders/service.ts');
+    const src = read(service!);
+    const start = src.indexOf('export type OrderPatch');
+    expect(start).toBeGreaterThan(-1);
+    const patchBlock = src.slice(start, src.indexOf('}>;', start));
+    // ถ้ารับได้ จะปลอมค่าส่ง/สิทธิ์ COD ของออเดอร์เก่าได้ทันที
+    expect(patchBlock).not.toContain('shipping_snapshot');
+    expect(patchBlock).not.toContain('order_no');
+    expect(patchBlock).not.toContain('created_by_admin_id');
+  });
+
+  it('กฎ COD ต้องบังคับในฐานข้อมูล ไม่ใช่แค่ฝั่งหน้าเว็บ', () => {
+    const migrations = readdirSync(path.resolve(SRC, '../supabase/migrations'))
+      .filter((f) => f.endsWith('.sql'))
+      .map((f) => readFileSync(path.resolve(SRC, '../supabase/migrations', f), 'utf8'))
+      .join('\n');
+    expect(migrations).toContain('cod_supported');
+    expect(migrations).toMatch(/ไม่รองรับเก็บเงินปลายทาง/);
+  });
+
+  it('การกันตอบซ้ำต้องมาจาก unique index ของฐานข้อมูล', () => {
+    const migrations = readdirSync(path.resolve(SRC, '../supabase/migrations'))
+      .filter((f) => f.endsWith('.sql'))
+      .map((f) => readFileSync(path.resolve(SRC, '../supabase/migrations', f), 'utf8'))
+      .join('\n');
+    // ถ้าไม่มีบรรทัดนี้ การกันซ้ำจะเหลือแค่จังหวะของ JavaScript ซึ่งกันไม่ได้จริง
+    expect(migrations).toMatch(/create unique index[^;]*auto_reply_executions \(message_id\)/);
+  });
+});

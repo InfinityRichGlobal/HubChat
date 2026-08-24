@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ClipboardCopy, Loader2, MessageSquare, PackageSearch, Search } from 'lucide-react';
+import { ClipboardCopy, Loader2, MessageSquare, PackageSearch, Search, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -88,6 +88,7 @@ export default function OrdersClient({
   const [orders, setOrders] = useState(initialOrders);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>('all');
+  const [payment, setPayment] = useState<string>('all');
   const [pageId, setPageId] = useState<string>('all');
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -97,6 +98,7 @@ export default function OrdersClient({
     const params = new URLSearchParams();
     if (search.trim()) params.set('search', search.trim());
     if (status !== 'all') params.set('status', status);
+    if (payment !== 'all') params.set('payment_status', payment);
     if (pageId !== 'all') params.set('page_id', pageId);
     try {
       const res = await fetch(`/api/orders?${params.toString()}`, { cache: 'no-store' });
@@ -105,7 +107,7 @@ export default function OrdersClient({
     } catch {
       return null;
     }
-  }, [search, status, pageId]);
+  }, [search, status, payment, pageId]);
 
   const reload = useCallback(async () => {
     const rows = await fetchOrders();
@@ -158,6 +160,16 @@ export default function OrdersClient({
             <SelectItem value="all">ทุกสถานะ</SelectItem>
             {(Object.keys(STATUS_LABEL) as OrderStatus[]).map((s) => (
               <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={payment} onValueChange={setPayment}>
+          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">ทุกการจ่ายเงิน</SelectItem>
+            {(Object.keys(PAYMENT_LABEL) as PaymentStatus[]).map((s) => (
+              <SelectItem key={s} value={s}>{PAYMENT_LABEL[s]}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -215,6 +227,14 @@ export default function OrdersClient({
                   <div className="truncate text-xs text-muted-foreground">
                     {o.items.map((i) => `${i.variant || i.name}×${i.qty}`).join(', ') || '—'}
                   </div>
+                  {(o.shipping_snapshot?.name || o.tracking_no) && (
+                    <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+                      <Truck className="size-3 shrink-0" />
+                      {o.shipping_snapshot?.name ?? o.shipping_carrier ?? '—'}
+                      {o.payment_method === 'cod' ? ' · เก็บปลายทาง' : ''}
+                      {o.tracking_no ? ` · ${o.tracking_no}` : ''}
+                    </div>
+                  )}
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="text-sm font-semibold">{baht(o.total)}</div>

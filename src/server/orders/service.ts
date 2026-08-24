@@ -17,6 +17,9 @@ import type { Promotion } from './pricing';
 
 export class OrderAccessError extends Error {}
 
+/** ข้อมูลที่แอดมินกรอกไม่ผ่านกฎ (ไม่ใช่เรื่องสิทธิ์ และไม่ใช่ระบบพัง) */
+export class CatalogError extends Error {}
+
 /* ------------------------------------------------------------------------ */
 /* สินค้า                                                                     */
 /* ------------------------------------------------------------------------ */
@@ -36,7 +39,9 @@ export type Product = {
 const PRODUCT_COLUMNS = 'id,name,sku,variant,price,image_url,is_active,sort_order';
 
 export async function listProducts(activeOnly = false): Promise<Product[]> {
-  let q = db().from('products').select(PRODUCT_COLUMNS).order('sort_order').limit(300);
+  // ⭐ สินค้าที่เก็บเข้ากรุแล้วต้องไม่โผล่ที่ไหนอีก แม้ในหน้าตั้งค่า
+  //    (ยังอยู่ในฐานข้อมูลเพื่อไม่ให้ออเดอร์เก่าขาดที่อ้างอิง)
+  let q = db().from('products').select(PRODUCT_COLUMNS).is('archived_at', null).order('sort_order').limit(300);
   if (activeOnly) q = q.eq('is_active', true);
   const { data, error } = await q;
   if (error) throw new Error(`อ่านรายการสินค้าไม่สำเร็จ: ${error.message}`);
@@ -67,12 +72,19 @@ export async function createProduct(input: ProductInput): Promise<Product> {
     })
     .select(PRODUCT_COLUMNS)
     .single();
-  if (error) throw new Error(`บันทึกสินค้าไม่สำเร็จ: ${error.message}`);
+  if (error) {
+    // 23505 = sku ซ้ำ (unique index เฉพาะสินค้าที่ยังไม่เก็บเข้ากรุ)
+    if (error.code === '23505') throw new CatalogError('รหัสสินค้า (SKU) นี้ถูกใช้ไปแล้ว');
+    throw new Error(`บันทึกสินค้าไม่สำเร็จ: ${error.message}`);
+  }
   return data as unknown as Product;
 }
 
-export async function updateProduct(id: string, input: Partial<ProductInput>): Promise<Product | null> {
-  const patch: Record<string, unknown> = {};
+export async function updateProduct(
+  id: string,
+  input: Partial<ProductInput> & { archive?: boolean },
+): Promise<Product | null> {
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.name !== undefined) patch.name = input.name.trim();
   if (input.variant !== undefined) patch.variant = input.variant?.trim() || null;
   if (input.sku !== undefined) patch.sku = input.sku?.trim() || null;
@@ -80,7 +92,14 @@ export async function updateProduct(id: string, input: Partial<ProductInput>): P
   if (input.image_url !== undefined) patch.image_url = input.image_url?.trim() || null;
   if (input.sort_order !== undefined) patch.sort_order = input.sort_order;
   if (input.is_active !== undefined) patch.is_active = input.is_active;
-  if (Object.keys(patch).length === 0) return null;
+
+  // ⭐ เก็บเข้ากรุแทนการลบ — ออเดอร์เก่าต้องยังตามรอยกลับมาได้
+  //    ปิดใช้งานไปพร้อมกันเสมอ ไม่งั้นจะยังโผล่ในจุดเลือกขาย
+  if (input.archive) {
+    patch.archived_at = new Date().toISOString();
+    patch.is_active = false;
+  }
+  if (Object.keys(patch).length <= 1) return null;
 
   const { data, error } = await db()
     .from('products')
@@ -101,7 +120,7 @@ const PROMO_COLUMNS = 'id,name,type,config,price,is_active,sort_order';
 export type PromotionRow = Promotion & { is_active: boolean; sort_order: number };
 
 export async function listPromotions(activeOnly = false): Promise<PromotionRow[]> {
-  let q = db().from('promotions').select(PROMO_COLUMNS).order('sort_order').limit(100);
+  let q = db().from('promotions').select(PROMO_COLUMNS).is('archived_at', null).order('sort_order').limit(100);
   if (activeOnly) q = q.eq('is_active', true);
   const { data, error } = await q;
   if (error) throw new Error(`อ่านรายการโปรโมชันไม่สำเร็จ: ${error.message}`);
@@ -138,15 +157,22 @@ export async function createPromotion(input: PromotionInput): Promise<PromotionR
   return data as unknown as PromotionRow;
 }
 
-export async function updatePromotion(id: string, input: Partial<PromotionInput>): Promise<PromotionRow | null> {
-  const patch: Record<string, unknown> = {};
+export async function updatePromotion(
+  id: string,
+  input: Partial<PromotionInput> & { archive?: boolean },
+): Promise<PromotionRow | null> {
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.name !== undefined) patch.name = input.name.trim();
   if (input.type !== undefined) patch.type = input.type;
   if (input.config !== undefined) patch.config = input.config;
   if (input.price !== undefined) patch.price = input.price;
   if (input.sort_order !== undefined) patch.sort_order = input.sort_order;
   if (input.is_active !== undefined) patch.is_active = input.is_active;
-  if (Object.keys(patch).length === 0) return null;
+  if (input.archive) {
+    patch.archived_at = new Date().toISOString();
+    patch.is_active = false;
+  }
+  if (Object.keys(patch).length <= 1) return null;
 
   const { data, error } = await db()
     .from('promotions')
@@ -181,18 +207,23 @@ export type OrderRow = {
   payment_status: PaymentStatus;
   slip_url: string | null;
   shipping_carrier: string | null;
+  shipping_method_id: string | null;
+  /** สำเนาวิธีจัดส่ง ณ ตอนสร้าง — ออเดอร์เก่าต้องไม่เปลี่ยนตามค่าส่งที่แก้ทีหลัง */
+  shipping_snapshot: { id?: string; name?: string; fee?: number; cod_supported?: boolean } | null;
   tracking_no: string | null;
   status: OrderStatus;
   referral_ad_id: string | null;
   internal_note: string | null;
   created_by_admin_id: string | null;
   created_at: string;
+  updated_at: string | null;
 };
 
 const ORDER_COLUMNS =
   'id,order_no,conversation_id,customer_id,page_id,recipient_name,phone,address,postcode,' +
   'items,subtotal,shipping_fee,discount,total,payment_method,payment_status,slip_url,' +
-  'shipping_carrier,tracking_no,status,referral_ad_id,internal_note,created_by_admin_id,created_at';
+  'shipping_carrier,shipping_method_id,shipping_snapshot,tracking_no,status,referral_ad_id,' +
+  'internal_note,created_by_admin_id,created_at,updated_at';
 
 /** เพจที่แอดมินคนนี้เห็นได้ — ใช้กรองออเดอร์ */
 async function visiblePageIds(admin: PublicAdmin): Promise<string[]> {
@@ -206,6 +237,8 @@ export type OrderFilters = {
   status?: OrderStatus;
   page_id?: string;
   payment_method?: PaymentMethod;
+  payment_status?: PaymentStatus;
+  shipping_method_id?: string;
   admin_id?: string;
   search?: string;
   limit?: number;
@@ -224,6 +257,8 @@ export async function listOrders(admin: PublicAdmin, filters: OrderFilters = {})
 
   if (filters.status) query = query.eq('status', filters.status);
   if (filters.payment_method) query = query.eq('payment_method', filters.payment_method);
+  if (filters.payment_status) query = query.eq('payment_status', filters.payment_status);
+  if (filters.shipping_method_id) query = query.eq('shipping_method_id', filters.shipping_method_id);
   if (filters.admin_id) query = query.eq('created_by_admin_id', filters.admin_id);
 
   const term = filters.search?.trim();
@@ -246,6 +281,10 @@ function normalise(rows: OrderRow[]): OrderRow[] {
     shipping_fee: Number(o.shipping_fee),
     discount: Number(o.discount),
     total: Number(o.total),
+    shipping_snapshot:
+      o.shipping_snapshot && typeof o.shipping_snapshot === 'object' && Object.keys(o.shipping_snapshot).length > 0
+        ? o.shipping_snapshot
+        : null,
   }));
 }
 
@@ -274,6 +313,7 @@ export type CreateOrderInput = {
   total: number;
   payment_method?: PaymentMethod | null;
   internal_note?: string | null;
+  shipping_method_id?: string | null;
 };
 
 export async function createOrder(admin: PublicAdmin, input: CreateOrderInput): Promise<OrderRow> {
@@ -303,6 +343,7 @@ export async function createOrder(admin: PublicAdmin, input: CreateOrderInput): 
     p_total: input.total,
     p_payment_method: input.payment_method ?? null,
     p_internal_note: input.internal_note ?? null,
+    p_shipping_method_id: input.shipping_method_id ?? null,
   });
   if (error) throw new Error(`สร้างออเดอร์ไม่สำเร็จ: ${error.message}`);
 
@@ -325,6 +366,13 @@ export type OrderPatch = Partial<{
   payment_status: PaymentStatus;
   slip_url: string | null;
   shipping_carrier: string | null;
+  /**
+   * เปลี่ยนวิธีจัดส่งได้ แต่ "สำเนา" ของวิธีจัดส่งเปลี่ยนเองไม่ได้
+   * 🔴 shipping_snapshot ไม่อยู่ในรายการนี้โดยตั้งใจ —
+   *    ฐานข้อมูลเป็นคนหยิบสำเนามาให้เมื่อ shipping_method_id เปลี่ยน
+   *    ถ้ารับจากผู้เรียกได้ จะปลอมค่าส่ง/สิทธิ์เก็บเงินปลายทางของออเดอร์เก่าได้ทันที
+   */
+  shipping_method_id: string | null;
   tracking_no: string | null;
   status: OrderStatus;
   internal_note: string | null;

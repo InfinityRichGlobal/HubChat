@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { listProducts, listPromotions } from '@/server/orders/service';
+import { getShippingMethod, codCombinationProblem } from '@/server/orders/shipping';
 import { calculateOrder, PricingError, type PickedProduct } from '@/server/orders/pricing';
 
 export const runtime = 'nodejs';
@@ -22,7 +23,9 @@ export const dynamic = 'force-dynamic';
 const schema = z.object({
   promotion_id: z.string().uuid().optional().nullable(),
   product_ids: z.array(z.string().uuid()).max(50),
+  shipping_method_id: z.string().uuid().optional().nullable(),
   shipping_fee: z.number().min(0).max(100000).optional(),
+  payment_method: z.enum(['cod', 'transfer']).optional().nullable(),
   extra_discount: z.number().min(0).max(1000000).optional(),
   manual_total: z.number().min(0).max(10000000).optional().nullable(),
 });
@@ -47,10 +50,19 @@ export async function POST(req: NextRequest) {
       return fail('unknown_promotion', 'ไม่พบโปรโมชันนี้ — รีเฟรชหน้าแล้วลองใหม่', 422);
     }
 
+    const shippingMethod = body.shipping_method_id ? await getShippingMethod(body.shipping_method_id) : null;
+    if (body.shipping_method_id && !shippingMethod) {
+      return fail('unknown_shipping', 'ไม่พบวิธีจัดส่งนี้ — รีเฟรชหน้าแล้วลองใหม่', 422);
+    }
+
+    // แจ้งเตือนคู่ที่เป็นไปไม่ได้ตั้งแต่ตอนดูราคา จะได้ไม่ต้องกรอกจนจบแล้วค่อยเด้ง
+    const codProblem = codCombinationProblem(body.payment_method, shippingMethod);
+    if (codProblem) return fail('cod_not_supported', codProblem, 422);
+
     const price = calculateOrder({
       promotion,
       picked,
-      shipping_fee: body.shipping_fee,
+      shipping_fee: body.shipping_fee ?? shippingMethod?.fee ?? 0,
       extra_discount: body.extra_discount,
       manual_total: body.manual_total,
     });

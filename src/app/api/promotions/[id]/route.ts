@@ -17,6 +17,8 @@ const schema = z.object({
   price: z.number().min(0).max(1000000).optional().nullable(),
   sort_order: z.number().int().optional(),
   is_active: z.boolean().optional(),
+  /** true = เก็บเข้ากรุ (ใช้แทนการลบ — ออเดอร์เก่าต้องไม่ขาดที่อ้างอิง) */
+  archive: z.boolean().optional(),
 });
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {

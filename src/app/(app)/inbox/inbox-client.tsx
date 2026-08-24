@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ClipboardCopy, Copy, Loader2, Lock, MapPin, MessageSquareOff,
-  Megaphone, Quote, Search, Send, ShoppingCart, Tag as TagIcon, X,
+  Megaphone, Paperclip, Quote, Search, Send, ShoppingCart, Tag as TagIcon, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
 import { Button } from '@/components/ui/button';
@@ -114,6 +114,15 @@ async function copyText(text: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * ข้อจำกัดของไฟล์แนบ
+ * ⚠️ ค่าพวกนี้ต้องตรงกับ src/server/messaging/send-image.ts
+ *    ที่นี่มีไว้เพื่อบอกผู้ใช้ทันทีโดยไม่ต้องอัปโหลดขึ้นไปก่อน
+ *    ตัวที่บังคับจริงอยู่ฝั่งเซิร์ฟเวอร์เสมอ
+ */
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 type PolicyStatus = {
   can_send: boolean;
@@ -491,6 +500,10 @@ function ChatRoom({
   const [tagsOpen, setTagsOpen] = useState(false);
   const [contactSource, setContactSource] = useState<string | null>(null);
   const [orderOpen, setOrderOpen] = useState(false);
+  /** รูปที่เลือกไว้แต่ยังไม่ได้ส่ง — ต้องกดส่งเองเสมอ */
+  const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   /** กด Escape เพื่อซ่อนรายการชุดคำตอบชั่วคราวโดยไม่ต้องลบข้อความที่พิมพ์ไว้ */
   const [dismissedCanned, setDismissedCanned] = useState(false);
@@ -622,6 +635,83 @@ function ChatRoom({
     setText((prev) => `${body}\n${prev}`);
     setMenuFor(null);
     inputRef.current?.focus();
+  }
+
+  /** เลือกรูป — ตรวจตั้งแต่บนจอ เพื่อบอกปัญหาทันทีโดยไม่ต้องรอเซิร์ฟเวอร์ */
+  function pickImage(file: File | null) {
+    if (!file) return;
+    if (!ALLOWED_IMAGE_MIMES.includes(file.type)) {
+      toast.error('รองรับเฉพาะรูปภาพ (JPG / PNG / GIF / WEBP)');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error(`ไฟล์ใหญ่เกินไป (สูงสุด ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)} MB)`);
+      return;
+    }
+    // ⚠️ เก็บ object URL ไว้เพื่อคืนหน่วยความจำตอนลบ/ส่งเสร็จ
+    setPendingImage((prev) => {
+      if (prev) URL.revokeObjectURL(prev.preview);
+      return { file, preview: URL.createObjectURL(file) };
+    });
+  }
+
+  function clearImage() {
+    setPendingImage((prev) => {
+      if (prev) URL.revokeObjectURL(prev.preview);
+      return null;
+    });
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  /**
+   * ส่งรูป — เดินเส้นทางเดียวกับข้อความทุกประการ
+   * 🔴 ไม่มีการยิง Meta ตรงจากหน้านี้ ทุกอย่างผ่าน API route → Policy Engine
+   */
+  async function sendImage() {
+    const pending = pendingImage;
+    if (!pending || uploading) return;
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append('file', pending.file);
+      body.append('idempotency_key', idempotencyKey.current);
+
+      const res = await fetch(`/api/conversations/${c.id}/reply-image`, { method: 'POST', body });
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        toast.error(json?.error?.message_th ?? 'ส่งรูปไม่สำเร็จ');
+        return;
+      }
+
+      const d = json.data as { sent: boolean; outcome_unknown: boolean; reason_th: string; alternatives_th: string[] };
+
+      if (d.sent) {
+        clearImage();
+        idempotencyKey.current = newIdempotencyKey();
+        await loadMessages();
+        onChanged();
+      } else if (d.outcome_unknown) {
+        // ⚠️ เหมือนข้อความ : ยิงไปแล้วไม่รู้ผล ห้ามบอกให้กดซ้ำ
+        toast.warning('ไม่ทราบผลการส่ง', {
+          description: 'รูปอาจถึงลูกค้าแล้ว ให้เปิดดูในแอป Messenger ก่อนตัดสินใจส่งใหม่',
+          duration: 12_000,
+        });
+      } else {
+        toast.error(d.reason_th, {
+          description: d.alternatives_th.length > 0 ? d.alternatives_th.join(' · ') : undefined,
+          duration: 10_000,
+        });
+        await loadPolicy();
+      }
+    } catch (err) {
+      console.error('[inbox] ส่งรูปไม่สำเร็จ:', err);
+      toast.error('ส่งรูปไม่สำเร็จ', {
+        description: err instanceof Error ? err.message : 'ติดต่อเซิร์ฟเวอร์ไม่ได้',
+      });
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function send() {
@@ -781,12 +871,54 @@ function ChatRoom({
           </div>
         )}
 
+        {/* ---------- รูปที่เลือกไว้ (ยังไม่ส่ง) ---------- */}
+        {canReply && pendingImage && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={pendingImage.preview}
+              alt="รูปที่จะส่ง"
+              className="size-14 shrink-0 rounded object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium">{pendingImage.file.name}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {(pendingImage.file.size / 1024 / 1024).toFixed(2)} MB
+              </p>
+            </div>
+            <Button size="sm" onClick={() => void sendImage()} disabled={uploading}>
+              {uploading ? <Loader2 className="animate-spin" /> : <Send />}
+              ส่งรูป
+            </Button>
+            <Button size="icon" variant="ghost" aria-label="เอารูปออก" onClick={clearImage} disabled={uploading}>
+              <X />
+            </Button>
+          </div>
+        )}
+
         {!canReply ? (
           <p className="py-2 text-center text-xs text-muted-foreground">
             บัญชีของคุณดูได้อย่างเดียว ตอบแชทไม่ได้
           </p>
         ) : (
           <div className="flex items-end gap-2">
+            {/* ⭐ แนบรูป — เลือกแล้วยังไม่ส่ง ต้องกดส่งเองเสมอ */}
+            <input
+              ref={fileRef}
+              type="file"
+              accept={ALLOWED_IMAGE_MIMES.join(',')}
+              className="hidden"
+              onChange={(e) => pickImage(e.target.files?.[0] ?? null)}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="แนบรูป"
+              disabled={sending || uploading}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Paperclip />
+            </Button>
             <Input
               ref={inputRef}
               value={text}
@@ -917,11 +1049,43 @@ function MessageBubble({
       >
         {m.text && <p className="whitespace-pre-wrap">{m.text}</p>}
 
-        {m.attachments.map((a, i) => (
-          <span key={i} className="mt-1 block text-xs opacity-80">
-            {a.url ? `ไฟล์แนบ (${a.type}) — แตะเพื่อเปิดเมนู` : `[ไฟล์แนบ ${a.type}]`}
+        {m.attachments.map((a, i) => {
+          const isImage = a.type === 'image' && Boolean(a.url);
+          if (isImage) {
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={i}
+                src={a.url!}
+                alt="รูปที่แนบมา"
+                loading="lazy"
+                className="mt-1 max-h-56 w-full rounded-lg object-cover"
+                /**
+                 * ⚠️ ลิงก์รูปจาก Meta เป็นลิงก์ชั่วคราว พอหมดอายุจะโหลดไม่ขึ้น
+                 *    ต้องบอกตรง ๆ ว่าเปิดไม่ได้ ดีกว่าโชว์กรอบว่าง ๆ ให้แอดมินงง
+                 *    ทางแก้จริงคือเก็บสำเนาไว้เอง (D-17 / Cloudflare R2)
+                 */
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  el.style.display = 'none';
+                  const note = el.nextElementSibling as HTMLElement | null;
+                  if (note) note.style.display = 'block';
+                }}
+              />
+            );
+          }
+          return (
+            <span key={i} className="mt-1 block text-xs opacity-80">
+              [ไฟล์แนบ {a.type}]
+            </span>
+          );
+        })}
+
+        {m.attachments.some((a) => a.type === 'image' && a.url) && (
+          <span style={{ display: 'none' }} className="mt-1 text-xs opacity-80">
+            🖼️ รูปหมดอายุแล้ว (ลิงก์จาก Meta อยู่ได้ไม่นาน) — เปิดดูใน Messenger แทน
           </span>
-        ))}
+        )}
       </button>
 
       <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">

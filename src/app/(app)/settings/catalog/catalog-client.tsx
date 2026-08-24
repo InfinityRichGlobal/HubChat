@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Package, Plus, Tag } from 'lucide-react';
+import { Archive, Loader2, Package, Plus, Tag, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import type { Product, PromotionRow } from '@/server/orders/service';
+import type { ShippingMethod } from '@/server/orders/shipping';
 import type { PromotionType } from '@/types/db';
 
 /**
@@ -37,16 +38,20 @@ export default function CatalogClient({
   canManage,
   initialProducts,
   initialPromotions,
+  initialShipping,
 }: {
   canManage: boolean;
   initialProducts: Product[];
   initialPromotions: PromotionRow[];
+  initialShipping: ShippingMethod[];
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [productOpen, setProductOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const [shipOpen, setShipOpen] = useState(false);
+  const [editingShip, setEditingShip] = useState<ShippingMethod | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function call(url: string, init: RequestInit, successMsg?: string) {
@@ -114,6 +119,40 @@ export default function CatalogClient({
     try {
       const result = await call('/api/promotions', { method: 'POST', body: JSON.stringify(payload) }, 'เพิ่มโปรแล้ว');
       if (result) setPromoOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * เก็บเข้ากรุแทนการลบ
+   * 🔴 ลบสินค้าที่เคยขายไปแล้วไม่ได้ — ออเดอร์เก่าจะตามรอยกลับมาไม่ได้
+   *    และรายงานยอดขายย้อนหลังจะเพี้ยน
+   */
+  async function archive(kind: 'products' | 'promotions' | 'shipping-methods', id: string, label: string) {
+    if (!confirm(`เก็บ "${label}" เข้ากรุ?\n\nจะหายจากทุกจุดที่เลือกใช้ แต่ออเดอร์เก่าที่เคยใช้ยังอยู่ครบ`)) return;
+    await call(`/api/${kind}/${id}`, { method: 'PATCH', body: JSON.stringify({ archive: true }) }, 'เก็บเข้ากรุแล้ว');
+  }
+
+  async function submitShipping(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const payload = {
+      name: String(f.get('name') ?? '').trim(),
+      fee: Number(f.get('fee') ?? 0),
+      cod_supported: f.get('cod_supported') === 'on',
+      note: String(f.get('note') ?? '').trim() || null,
+      sort_order: Number(f.get('sort_order') ?? 0),
+    };
+    setBusy(true);
+    try {
+      const result = editingShip
+        ? await call(`/api/shipping-methods/${editingShip.id}`, { method: 'PATCH', body: JSON.stringify(payload) }, 'บันทึกแล้ว')
+        : await call('/api/shipping-methods', { method: 'POST', body: JSON.stringify(payload) }, 'เพิ่มวิธีจัดส่งแล้ว');
+      if (result) {
+        setShipOpen(false);
+        setEditingShip(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -193,6 +232,14 @@ export default function CatalogClient({
                   >
                     แก้
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="เก็บเข้ากรุ"
+                    onClick={() => void archive('products', p.id, p.variant || p.name)}
+                  >
+                    <Archive />
+                  </Button>
                 </div>
               )}
             </div>
@@ -240,6 +287,7 @@ export default function CatalogClient({
               </div>
 
               {canManage && (
+                <div className="flex shrink-0 items-center gap-2">
                 <Switch
                   checked={p.is_active}
                   aria-label="เปิดใช้"
@@ -251,6 +299,85 @@ export default function CatalogClient({
                     )
                   }
                 />
+                <Button variant="ghost" size="sm" aria-label="เก็บเข้ากรุ"
+                  onClick={() => void archive('promotions', p.id, p.name)}>
+                  <Archive />
+                </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+
+      {/* ------------------ วิธีจัดส่ง (รอบ 6) ------------------ */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="size-4" />
+                วิธีจัดส่ง
+              </CardTitle>
+              <CardDescription>
+                ค่าส่งกับ &quot;รับเก็บเงินปลายทางได้ไหม&quot; ถูกบังคับฝั่งเซิร์ฟเวอร์ —
+                ออเดอร์ที่เลือกคู่ที่เป็นไปไม่ได้จะถูกปฏิเสธ
+              </CardDescription>
+            </div>
+            {canManage && (
+              <Button size="sm" onClick={() => { setEditingShip(null); setShipOpen(true); }}>
+                <Plus />
+                เพิ่มวิธีจัดส่ง
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {initialShipping.length === 0 && (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              ยังไม่มีวิธีจัดส่ง — เพิ่มก่อนถึงจะเลือกได้ตอนสร้างออเดอร์
+            </p>
+          )}
+
+          {initialShipping.map((m) => (
+            <div key={m.id} className="flex items-center gap-2 rounded-md border p-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm font-medium">{m.name}</span>
+                  <Badge variant={m.cod_supported ? 'secondary' : 'outline'} className="text-[10px]">
+                    {m.cod_supported ? 'เก็บปลายทางได้' : 'โอนอย่างเดียว'}
+                  </Badge>
+                  {!m.is_active && <Badge variant="destructive" className="text-[10px]">ปิด</Badge>}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  ค่าส่ง {baht(m.fee)}
+                  {m.note ? ` · ${m.note}` : ''}
+                </div>
+              </div>
+
+              {canManage && (
+                <div className="flex shrink-0 items-center gap-2">
+                  <Switch
+                    checked={m.is_active}
+                    aria-label="เปิดใช้"
+                    onCheckedChange={(v) =>
+                      call(
+                        `/api/shipping-methods/${m.id}`,
+                        { method: 'PATCH', body: JSON.stringify({ is_active: v }) },
+                        v ? 'เปิดใช้แล้ว' : 'ปิดแล้ว',
+                      )
+                    }
+                  />
+                  <Button variant="ghost" size="sm"
+                    onClick={() => { setEditingShip(m); setShipOpen(true); }}>
+                    แก้
+                  </Button>
+                  <Button variant="ghost" size="sm" aria-label="เก็บเข้ากรุ"
+                    onClick={() => void archive('shipping-methods', m.id, m.name)}>
+                    <Archive />
+                  </Button>
+                </div>
               )}
             </div>
           ))}
@@ -356,6 +483,70 @@ export default function CatalogClient({
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setPromoOpen(false)}>ยกเลิก</Button>
+              <Button type="submit" disabled={busy}>
+                {busy && <Loader2 className="animate-spin" />}
+                บันทึก
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ------------------ กล่องวิธีจัดส่ง ------------------ */}
+      <Dialog open={shipOpen} onOpenChange={(v) => { setShipOpen(v); if (!v) setEditingShip(null); }}>
+        <DialogContent>
+          <form onSubmit={submitShipping}>
+            <DialogHeader>
+              <DialogTitle>{editingShip ? 'แก้วิธีจัดส่ง' : 'เพิ่มวิธีจัดส่ง'}</DialogTitle>
+              <DialogDescription>
+                แก้ค่าส่งที่นี่ไม่กระทบออเดอร์เก่า — ออเดอร์เก็บสำเนาค่าส่งไว้ตั้งแต่ตอนสร้าง
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-3 py-3">
+              <div className="flex gap-2">
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Label htmlFor="s-name">ชื่อวิธีจัดส่ง</Label>
+                  <Input id="s-name" name="name" required maxLength={80}
+                    defaultValue={editingShip?.name ?? ''} placeholder="Flash ส่งธรรมดา" />
+                </div>
+                <div className="flex w-28 flex-col gap-1.5">
+                  <Label htmlFor="s-fee">ค่าส่ง</Label>
+                  <Input id="s-fee" name="fee" type="number" min={0} step="0.01"
+                    defaultValue={editingShip?.fee ?? 0} />
+                </div>
+              </div>
+
+              <label className="flex items-start gap-2 rounded-md border p-2.5">
+                <input
+                  type="checkbox"
+                  name="cod_supported"
+                  defaultChecked={editingShip?.cod_supported ?? true}
+                  className="mt-0.5 size-4"
+                />
+                <span className="text-sm">
+                  รับเก็บเงินปลายทาง (COD)
+                  <span className="block text-xs text-muted-foreground">
+                    ถ้าไม่ติ๊ก ระบบจะไม่ยอมให้สร้างออเดอร์แบบเก็บปลายทางด้วยวิธีนี้
+                  </span>
+                </span>
+              </label>
+
+              <div className="flex gap-2">
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Label htmlFor="s-note">หมายเหตุ</Label>
+                  <Input id="s-note" name="note" maxLength={300}
+                    defaultValue={editingShip?.note ?? ''} placeholder="ส่งถึงใน 2-3 วัน" />
+                </div>
+                <div className="flex w-24 flex-col gap-1.5">
+                  <Label htmlFor="s-sort">ลำดับ</Label>
+                  <Input id="s-sort" name="sort_order" type="number"
+                    defaultValue={editingShip?.sort_order ?? 0} />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
               <Button type="submit" disabled={busy}>
                 {busy && <Loader2 className="animate-spin" />}
                 บันทึก

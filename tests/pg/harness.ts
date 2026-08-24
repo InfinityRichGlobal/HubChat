@@ -194,6 +194,20 @@ async function handle(
     const op = v.slice(0, dot);
     const val = v.slice(dot + 1);
 
+    /* ---- col=is.null / col=is.not.null ----
+     * ⚠️ PostgREST ใช้ตัวนี้แทน eq สำหรับค่าว่าง เพราะ SQL เทียบ null ด้วย = ไม่ได้
+     *    (ตอนแรกลืมใส่ในตัวจำลอง ทำให้ตัวกรอง .is('archived_at', null) เงียบหายไปเฉย ๆ
+     *     แล้วเทสต์ผ่านทั้งที่ของจริงยังไม่ถูกกรอง — ชุดทดสอบวิธีจัดส่งเป็นตัวจับได้)
+     */
+    if (op === 'is') {
+      const target = val.toLowerCase();
+      if (target === 'null') where.push(`${q(k)} is null`);
+      else if (target === 'not.null') where.push(`${q(k)} is not null`);
+      else if (target === 'true') where.push(`${q(k)} is true`);
+      else if (target === 'false') where.push(`${q(k)} is false`);
+      continue;
+    }
+
     /* ---- col=in.(a,b,c) ---- */
     if (op === 'in') {
       const items = splitTop(val.replace(/^\(|\)$/g, '')).map((x) => x.replace(/^"|"$/g, ''));

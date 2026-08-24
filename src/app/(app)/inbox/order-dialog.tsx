@@ -25,7 +25,9 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import type { Product, PromotionRow } from '@/server/orders/service';
+import type { ShippingMethod } from '@/server/orders/shipping';
 import type { PriceBreakdown } from '@/server/orders/pricing';
+import type { PaymentMethod } from '@/types/db';
 
 type Contact = {
   recipient_name: string | null;
@@ -65,10 +67,12 @@ export default function OrderDialog({
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [promotions, setPromotions] = useState<PromotionRow[]>([]);
+  const [shipping, setShipping] = useState<ShippingMethod[]>([]);
 
   const [promotionId, setPromotionId] = useState<string | null>(null);
   const [pickedIds, setPickedIds] = useState<string[]>([]);
-  const [shipping, setShipping] = useState('');
+  const [shippingMethodId, setShippingMethodId] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
   const [manualTotal, setManualTotal] = useState('');
   const [form, setForm] = useState<Contact>({
     recipient_name: '', phone: '', address: '', postcode: '',
@@ -88,10 +92,15 @@ export default function OrderDialog({
       getJson<{ products: Product[] }>('/api/products?active=1'),
       getJson<{ promotions: PromotionRow[] }>('/api/promotions?active=1'),
       getJson<{ current: Contact }>(`/api/conversations/${conversationId}/contact`),
-    ]).then(([p, promo, contact]) => {
+      getJson<{ methods: ShippingMethod[] }>('/api/shipping-methods?active=1'),
+    ]).then(([p, promo, contact, ship]) => {
       if (!alive) return;
       setProducts(p?.products ?? []);
       setPromotions(promo?.promotions ?? []);
+      const methods = ship?.methods ?? [];
+      setShipping(methods);
+      // เลือกวิธีจัดส่งอันแรกให้เลย — แอดมินเปลี่ยนได้ แต่ไม่ต้องเริ่มจากศูนย์
+      if (methods.length > 0) setShippingMethodId(methods[0].id);
       if (contact?.current) {
         setForm({
           recipient_name: contact.current.recipient_name ?? '',
@@ -116,7 +125,9 @@ export default function OrderDialog({
     const body = {
       promotion_id: promotionId,
       product_ids: pickedIds,
-      shipping_fee: Number(shipping) || 0,
+      // ⭐ ส่ง "วิธีจัดส่ง" ไม่ใช่ "ค่าส่ง" — เซิร์ฟเวอร์เป็นคนหยิบราคามาเอง
+      shipping_method_id: shippingMethodId,
+      payment_method: paymentMethod,
       manual_total: manualTotal.trim() === '' ? null : Number(manualTotal),
     };
     try {
@@ -131,7 +142,7 @@ export default function OrderDialog({
     } catch {
       return { ok: false, message: 'ติดต่อเซิร์ฟเวอร์ไม่ได้' };
     }
-  }, [promotionId, pickedIds, shipping, manualTotal]);
+  }, [promotionId, pickedIds, shippingMethodId, paymentMethod, manualTotal]);
 
   useEffect(() => {
     let alive = true;
@@ -189,7 +200,8 @@ export default function OrderDialog({
           phone: form.phone?.trim() || null,
           address: form.address?.trim() || null,
           postcode: form.postcode?.trim() || null,
-          shipping_fee: Number(shipping) || 0,
+          shipping_method_id: shippingMethodId,
+          payment_method: paymentMethod,
           manual_total: manualTotal.trim() === '' ? null : Number(manualTotal),
         }),
       });
@@ -215,7 +227,9 @@ export default function OrderDialog({
     }
   }
 
-  const canCreate = pickedIds.length > 0 && price !== null && !pricing && !saving;
+  const selectedShipping = shipping.find((m) => m.id === shippingMethodId) ?? null;
+  const codBlocked = paymentMethod === 'cod' && selectedShipping !== null && !selectedShipping.cod_supported;
+  const canCreate = pickedIds.length > 0 && price !== null && !pricing && !saving && !codBlocked;
 
   return (
     <Dialog open={conversationId !== null} onOpenChange={(v) => !v && onClose()}>
@@ -328,22 +342,74 @@ export default function OrderDialog({
               </div>
             )}
 
-            {/* ---- ค่าส่ง / ราคากรอกเอง ---- */}
-            <div className="flex gap-2">
-              <div className="flex flex-1 flex-col gap-1.5">
-                <Label htmlFor="shipping" className="text-xs">ค่าส่ง</Label>
-                <Input
-                  id="shipping" inputMode="decimal" value={shipping} placeholder="0"
-                  onChange={(e) => setShipping(e.target.value)}
-                />
+            {/* ---- วิธีจ่ายเงิน ---- */}
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">วิธีจ่ายเงิน</Label>
+              <div className="flex gap-1.5">
+                {(['cod', 'transfer'] as PaymentMethod[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setPaymentMethod(m)}
+                    className={
+                      'flex-1 rounded-md border px-3 py-2 text-xs ' +
+                      (paymentMethod === m ? 'border-primary bg-primary/10 font-medium' : 'hover:bg-accent')
+                    }
+                  >
+                    {m === 'cod' ? 'เก็บเงินปลายทาง' : 'โอนเงิน'}
+                  </button>
+                ))}
               </div>
-              <div className="flex flex-1 flex-col gap-1.5">
-                <Label htmlFor="manual" className="text-xs">ราคารวม (กรอกทับได้)</Label>
-                <Input
-                  id="manual" inputMode="decimal" value={manualTotal} placeholder="อัตโนมัติ"
-                  onChange={(e) => setManualTotal(e.target.value)}
-                />
+            </div>
+
+            {/* ---- วิธีจัดส่ง ---- */}
+            {shipping.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">วิธีจัดส่ง</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {shipping.map((m) => {
+                    // ⚠️ ปิดปุ่มที่เป็นไปไม่ได้ตั้งแต่บนจอ (เซิร์ฟเวอร์กันซ้ำอีกชั้น)
+                    const blocked = paymentMethod === 'cod' && !m.cod_supported;
+                    const selected = shippingMethodId === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        disabled={blocked}
+                        title={blocked ? `${m.name} ไม่รองรับเก็บเงินปลายทาง` : undefined}
+                        onClick={() => setShippingMethodId(m.id)}
+                        className={
+                          'rounded-full border px-3 py-1 text-xs ' +
+                          (blocked
+                            ? 'cursor-not-allowed opacity-40'
+                            : selected
+                              ? 'border-primary bg-primary/10 font-medium'
+                              : 'hover:bg-accent')
+                        }
+                      >
+                        {m.name} · ฿{Number(m.fee).toLocaleString('th-TH')}
+                        {blocked ? ' (ไม่รับปลายทาง)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+                {paymentMethod === 'cod' &&
+                  shippingMethodId !== null &&
+                  shipping.find((m) => m.id === shippingMethodId)?.cod_supported === false && (
+                    <p className="text-[11px] text-destructive">
+                      วิธีจัดส่งที่เลือกไม่รองรับเก็บเงินปลายทาง — เลือกวิธีอื่น หรือเปลี่ยนเป็นโอนเงิน
+                    </p>
+                  )}
               </div>
+            )}
+
+            {/* ---- ราคากรอกเอง ---- */}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="manual" className="text-xs">ราคารวม (กรอกทับได้)</Label>
+              <Input
+                id="manual" inputMode="decimal" value={manualTotal} placeholder="อัตโนมัติ"
+                onChange={(e) => setManualTotal(e.target.value)}
+              />
             </div>
 
             {/* ---- ยอดที่เซิร์ฟเวอร์คิดมา ---- */}

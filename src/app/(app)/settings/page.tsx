@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package } from 'lucide-react';
+import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can, ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,6 +46,13 @@ export default async function SettingsPage() {
       show: can(admin.role, 'content.view'),
     },
     {
+      href: '/settings/autoreply',
+      icon: Bot,
+      title: 'ตอบอัตโนมัติ (คีย์เวิร์ด)',
+      description: '🔴 ส่วนเดียวที่ระบบพิมพ์หาลูกค้าเอง — ตั้งกฎ ดูประวัติ เปิด/ปิดได้ทันที',
+      show: can(admin.role, 'content.view'),
+    },
+    {
       href: '/settings/activity',
       icon: ScrollText,
       title: 'ประวัติการใช้งาน',
@@ -55,8 +62,8 @@ export default async function SettingsPage() {
   ].filter((i) => i.show);
 
   const upcoming = [
-    { icon: MessageSquareText, title: 'กฎคีย์เวิร์ดตอบอัตโนมัติ', round: 'รอบ 6' },
-    { icon: Bell, title: 'แจ้งเตือน (PWA + Telegram)', round: 'รอบ 7' },
+    { icon: Package, title: 'นำเข้าเลขพัสดุ + แจ้งลูกค้า', round: 'รอบ 7' },
+    { icon: Bell, title: 'แจ้งเตือน (PWA + Telegram)', round: 'รอบ 9' },
   ];
 
   return (
