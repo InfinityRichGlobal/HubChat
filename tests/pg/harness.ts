@@ -76,6 +76,28 @@ const OPS: Record<string, string> = {
   eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=', ilike: 'ILIKE', like: 'LIKE',
 };
 
+
+/** ตัดสตริงด้วยเครื่องหมายจุลภาค โดยไม่ตัดข้างในวงเล็บหรือเครื่องหมายคำพูด */
+function splitTop(input: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quoted = false;
+  let cur = '';
+  for (const ch of input) {
+    if (ch === '"') quoted = !quoted;
+    if (!quoted && ch === '(') depth += 1;
+    if (!quoted && ch === ')') depth -= 1;
+    if (!quoted && depth === 0 && ch === ',') {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+
 function q(id: string): string {
   return `"${id.replace(/"/g, '')}"`;
 }
@@ -149,9 +171,37 @@ async function handle(
     }
     if (k === 'limit') { limit = ` limit ${parseInt(v, 10)}`; continue; }
     if (k === 'offset') continue;
+
+    /* ---- or=(cond,cond) : ใช้ในช่องค้นหาของอินบ็อกซ์ ---- */
+    if (k === 'or') {
+      const parts = splitTop(v.replace(/^\(|\)$/g, ''));
+      const ors: string[] = [];
+      for (const part of parts) {
+        const d = part.indexOf('.');
+        const col = part.slice(0, d);
+        const rest = part.slice(d + 1);
+        const d2 = rest.indexOf('.');
+        const op2 = rest.slice(0, d2);
+        if (!OPS[op2]) continue;
+        params.push(rest.slice(d2 + 1));
+        ors.push(`${q(col)} ${OPS[op2]} $${params.length}`);
+      }
+      if (ors.length > 0) where.push(`(${ors.join(' or ')})`);
+      continue;
+    }
+
     const dot = v.indexOf('.');
     const op = v.slice(0, dot);
     const val = v.slice(dot + 1);
+
+    /* ---- col=in.(a,b,c) ---- */
+    if (op === 'in') {
+      const items = splitTop(val.replace(/^\(|\)$/g, '')).map((x) => x.replace(/^"|"$/g, ''));
+      params.push(items);
+      where.push(`${q(k)}::text = any($${params.length}::text[])`);
+      continue;
+    }
+
     if (!OPS[op]) continue;
     params.push(val);
     where.push(`${q(k)} ${OPS[op]} $${params.length}`);

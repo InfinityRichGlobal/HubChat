@@ -392,3 +392,52 @@ describe('🔴 access token ของเพจห้ามหลุดออก�
     expect(offenders).toEqual([]);
   });
 });
+
+/* ================================================================== */
+/* รอบ 3B — หน้าแชท                                                    */
+/* ================================================================== */
+describe('🔴 หน้าแชทต้องมี "ปุ่มส่งปุ่มเดียว" เท่านั้น', () => {
+  const REPLY_ROUTE = 'app/api/conversations/[id]/reply/route.ts';
+
+  it('route ตอบแชทต้องไม่รับ transport / tag จากหน้าเว็บ', () => {
+    const file = CODE_FILES.find((f) => rel(f) === REPLY_ROUTE);
+    expect(file, `ไม่พบไฟล์ ${REPLY_ROUTE}`).toBeDefined();
+    const src = read(file!);
+    // ถ้าวันหนึ่งมีคนเพิ่มช่องพวกนี้เข้าไปใน schema แอดมินจะเลือกช่องทางเองได้ทันที
+    expect(src).not.toMatch(/transport\s*:/);
+    expect(src).not.toMatch(/message_tag/);
+    expect(src).not.toMatch(/messaging_type/);
+  });
+
+  it('route ตอบแชทต้องสร้างตราประทับจาก session ไม่ใช่รับมาจาก body', () => {
+    const file = CODE_FILES.find((f) => rel(f) === REPLY_ROUTE);
+    const src = read(file!);
+    expect(src).toContain('humanAdminReply');
+    // ห้ามรับ provenance หรือ admin_id มาจากผู้เรียก
+    expect(src).not.toMatch(/provenance\s*:\s*(z\.|body\.)/);
+    expect(src).not.toMatch(/admin_id\s*:\s*(z\.|body\.)/);
+  });
+
+  it('route ตอบแชทต้องส่งเฉพาะ conversation_id ที่มาจาก URL ไม่ใช่จาก body', () => {
+    const file = CODE_FILES.find((f) => rel(f) === REPLY_ROUTE);
+    const src = read(file!);
+    expect(src).not.toMatch(/conversation_id\s*:\s*body\./);
+    expect(src).not.toMatch(/customer_id|page_id|psid/);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ชั้นข้อมูลอินบ็อกซ์ต้องไม่เผลอดึง token ของเพจออกมา', () => {
+  it("ไม่มี select('*') ในชั้นข้อมูลอินบ็อกซ์", () => {
+    const files = CODE_FILES.filter((f) => rel(f).startsWith('server/inbox/'));
+    expect(files.length).toBeGreaterThan(0);
+    const offenders = files.filter((f) => /\.select\(\s*['"]\*['"]\s*\)/.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ไม่มีการเลือกคอลัมน์ access_token ในชั้นข้อมูลอินบ็อกซ์', () => {
+    const files = CODE_FILES.filter((f) => rel(f).startsWith('server/inbox/'));
+    const offenders = files.filter((f) => read(f).includes('access_token')).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});

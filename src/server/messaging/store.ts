@@ -340,3 +340,43 @@ export async function recordSendVerified(conversationId: string): Promise<void> 
     console.error('[messaging] บันทึกผลส่งสำเร็จไม่ได้:', e);
   }
 }
+
+/**
+ * บันทึกข้อความขาออกลงประวัติแชท (ปิดรายการ D-4)
+ * ===========================================================================
+ * เรียกหลังจาก Meta ตอบว่าส่งสำเร็จแล้วเท่านั้น
+ *
+ * ⚠️ ล้มเหลวได้โดยไม่ทำให้ผลการส่งเปลี่ยน — ข้อความถึงลูกค้าไปแล้วจริง ๆ
+ *    ถ้าโยน error ตรงนี้ ผู้เรียกจะเข้าใจผิดว่าส่งไม่สำเร็จแล้วกดส่งซ้ำ
+ *    ซึ่งแย่กว่าการที่ประวัติขาดไปหนึ่งบรรทัดมาก
+ *    (ถึงขาดจริง เดี๋ยว echo จาก Meta ก็จะเติมให้เองอยู่แล้ว)
+ */
+export async function recordOutboundMessage(params: {
+  conversation_id: string;
+  admin_id: string | null;
+  sender_type: 'admin' | 'bot';
+  text: string | null;
+  attachments: unknown[];
+  meta_message_id: string | null;
+  human_agent_tag: boolean;
+}): Promise<string | null> {
+  try {
+    const { data, error } = await db().rpc('record_outbound_message', {
+      p_conversation_id: params.conversation_id,
+      p_admin_id: params.admin_id,
+      p_sender_type: params.sender_type,
+      p_text: params.text,
+      p_attachments: params.attachments,
+      p_meta_message_id: params.meta_message_id,
+      p_human_agent_tag: params.human_agent_tag,
+    });
+    if (error) {
+      console.error('[messaging] บันทึกข้อความขาออกลงประวัติไม่สำเร็จ:', error.message);
+      return null;
+    }
+    return (data as string | null) ?? null;
+  } catch (e) {
+    console.error('[messaging] บันทึกข้อความขาออกลงประวัติไม่สำเร็จ:', e);
+    return null;
+  }
+}

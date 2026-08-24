@@ -43,6 +43,7 @@ import {
   claimSend,
   finishSend,
   recordAttempt,
+  recordOutboundMessage,
   recordPolicyObservation,
   recordSendVerified,
   resolveSendContext,
@@ -255,6 +256,23 @@ export async function sendMessage(req: SendRequest, options: SendOptions = {}): 
 
       // ส่งได้จริง = ล้างสถานะ "เคยถูกปฏิเสธ" ของห้องแชทนี้
       await recordSendVerified(ctx.conversation_id);
+
+      // บันทึกลงประวัติแชทให้แอดมินคนอื่นเห็น (D-4)
+      // ⚠️ ล้มเหลวได้โดยไม่กระทบผลการส่ง — ข้อความถึงลูกค้าไปแล้วจริง
+      //    และ echo จาก Meta จะเติมให้เองถ้าแถวนี้หายไป (กันซ้ำด้วย meta_message_id)
+      await recordOutboundMessage({
+        conversation_id: ctx.conversation_id,
+        admin_id: prov.admin_id,
+        sender_type: prov.human_authored ? 'admin' : 'bot',
+        text: ctx.content.text ?? null,
+        attachments: (ctx.content.images ?? []).map((img) => ({
+          type: 'image',
+          url: img.url,
+          meta_attachment_id: img.meta_attachment_id,
+        })),
+        meta_message_id: result.message_id,
+        human_agent_tag: decision.transport === 'HUMAN_AGENT',
+      });
 
       return {
         sent: true,

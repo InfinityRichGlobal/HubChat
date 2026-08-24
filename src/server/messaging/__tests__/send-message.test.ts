@@ -31,6 +31,7 @@ const store = {
   finishes: [] as Record<string, unknown>[],
   observations: [] as Record<string, unknown>[],
   verified: [] as string[],
+  outbound: [] as Record<string, unknown>[],
   /** ผลของการจองสิทธิ์ครั้งถัดไป */
   nextClaim: { won: true, status: 'claimed' as string },
   /** ผลการดึงบริบท */
@@ -63,6 +64,10 @@ vi.mock('../store', () => ({
   }),
   recordSendVerified: vi.fn(async (id: string) => {
     store.verified.push(id);
+  }),
+  recordOutboundMessage: vi.fn(async (p: Record<string, unknown>) => {
+    store.outbound.push(p);
+    return `msg-${store.outbound.length}`;
   }),
 }));
 
@@ -136,6 +141,7 @@ beforeEach(() => {
   store.finishes = [];
   store.observations = [];
   store.verified = [];
+  store.outbound = [];
   store.nextClaim = { won: true, status: 'claimed' };
   store.factualLastCustomerMessageAt = new Date('2026-08-23T11:00:00Z');
   seedContext();
@@ -391,5 +397,51 @@ describe('payload ที่ยิงออกไป', () => {
     await sendMessage(req({ provenance: bulkJobProvenance('admin-9') }), { now: NOW, sleep: noSleep });
     expect(store.attempts[0].human_typed).toBe(false);
     expect(store.attempts[0].admin_id).toBe('admin-9');
+  });
+});
+
+/* ================================================================== */
+describe('รอบ 3B — ข้อความที่ส่งสำเร็จต้องลงประวัติแชท (ปิด D-4)', () => {
+  it('ส่งสำเร็จ → บันทึกลงประวัติพร้อม meta_message_id', async () => {
+    fakeMeta([{ status: 200, body: { message_id: 'mid.saved' } }]);
+    await sendMessage(req(), { now: NOW, sleep: noSleep });
+
+    expect(store.outbound).toHaveLength(1);
+    expect(store.outbound[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      text: 'สวัสดีค่ะ',
+      meta_message_id: 'mid.saved',
+      // ⭐ ต้องเก็บ meta_message_id ไว้ ไม่งั้น echo ที่ Meta ส่งกลับมา
+      //    จะกลายเป็นข้อความซ้ำอีกแถวในห้องแชท
+    });
+  });
+
+  it('ส่งด้วยการส่งปกติ → ไม่ติดธง Human Agent', async () => {
+    fakeMeta([{ status: 200, body: { message_id: 'mid.std' } }]);
+    await sendMessage(req(), { now: NOW, sleep: noSleep });
+    expect(store.outbound[0].human_agent_tag).toBe(false);
+  });
+
+  it('บอทตอบ → บันทึกเป็นผู้ส่งชนิด bot ไม่ใช่ admin', async () => {
+    fakeMeta([{ status: 200, body: { message_id: 'mid.bot' } }]);
+    await sendMessage(req({ provenance: keywordBotProvenance() }), { now: NOW, sleep: noSleep });
+    expect(store.outbound[0].sender_type).toBe('bot');
+  });
+
+  it('🔴 ส่งไม่สำเร็จ → ห้ามมีข้อความโผล่ในประวัติแชท', async () => {
+    fakeMeta([{ status: 400, body: { error: { code: 10, message: 'policy' } } }]);
+    const result = await sendMessage(req(), { now: NOW, sleep: noSleep });
+
+    expect(result.sent).toBe(false);
+    // ถ้าบันทึกไว้ทั้งที่ส่งไม่ออก แอดมินจะเข้าใจผิดว่าลูกค้าได้รับแล้ว
+    expect(store.outbound).toHaveLength(0);
+  });
+
+  it('🔴 ไม่รู้ผล → ห้ามมีข้อความโผล่ในประวัติแชทเช่นกัน', async () => {
+    fakeMeta([{ throws: 'network down' }]);
+    const result = await sendMessage(req(), { now: NOW, sleep: noSleep });
+
+    expect(result.outcome_unknown).toBe(true);
+    expect(store.outbound).toHaveLength(0);
   });
 });
