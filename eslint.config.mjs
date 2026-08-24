@@ -26,6 +26,11 @@ const eslintConfig = defineConfig([
       "src/server/transports/**",
       "src/server/messaging/**",
       "src/server/meta/**",
+      // ทางเข้าของข้อมูล (webhook) ต้องอ่านโปรไฟล์ลูกค้าจาก Meta ได้
+      // แต่ห้ามส่งข้อความ — มีกฎเฉพาะของมันอยู่ในบล็อกถัดไป
+      "src/server/ingest/**",
+      // หน้าตั้งค่าเพจต้องยิงถาม Meta ว่า token ใช้ได้ไหม (อ่านอย่างเดียว)
+      "src/server/pages/**",
       "src/**/__tests__/**",
     ],
     rules: {
@@ -54,6 +59,47 @@ const eslintConfig = defineConfig([
               importNames: ["getAdapter", "allAdapters"],
               message:
                 "ห้ามหยิบ adapter มาใช้เอง — ต้องผ่าน sendMessage() (transportChannelSupport() อ่านอย่างเดียวใช้ได้)",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  /* ---------------------------------------------------------------------
+   * กฎเฉพาะของ "ทางเข้าข้อมูล" (src/server/ingest)
+   * ------------------------------------------------------------------- *
+   * โฟลเดอร์นี้ได้รับยกเว้นให้แตะ @/server/meta ได้ เพราะต้องดึงชื่อลูกค้า
+   * แต่การยกเว้นต้องแคบที่สุด — เปิดให้อ่านโปรไฟล์ ไม่ได้เปิดให้ส่งข้อความ
+   *
+   * ถ้าวันหนึ่งรอบคีย์เวิร์ดต้องตอบอัตโนมัติจากตรงนี้
+   * ต้องเรียกผ่าน sendMessage() เท่านั้น (ตัวนั้นไม่ได้ห้ามไว้)
+   * ------------------------------------------------------------------- */
+  {
+    files: ["src/server/ingest/**/*.ts", "src/server/pages/**/*.ts"],
+    ignores: ["src/**/__tests__/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/server/meta/client"],
+              importNames: ["sendToMeta"],
+              message:
+                "ทางเข้าข้อมูลห้ามส่งข้อความ — ถ้าต้องตอบกลับ ต้องผ่าน sendMessage() เพื่อให้ Policy Engine ตัดสินก่อนเสมอ",
+            },
+            {
+              group: [
+                "@/server/transports/standard",
+                "@/server/transports/human-agent",
+                "@/server/transports/utility",
+                "@/server/transports/marketing",
+                "@/server/transports/base",
+                "@/server/transports/registry",
+              ],
+              message:
+                "ทางเข้าข้อมูลห้ามเรียก transport adapter — การส่งข้อความทุกกรณีต้องผ่าน sendMessage()",
             },
           ],
         },

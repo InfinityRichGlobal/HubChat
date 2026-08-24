@@ -125,6 +125,61 @@ export async function sendToMeta(page: MetaPage, payload: MetaSendPayload): Prom
   return { ok: true, message_id: body?.message_id ?? null, http_status: res.status };
 }
 
+/* ------------------------------------------------------------------------ */
+/* การอ่านข้อมูลจาก Meta (ไม่ใช่การส่งข้อความ)                                  */
+/* ------------------------------------------------------------------------ */
+
+export type MetaGetResult =
+  | { ok: true; data: Record<string, unknown>; http_status: number }
+  | { ok: false; error: MetaErrorInfo; http_status: number };
+
+/**
+ * อ่านข้อมูลจาก Graph API แบบ GET
+ * ===========================================================================
+ * ⚠️ ตัวนี้ "อ่านอย่างเดียว" ห้ามใช้ส่งข้อความเด็ดขาด
+ *    การส่งข้อความทุกกรณีต้องผ่าน sendMessage() → Policy Engine → sendToMeta()
+ *    ที่แยกกันชัดเจนเพราะการอ่านไม่มีความเสี่ยงเรื่องนโยบายของ Meta
+ *    แต่การส่งมี และเป็นส่วนที่ผิดแล้วเพจโดนระงับ
+ *
+ * ใช้กับ : ดึงชื่อ/รูปโปรไฟล์ลูกค้า (webhook ไม่ได้ส่งชื่อมาให้)
+ */
+export async function metaGet(
+  page: MetaPage,
+  pathSegment: string,
+  params: Record<string, string> = {},
+): Promise<MetaGetResult> {
+  const env = serverEnv();
+  const token = pageToken(page);
+  const qs = new URLSearchParams(params).toString();
+  const url =
+    `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${encodeURIComponent(pathSegment)}` + (qs ? `?${qs}` : '');
+
+  let res: Response;
+  try {
+    res = await fetcher()(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      http_status: 0,
+      error: classifyMetaError({ message: (err as Error).message }, 0, { networkFailure: true }),
+    };
+  }
+
+  const body = (await res.json().catch(() => null)) as
+    | (Record<string, unknown> & { error?: RawMetaError })
+    | null;
+
+  if (!res.ok || body?.error) {
+    return { ok: false, http_status: res.status, error: classifyMetaError(body?.error ?? null, res.status) };
+  }
+
+  return { ok: true, data: body ?? {}, http_status: res.status };
+}
+
 /** ตรวจว่าตั้งค่า Meta App ครบหรือยัง — ใช้ตอนเปิดใช้ adapter */
 export function isMetaConfigured(): boolean {
   const env = serverEnv();

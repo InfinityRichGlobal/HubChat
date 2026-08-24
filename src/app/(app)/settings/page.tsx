@@ -18,6 +18,13 @@ export default async function SettingsPage() {
 
   const ready = [
     {
+      href: '/settings/pages',
+      icon: Store,
+      title: 'จัดการเพจ',
+      description: 'เชื่อมเพจ Facebook / Instagram ใส่ token และทดสอบการเชื่อมต่อ',
+      show: can(admin.role, 'page.manage'),
+    },
+    {
       href: '/settings/admins',
       icon: Users,
       title: 'แอดมิน + สิทธิ์',
@@ -34,7 +41,6 @@ export default async function SettingsPage() {
   ].filter((i) => i.show);
 
   const upcoming = [
-    { icon: Store, title: 'จัดการเพจ', round: 'รอบ 3' },
     { icon: MessageSquareText, title: 'ชุดคำตอบ + กฎคีย์เวิร์ด', round: 'รอบ 4' },
     { icon: Package, title: 'สินค้า / โปรโมชัน / ค่าส่ง', round: 'รอบ 5' },
     { icon: Tags, title: 'แท็ก', round: 'รอบ 4' },

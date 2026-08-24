@@ -292,3 +292,103 @@ describe('🔴 คำตอบของ Meta ห้ามไปแก้ปร�
     expect(observationBlock).not.toContain("from('customers')");
   });
 });
+
+/* ================================================================== */
+/* รอบ 3A — ทางเข้าข้อมูล (webhook)                                     */
+/* ================================================================== */
+describe('🔴 ประตูรับ webhook ต้องปลอดภัยและตอบเร็ว', () => {
+  const WEBHOOK_ROUTE = 'app/api/webhooks/meta/route.ts';
+
+  function webhookSource(): string {
+    const file = CODE_FILES.find((f) => rel(f) === WEBHOOK_ROUTE);
+    expect(file, `ไม่พบไฟล์ ${WEBHOOK_ROUTE}`).toBeDefined();
+    return read(file!);
+  }
+
+  it('ต้องอ่านเนื้อคำขอเป็นข้อความดิบ ห้ามใช้ req.json()', () => {
+    const src = webhookSource();
+    // ลายเซ็นคำนวณจากตัวอักษรดิบ ถ้า parse ก่อนแล้ว stringify ใหม่ ลายเซ็นจะไม่มีวันตรง
+    expect(src).toMatch(/\.text\(\)/);
+    expect(src).not.toMatch(/req\.json\(\)/);
+  });
+
+  it('ต้องตรวจลายเซ็น "ก่อน" วางงานลงคิวเสมอ', () => {
+    // ต้องดูเฉพาะ "เนื้อในฟังก์ชัน POST" ไม่ใช่ลำดับบรรทัด import ด้านบนไฟล์
+    const src = webhookSource();
+    const body = src.slice(src.indexOf('export async function POST'));
+    const verifyAt = body.indexOf('verifyMetaSignature');
+    const enqueueAt = body.indexOf('enqueueWebhook');
+    expect(verifyAt, 'ไม่พบการตรวจลายเซ็นในไฟล์ webhook').toBeGreaterThan(-1);
+    expect(enqueueAt, 'ไม่พบการวางงานลงคิว').toBeGreaterThan(-1);
+    expect(verifyAt).toBeLessThan(enqueueAt);
+  });
+
+  it('ห้ามประมวลผลข้อความก่อนตอบ Meta (สเปกหัวข้อ 6.3)', () => {
+    const src = webhookSource();
+    // ยอมให้เรียก processWebhookBatch ได้เฉพาะข้างใน after() เท่านั้น
+    if (src.includes('processWebhookBatch')) {
+      expect(src, 'ต้องเรียกผ่าน after() เท่านั้น').toMatch(/after\(/);
+      const afterAt = src.indexOf('after(');
+      const processAt = src.indexOf('processWebhookBatch(');
+      expect(afterAt).toBeLessThan(processAt);
+    }
+  });
+
+  it('ห้ามตอบรายละเอียดภายในกลับไปให้คนที่ยิงเข้ามา', () => {
+    const src = webhookSource();
+    // ข้อความ error ภาษาไทยของเราต้องอยู่ใน log ไม่ใช่ใน response
+    expect(src).not.toMatch(/new Response\([^)]*message_th/);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 ทางเข้าข้อมูลห้ามกลายเป็นทางลัดในการส่งข้อความ', () => {
+  const ingestFiles = CODE_FILES.filter((f) => rel(f).startsWith('server/ingest/'));
+
+  it('มีไฟล์ในโฟลเดอร์ ingest ให้ตรวจจริง', () => {
+    expect(ingestFiles.length).toBeGreaterThan(0);
+  });
+
+  it('ingest ห้าม import transport adapter หรือ registry', () => {
+    const offenders = ingestFiles.filter((f) => /@\/server\/transports\//.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ingest แตะ Meta client ได้เฉพาะเป็นชนิดข้อมูล — ของจริงต้องผ่าน server/meta เท่านั้น', () => {
+    const nonTypeImport = /^import\s+(?!type\s)[^;]*from\s+['"]@\/server\/meta\/client['"]/m;
+    const offenders = ingestFiles.filter((f) => nonTypeImport.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+describe('🔴 access token ของเพจห้ามหลุดออกไปฝั่งหน้าเว็บ', () => {
+  it('API เกี่ยวกับเพจ ห้ามแตะตาราง pages เอง ต้องผ่านชั้นบริการที่ตัด token ออกแล้ว', () => {
+    const pageApis = CODE_FILES.filter((f) => rel(f).startsWith('app/api/pages/'));
+    expect(pageApis.length).toBeGreaterThan(0);
+    // ถ้า route ไป query ตาราง pages เอง วันหนึ่งจะมีคนเผลอ select('*') แล้ว token หลุด
+    const offenders = pageApis.filter((f) => /from\(['"]pages['"]\)/.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ชั้นบริการเพจต้องมีตัวตัด token ออกก่อนส่งกลับ', () => {
+    const service = CODE_FILES.find((f) => rel(f) === 'server/pages/service.ts');
+    expect(service, 'ไม่พบ server/pages/service.ts').toBeDefined();
+    const src = read(service!);
+    // ชนิดข้อมูลที่ส่งออก (SafePage) ต้องไม่มีช่อง access_token
+    const safeType = src.slice(src.indexOf('export type SafePage'), src.indexOf('};', src.indexOf('export type SafePage')));
+    expect(safeType).not.toContain('access_token');
+    // และต้องเข้ารหัสก่อนเก็บเสมอ
+    expect(src).toContain('encryptSecret');
+  });
+
+  it('หน้าเว็บฝั่งเบราว์เซอร์ต้องไม่มีคำว่า access_token ในชนิดข้อมูลที่รับมา', () => {
+    const clientFiles = CODE_FILES.filter((f) => read(f).slice(0, 200).includes("'use client'"));
+    const offenders = clientFiles
+      .filter((f) => /access_token\s*:/.test(read(f)))
+      .map(rel)
+      // ช่องกรอกในฟอร์มชื่อ access_token ได้ (ส่งขึ้นอย่างเดียว ไม่ได้รับกลับ)
+      .filter((r) => !r.endsWith('pages-client.tsx'));
+    expect(offenders).toEqual([]);
+  });
+});

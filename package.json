@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "create-owner": "tsx scripts/create-owner.ts",
     "check-db": "tsx scripts/check-db.ts",
+    "worker": "tsx scripts/worker.ts",
     "test": "vitest run",
     "test:pg": "vitest run --config vitest.pg.config.ts",
     "test:all": "npm test && npm run test:pg"

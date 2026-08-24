@@ -122,7 +122,14 @@ async function handle(
     const args = (body ?? {}) as Record<string, unknown>;
     const names = Object.keys(args);
     const sql = `select * from ${q(fn)}(${names.map((n, i) => `${n} => $${i + 1}`).join(', ')})`;
-    const r = await pool.query(sql, names.map((n) => args[n]));
+    // ⚠️ ค่า array ของ JavaScript ต้องแปลงเป็นข้อความ JSON ก่อน
+    //    ไม่งั้น node-postgres จะแปลงเป็น array ของ Postgres ({...}) ซึ่งใส่ในช่อง jsonb ไม่ได้
+    //    (ตัว PostgREST จริงรับ JSON มาทั้งก้อนอยู่แล้ว จึงไม่มีปัญหานี้)
+    //    ถ้าวันหนึ่งมีฟังก์ชันที่รับ text[] / uuid[] จริง ๆ ต้องกลับมาแก้ตรงนี้
+    const r = await pool.query(
+      sql,
+      names.map((n) => (Array.isArray(args[n]) ? JSON.stringify(args[n]) : args[n])),
+    );
     return send(res, 200, r.rows.length === 1 && Object.keys(r.rows[0]).length === 0 ? null : r.rows);
   }
 
