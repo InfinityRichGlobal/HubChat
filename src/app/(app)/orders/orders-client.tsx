@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ClipboardCopy, Loader2, MessageSquare, PackageSearch, Search, Truck } from 'lucide-react';
+import { ClipboardCopy, Loader2, MessageSquare, PackageSearch, Receipt, Search, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -280,6 +280,8 @@ function OrderDetailDialog({
   const [logs, setLogs] = useState<OrderLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingSlip, setUploadingSlip] = useState(false);
+  const slipRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!orderId) return;
@@ -332,6 +334,34 @@ function OrderDetailDialog({
       toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * อัปโหลดสลิปโอนเงิน (D-17)
+   * 🔴 สลิปคือหลักฐานการชำระเงิน — เก็บไว้เองอย่างถาวร ไม่ใช่ลิงก์ชั่วคราว
+   */
+  async function uploadSlip(file: File | null) {
+    if (!file || !orderId || uploadingSlip) return;
+    setUploadingSlip(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`/api/orders/${orderId}/slip`, { method: 'POST', body });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        toast.error(json?.error?.message_th ?? 'อัปโหลดสลิปไม่สำเร็จ');
+        return;
+      }
+      setOrder(json.data.order as OrderRow);
+      toast.success('เก็บสลิปแล้ว');
+      onSaved();
+    } catch (err) {
+      console.error('[orders] อัปโหลดสลิปไม่สำเร็จ:', err);
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setUploadingSlip(false);
+      if (slipRef.current) slipRef.current.value = '';
     }
   }
 
@@ -410,6 +440,65 @@ function OrderDetailDialog({
                     คัดลอก
                   </Button>
                 </div>
+              </div>
+
+              {/* ---- สลิปโอนเงิน (D-17) ---- */}
+              <div className="rounded-md border p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    <Receipt className="size-4" />
+                    สลิปโอนเงิน
+                  </div>
+                  {canEdit && (
+                    <>
+                      <input
+                        ref={slipRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => void uploadSlip(e.target.files?.[0] ?? null)}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={uploadingSlip}
+                        onClick={() => slipRef.current?.click()}
+                      >
+                        {uploadingSlip && <Loader2 className="animate-spin" />}
+                        {order.slip_media_id ? 'เปลี่ยนสลิป' : 'แนบสลิป'}
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                {order.slip_media_id ? (
+                  <a
+                    href={`/api/media/${order.slip_media_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 block"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/media/${order.slip_media_id}`}
+                      alt="สลิปโอนเงิน"
+                      className="max-h-48 rounded border object-contain"
+                      onError={(e) => {
+                        const el = e.currentTarget;
+                        el.style.display = 'none';
+                        const note = el.parentElement?.nextElementSibling as HTMLElement | null;
+                        if (note) note.style.display = 'block';
+                      }}
+                    />
+                  </a>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    ยังไม่มีสลิป — แนบไว้เพื่อใช้เป็นหลักฐานย้อนหลังได้ตลอด
+                  </p>
+                )}
+                <p style={{ display: 'none' }} className="mt-1 text-xs text-muted-foreground">
+                  เปิดสลิปไม่ได้ — กดที่รูปเพื่อเปิดในแท็บใหม่
+                </p>
               </div>
 
               {/* ---- สถานะ ---- */}

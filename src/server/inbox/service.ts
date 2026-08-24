@@ -62,7 +62,12 @@ export type MessageRow = {
   admin_id: string | null;
   admin_name: string | null;
   text: string | null;
-  attachments: Array<{ type: string; url?: string }>;
+  /**
+   * ไฟล์แนบ
+   * ⭐ media_id = สำเนาที่เราเก็บไว้เอง (D-17) — ใช้ตัวนี้ก่อนเสมอ
+   *    url = ลิงก์ชั่วคราวของ Meta ซึ่งหมดอายุ ใช้เป็นทางสำรองเท่านั้น
+   */
+  attachments: Array<{ type: string; url?: string; media_id?: string }>;
   sent_with_human_agent_tag: boolean;
   created_at: string;
 };

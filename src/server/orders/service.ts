@@ -206,6 +206,7 @@ export type OrderRow = {
   payment_method: PaymentMethod | null;
   payment_status: PaymentStatus;
   slip_url: string | null;
+  slip_media_id: string | null;
   shipping_carrier: string | null;
   shipping_method_id: string | null;
   /** สำเนาวิธีจัดส่ง ณ ตอนสร้าง — ออเดอร์เก่าต้องไม่เปลี่ยนตามค่าส่งที่แก้ทีหลัง */
@@ -221,7 +222,7 @@ export type OrderRow = {
 
 const ORDER_COLUMNS =
   'id,order_no,conversation_id,customer_id,page_id,recipient_name,phone,address,postcode,' +
-  'items,subtotal,shipping_fee,discount,total,payment_method,payment_status,slip_url,' +
+  'items,subtotal,shipping_fee,discount,total,payment_method,payment_status,slip_url,slip_media_id,' +
   'shipping_carrier,shipping_method_id,shipping_snapshot,tracking_no,status,referral_ad_id,' +
   'internal_note,created_by_admin_id,created_at,updated_at';
 
@@ -365,6 +366,8 @@ export type OrderPatch = Partial<{
   payment_method: PaymentMethod | null;
   payment_status: PaymentStatus;
   slip_url: string | null;
+  /** สลิปที่เก็บไว้เองอย่างถาวร (D-17) — ผูกกับ media_assets */
+  slip_media_id: string | null;
   shipping_carrier: string | null;
   /**
    * เปลี่ยนวิธีจัดส่งได้ แต่ "สำเนา" ของวิธีจัดส่งเปลี่ยนเองไม่ได้

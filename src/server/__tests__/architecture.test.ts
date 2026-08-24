@@ -743,3 +743,76 @@ describe('🔴 ข้อมูลที่ทำให้ออเดอร์�
     expect(migrations).toMatch(/create unique index[^;]*auto_reply_executions \(message_id\)/);
   });
 });
+
+/* ================================================================== */
+/* D-17 — เก็บสื่อไว้เองอย่างถาวร                                        */
+/* ================================================================== */
+describe('🔴 ที่เก็บไฟล์ต้องอยู่ฝั่งเซิร์ฟเวอร์ที่เดียว', () => {
+  it('r2.cloudflarestorage.com ปรากฏได้เฉพาะใน server/storage/r2.ts', () => {
+    const offenders = CODE_FILES.filter(
+      (f) => read(f).includes('r2.cloudflarestorage.com') && rel(f) !== 'server/storage/r2.ts',
+    ).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('🔴 กุญแจของ R2 ห้ามหลุดไปฝั่งเบราว์เซอร์', () => {
+    const clientFiles = CODE_FILES.filter((f) => read(f).slice(0, 200).includes("'use client'"));
+    const offenders = clientFiles
+      .filter((f) => /R2_ACCESS_KEY|R2_SECRET|aws4fetch|AwsClient/.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ชั้นที่เก็บไฟล์ต้องประกาศ server-only', () => {
+    for (const target of ['server/storage/r2.ts', 'server/storage/media.ts']) {
+      const file = CODE_FILES.find((f) => rel(f) === target);
+      expect(file, `ไม่พบไฟล์ ${target}`).toBeDefined();
+      expect(read(file!), `${target} ต้องมี import 'server-only'`).toContain("import 'server-only'");
+    }
+  });
+
+  it('🔴 การแยก "ลิงก์หมดอายุ" ต้องใช้ชนิดของ error ไม่ใช่เดาจากข้อความ', () => {
+    // เคยเขียนแบบอ่านเลขจากข้อความแล้วพลาด : R2 ตอบ 403 → ไปจดว่าไฟล์ลูกค้าหายถาวร
+    const media = CODE_FILES.find((f) => rel(f) === 'server/storage/media.ts');
+    expect(media).toBeDefined();
+    const src = read(media!);
+    expect(src).toContain('SourceGoneError');
+    // ต้องไม่มี regex ที่ไล่จับเลขสถานะจากข้อความ error
+    expect(src).not.toMatch(/\(403\|404\|410\)/);
+  });
+
+  it('🔴 เสิร์ฟไฟล์ต้องตรวจสิทธิ์รายเพจทุกครั้ง', () => {
+    const route = CODE_FILES.find((f) => rel(f) === 'app/api/media/[id]/route.ts');
+    expect(route, 'ไม่พบ route เสิร์ฟไฟล์').toBeDefined();
+    const src = read(route!);
+    // ถ้าไม่ตรวจ แอดมินที่ไม่มีสิทธิ์เห็นเพจจะเปิดสลิปของเพจนั้นได้
+    expect(src).toContain('canSeePage');
+    expect(src).toContain('requireAdmin');
+  });
+
+  it('การเก็บไฟล์ต้องจองสิทธิ์กับฐานข้อมูลก่อนโหลดเสมอ', () => {
+    const media = CODE_FILES.find((f) => rel(f) === 'server/storage/media.ts');
+    const src = read(media!);
+    const claimAt = src.indexOf('claim_media');
+    const fetchAt = src.indexOf('fetchAndStore(');
+    expect(claimAt).toBeGreaterThan(-1);
+    expect(fetchAt).toBeGreaterThan(-1);
+    expect(claimAt).toBeLessThan(fetchAt);
+  });
+
+  it('การกันโหลดซ้ำต้องมาจาก unique index ของฐานข้อมูล', () => {
+    const migrations = readdirSync(path.resolve(SRC, '../supabase/migrations'))
+      .filter((f) => f.endsWith('.sql'))
+      .map((f) => readFileSync(path.resolve(SRC, '../supabase/migrations', f), 'utf8'))
+      .join('\n');
+    expect(migrations).toMatch(/create unique index[^;]*media_assets \(message_id, attachment_index\)/);
+  });
+
+  it('⭐ ระบบต้องทำงานได้แม้ยังไม่ได้ตั้งค่า R2', () => {
+    // ถ้าบังคับให้ตั้งค่าก่อน = เจ้าของร้านใช้ระบบไม่ได้จนกว่าจะเปิดบัญชี R2
+    const r2 = CODE_FILES.find((f) => rel(f) === 'server/storage/r2.ts');
+    expect(read(r2!)).toContain('isStorageConfigured');
+    const media = CODE_FILES.find((f) => rel(f) === 'server/storage/media.ts');
+    expect(read(media!)).toContain('isStorageConfigured');
+  });
+});

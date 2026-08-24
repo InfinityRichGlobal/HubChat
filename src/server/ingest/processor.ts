@@ -17,6 +17,7 @@ import type { MetaPage } from '@/server/meta/client';
 import type { Platform } from '@/types/db';
 import { parseWebhookPayload } from './parse';
 import { runAutoReply } from '@/server/autoreply/runner';
+import { captureInboundMedia } from '@/server/storage/media';
 import { claimJobs, finishJob, nextStatusAfterFailure, type QueueJob } from './queue';
 import type { EchoMessageEvent, InboundMessageEvent } from './types';
 
@@ -33,6 +34,10 @@ export type ProcessSummary = {
   auto_replied: number;
   /** เข้าเงื่อนไขแต่ Policy Engine ไม่อนุญาต */
   auto_blocked: number;
+  /** ไฟล์แนบที่เก็บลงที่เก็บถาวรได้แล้ว (D-17) */
+  media_stored: number;
+  /** ไฟล์แนบที่เก็บไม่ได้ — รวมกรณีลิงก์หมดอายุ ซึ่งกู้ไม่ได้ */
+  media_failed: number;
 };
 
 const EMPTY_SUMMARY: ProcessSummary = {
@@ -45,6 +50,8 @@ const EMPTY_SUMMARY: ProcessSummary = {
   failed_jobs: 0,
   auto_replied: 0,
   auto_blocked: 0,
+  media_stored: 0,
+  media_failed: 0,
 };
 
 /** ความผิดที่ลองใหม่ไปก็ไม่มีวันหาย */
@@ -181,6 +188,40 @@ async function syncProfileIfNeeded(page: PageRow, customerId: string, psid: stri
 }
 
 /* ------------------------------------------------------------------------ */
+/* เก็บไฟล์แนบไว้เองอย่างถาวร (D-17)                                            */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * ดาวน์โหลดไฟล์ที่ลูกค้าส่งมาเก็บไว้เอง ก่อนลิงก์ของ Meta จะหมดอายุ
+ *
+ * 🔴 ทำก่อนตอบอัตโนมัติโดยตั้งใจ — ลิงก์กำลังเดินนาฬิกาหมดอายุอยู่
+ *    ส่วนการตอบอัตโนมัติรอได้อีกไม่กี่วินาที
+ *
+ * ⚠️ ห่อ try/catch เสมอ : รูปหายยังพอทน แต่ข้อความลูกค้าหายไม่ได้
+ */
+async function maybeCaptureMedia(
+  page: PageRow,
+  row: IngestRow,
+  ev: InboundMessageEvent,
+  summary: ProcessSummary,
+): Promise<void> {
+  if (!row.message_id || ev.attachments.length === 0) return;
+
+  try {
+    const result = await captureInboundMedia({
+      message_id: row.message_id,
+      conversation_id: row.conversation_id,
+      page_id: page.id,
+      attachments: ev.attachments,
+    });
+    summary.media_stored += result.stored;
+    summary.media_failed += result.failed;
+  } catch (err) {
+    console.error('[ingest] เก็บไฟล์แนบไม่สำเร็จ (ข้ามไป ข้อความลูกค้ายังอยู่ครบ):', err);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
 /* ตอบอัตโนมัติด้วยคีย์เวิร์ด (รอบ 6)                                           */
 /* ------------------------------------------------------------------------ */
 
@@ -258,6 +299,8 @@ async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary):
     if (ev.kind === 'inbound_message') {
       summary.inbound_saved += 1;
       await syncProfileIfNeeded(page, row.customer_id, ev.psid);
+      // ⭐ เก็บไฟล์ "ก่อน" ทำอย่างอื่น เพราะลิงก์ของ Meta เดินนาฬิกาหมดอายุอยู่
+      await maybeCaptureMedia(page, row, ev, summary);
       await maybeAutoReply(page, row, ev, summary);
     } else {
       summary.echo_saved += 1;
@@ -314,6 +357,8 @@ export async function drainWebhookQueue(maxRounds = 50, limit = 20): Promise<Pro
     total.failed_jobs += round.failed_jobs;
     total.auto_replied += round.auto_replied;
     total.auto_blocked += round.auto_blocked;
+    total.media_stored += round.media_stored;
+    total.media_failed += round.media_failed;
     if (round.jobs === 0) break;
   }
   return total;

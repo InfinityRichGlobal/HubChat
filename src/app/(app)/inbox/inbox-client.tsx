@@ -1050,42 +1050,60 @@ function MessageBubble({
         {m.text && <p className="whitespace-pre-wrap">{m.text}</p>}
 
         {m.attachments.map((a, i) => {
-          const isImage = a.type === 'image' && Boolean(a.url);
-          if (isImage) {
+          /**
+           * ⭐ ใช้สำเนาที่เราเก็บไว้เองก่อนเสมอ (D-17)
+           *    ลิงก์ของ Meta เป็นของชั่วคราว เปิดได้แค่ช่วงแรกเท่านั้น
+           *    ถ้ามี media_id แปลว่าเราเก็บไฟล์ไว้แล้ว → เปิดได้ตลอดไป
+           */
+          const src = a.media_id ? `/api/media/${a.media_id}` : a.url;
+          const durable = Boolean(a.media_id);
+
+          if (a.type === 'image' && src) {
             return (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                src={a.url!}
-                alt="รูปที่แนบมา"
-                loading="lazy"
-                className="mt-1 max-h-56 w-full rounded-lg object-cover"
-                /**
-                 * ⚠️ ลิงก์รูปจาก Meta เป็นลิงก์ชั่วคราว พอหมดอายุจะโหลดไม่ขึ้น
-                 *    ต้องบอกตรง ๆ ว่าเปิดไม่ได้ ดีกว่าโชว์กรอบว่าง ๆ ให้แอดมินงง
-                 *    ทางแก้จริงคือเก็บสำเนาไว้เอง (D-17 / Cloudflare R2)
-                 */
-                onError={(e) => {
-                  const el = e.currentTarget;
-                  el.style.display = 'none';
-                  const note = el.nextElementSibling as HTMLElement | null;
-                  if (note) note.style.display = 'block';
-                }}
-              />
+              <span key={i} className="mt-1 block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt="รูปที่แนบมา"
+                  loading="lazy"
+                  className="max-h-56 w-full rounded-lg object-cover"
+                  onError={(e) => {
+                    const el = e.currentTarget;
+                    el.style.display = 'none';
+                    const note = el.nextElementSibling as HTMLElement | null;
+                    if (note) note.style.display = 'block';
+                  }}
+                />
+                <span style={{ display: 'none' }} className="text-xs opacity-80">
+                  {durable
+                    ? '🖼️ เปิดรูปไม่ได้ ลองรีเฟรชหน้าอีกครั้ง'
+                    : '🖼️ รูปหมดอายุแล้ว (ยังไม่ได้ตั้งค่าที่เก็บไฟล์) — เปิดดูใน Messenger แทน'}
+                </span>
+              </span>
             );
           }
+
+          if (src) {
+            return (
+              <a
+                key={i}
+                href={src}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 block text-xs underline opacity-80"
+                onClick={(e) => e.stopPropagation()}
+              >
+                [เปิดไฟล์แนบ {a.type}]
+              </a>
+            );
+          }
+
           return (
             <span key={i} className="mt-1 block text-xs opacity-80">
               [ไฟล์แนบ {a.type}]
             </span>
           );
         })}
-
-        {m.attachments.some((a) => a.type === 'image' && a.url) && (
-          <span style={{ display: 'none' }} className="mt-1 text-xs opacity-80">
-            🖼️ รูปหมดอายุแล้ว (ลิงก์จาก Meta อยู่ได้ไม่นาน) — เปิดดูใน Messenger แทน
-          </span>
-        )}
       </button>
 
       <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
