@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
       search: params.get('search') ?? undefined,
       unread_only: params.get('unread') === '1',
       limit: params.get('limit') ? Number(params.get('limit')) : undefined,
+      // cursor = last_message_at ของห้องสุดท้ายที่หน้าเว็บถืออยู่ (ขอของเก่ากว่านั้น)
+      before: params.get('before'),
     });
 
     return ok(result);

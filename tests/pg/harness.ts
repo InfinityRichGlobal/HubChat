@@ -165,8 +165,20 @@ async function handle(
   for (const [k, v] of url.searchParams.entries()) {
     if (k === 'select') { selectParam = v; continue; }
     if (k === 'order') {
-      const [col, dir] = v.split('.');
-      order = ` order by ${q(col)} ${dir === 'desc' ? 'desc' : 'asc'}`;
+      /**
+       * ⚠️ PostgREST รับหลายคอลัมน์คั่นด้วยจุลภาค เช่น order=created_at.desc,id.desc
+       *    ตอนแรกตัวจำลองอ่านแค่คอลัมน์แรก ทำให้ "ตัวตัดสินตอนเวลาเท่ากัน"
+       *    ที่เพิ่งใส่เข้าไปกลายเป็นของหลอก — เทสต์ผ่านทั้งที่ของจริงยังไม่คงที่
+       *    (บทเรียนเดียวกับ D-50 เรื่องตัวดำเนินการ is)
+       */
+      const parts = v
+        .split(',')
+        .map((one) => {
+          const [col, dir] = one.split('.');
+          return `${q(col)} ${dir === 'desc' ? 'desc' : 'asc'}`;
+        })
+        .filter(Boolean);
+      if (parts.length > 0) order = ` order by ${parts.join(', ')}`;
       continue;
     }
     if (k === 'limit') { limit = ` limit ${parseInt(v, 10)}`; continue; }

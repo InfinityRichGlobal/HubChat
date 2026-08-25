@@ -16,10 +16,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const admin = await requireAdmin();
     const { id } = await ctx.params;
-    const limit = req.nextUrl.searchParams.get('limit');
+    const sp = req.nextUrl.searchParams;
+    const limit = sp.get('limit');
+    // cursor = เวลาของข้อความที่เก่าที่สุดที่หน้าเว็บถืออยู่ (ขอของเก่ากว่านั้น)
+    const before = sp.get('before');
 
-    const messages = await listMessages(admin, id, limit ? Number(limit) : undefined);
-    return ok({ messages });
+    const page = await listMessages(
+      admin,
+      id,
+      limit ? Number(limit) : undefined,
+      before,
+    );
+    return ok({ messages: page.messages, has_more: page.has_more });
   } catch (err) {
     if (err instanceof InboxAccessError) return fail('forbidden', err.message, 403);
     return toErrorResponse(err);

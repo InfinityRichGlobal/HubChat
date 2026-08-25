@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Plus, PlugZap, RefreshCw, ShieldCheck, ShieldAlert } from 'lucide-react';
+import {
+  Loader2, Plus, PlugZap, RefreshCw, ShieldCheck, ShieldAlert, History, Square,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -142,6 +144,19 @@ export default function PagesClient({ initialPages }: { initialPages: SafePage[]
         </Alert>
       )}
 
+      {initialPages.length > 0 && (
+        <Alert>
+          <History className="size-4" />
+          <AlertTitle>เปิดระบบมาแล้วเห็นแต่แชททดสอบ? เป็นเรื่องปกติ</AlertTitle>
+          <AlertDescription>
+            Meta ส่งข้อความให้เราเฉพาะที่เกิด &quot;หลังจาก&quot; เชื่อมเพจเท่านั้น
+            แชทเก่าที่มีอยู่ก่อนหน้าจะไม่ไหลเข้ามาเอง ต้องกดปุ่ม
+            &quot;ดึงแชทเก่าเข้าระบบ&quot; ที่การ์ดของเพจนั้น
+            ระบบจะทยอยดึงเป็นชุด ๆ กดซ้ำได้ไม่มีปัญหา เพราะข้อความที่มีอยู่แล้วจะไม่ถูกบันทึกซ้ำ
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-col gap-3">
         {initialPages.map((p) => (
           <Card key={p.id}>
@@ -184,6 +199,7 @@ export default function PagesClient({ initialPages }: { initialPages: SafePage[]
               <Button variant="outline" size="sm" onClick={() => setTokenFor(p)}>
                 {p.has_token ? 'เปลี่ยน token' : 'ใส่ token'}
               </Button>
+              <SyncButton page={p} onDone={() => startTransition(() => router.refresh())} />
               <div className="ml-auto flex items-center gap-2">
                 <Label htmlFor={`active-${p.id}`} className="text-xs text-muted-foreground">
                   เปิดใช้งาน
@@ -390,5 +406,145 @@ function TokenDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* ปุ่มดึงแชทเก่า (รอบ 7)                                                       */
+/* ------------------------------------------------------------------------ */
+
+type SyncTally = {
+  conversations: number;
+  saved: number;
+  duplicates: number;
+  rounds: number;
+};
+
+/**
+ * เพดานจำนวนรอบต่อการกดหนึ่งครั้ง
+ *
+ * ⚠️ ต้องมีเพดานเสมอ ห้ามวนจนกว่าจะหมดโดยไม่มีขอบเขต
+ *    ถ้า Meta ส่ง cursor เดิมกลับมาซ้ำ ๆ (เคยเกิดจริงกับ API ตระกูลนี้)
+ *    หน้าเว็บจะยิงไม่หยุดจนโดนตัดโควตาทั้งเพจ แล้วข้อความจริงจะเข้าไม่ได้ด้วย
+ *    1 รอบ = 10 หน้าของ Meta = ~250 ห้องแชท ดังนั้น 20 รอบ ≈ 5,000 ห้อง
+ */
+const MAX_ROUNDS_PER_CLICK = 20;
+
+function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
+  const [running, setRunning] = useState(false);
+  const [tally, setTally] = useState<SyncTally | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const stopRef = useRef(false);
+
+  async function run() {
+    setRunning(true);
+    stopRef.current = false;
+    const total: SyncTally = { conversations: 0, saved: 0, duplicates: 0, rounds: 0 };
+    let next = cursor;
+    let problem: string | null = null;
+
+    try {
+      for (let round = 0; round < MAX_ROUNDS_PER_CLICK; round += 1) {
+        if (stopRef.current) break;
+
+        const res = await fetch(`/api/pages/${page.id}/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ after: next }),
+        });
+        const json = await res.json();
+
+        if (!res.ok || !json.ok) {
+          problem = json?.error?.message_th ?? 'ดึงแชทเก่าไม่สำเร็จ';
+          break;
+        }
+
+        const s = json.data.summary as {
+          conversations_seen: number;
+          messages_saved: number;
+          duplicates: number;
+          has_more: boolean;
+          next_cursor: string | null;
+          error_th: string | null;
+        };
+
+        total.conversations += s.conversations_seen;
+        total.saved += s.messages_saved;
+        total.duplicates += s.duplicates;
+        total.rounds += 1;
+        setTally({ ...total });
+
+        // ⚠️ ซิงก์ "สำเร็จบางส่วน" ก็ยังนับของที่ได้มา แล้วค่อยหยุด
+        if (s.error_th) {
+          problem = s.error_th;
+          next = s.next_cursor;
+          break;
+        }
+
+        if (!s.has_more || !s.next_cursor) {
+          next = null;
+          break;
+        }
+
+        // 🔴 กันวนไม่รู้จบ : ถ้า cursor ไม่ขยับ แปลว่าเดินหน้าต่อไม่ได้จริง
+        if (s.next_cursor === next) {
+          next = null;
+          break;
+        }
+        next = s.next_cursor;
+      }
+    } catch (err) {
+      console.error('[sync] ดึงแชทเก่าไม่สำเร็จ:', err);
+      problem = 'ติดต่อเซิร์ฟเวอร์ไม่ได้ระหว่างดึงแชทเก่า';
+    } finally {
+      setCursor(next ?? null);
+      setRunning(false);
+      onDone();
+    }
+
+    const line =
+      `ห้องแชท ${total.conversations} · ข้อความใหม่ ${total.saved} · มีอยู่แล้ว ${total.duplicates}`;
+
+    if (problem) {
+      toast.error(problem, { description: `ที่ดึงมาได้แล้วยังอยู่ครบ — ${line}` });
+    } else if (total.saved === 0 && total.conversations > 0) {
+      toast.success('ซิงก์เรียบร้อย — ไม่มีข้อความใหม่', { description: line });
+    } else if (total.conversations === 0) {
+      toast.info('Meta ไม่ได้ส่งห้องแชทกลับมาเลย', {
+        description:
+          'ถ้าเพจมีลูกค้าทักจริง แปลว่า token ยังไม่มีสิทธิ์อ่านกล่องข้อความ — ลองสร้าง token ใหม่ให้ครบสิทธิ์',
+      });
+    } else {
+      toast.success(`ดึงแชทเก่าเข้าระบบแล้ว`, { description: line });
+    }
+  }
+
+  if (running) {
+    return (
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" disabled>
+          <Loader2 className="animate-spin" />
+          กำลังดึง…
+          {tally && ` ${tally.conversations} ห้อง / ${tally.saved} ข้อความ`}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            stopRef.current = true;
+          }}
+        >
+          <Square />
+          หยุด
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={run} disabled={!page.has_token}>
+      <History />
+      {cursor ? 'ดึงต่อ (ยังเหลืออีก)' : 'ดึงแชทเก่าเข้าระบบ'}
+    </Button>
   );
 }

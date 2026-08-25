@@ -151,8 +151,14 @@ export async function metaGet(
   const env = serverEnv();
   const token = pageToken(page);
   const qs = new URLSearchParams(params).toString();
-  const url =
-    `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${encodeURIComponent(pathSegment)}` + (qs ? `?${qs}` : '');
+  /**
+   * 🔴 ต้องเข้ารหัส "ทีละท่อน" ไม่ใช่ทั้งเส้น
+   *    encodeURIComponent('12345/conversations') จะได้ '12345%2Fconversations'
+   *    ซึ่ง Meta จะมองว่าเป็นชื่อวัตถุชิ้นเดียว แล้วตอบ error 100 กลับมา
+   *    (เดิมไม่มีใครเรียกเส้นทางที่มีเครื่องหมาย / จึงไม่เคยเจอ — รอบ 7 เป็นรายแรก)
+   */
+  const safePath = pathSegment.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${safePath}` + (qs ? `?${qs}` : '');
 
   let res: Response;
   try {

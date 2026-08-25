@@ -79,6 +79,12 @@ export type ListFilters = {
   /** กรองเฉพาะห้องที่ติดแท็กใดแท็กหนึ่งในรายการนี้ */
   tag_ids?: string[];
   limit?: number;
+  /**
+   * ขอห้องที่เก่ากว่าเวลานี้ (ค่าของ last_message_at จากห้องสุดท้ายที่หน้าเว็บถืออยู่)
+   * ⭐ ใช้ lte ไม่ใช่ lt เพราะการดึงแชทเก่าเข้ามาทำให้หลายห้องมีเวลาเท่ากันเป๊ะได้
+   *    หน้าเว็บกรองตัวซ้ำที่ขอบทิ้งด้วย id เอง
+   */
+  before?: string | null;
 };
 
 export class InboxAccessError extends Error {}
@@ -132,9 +138,9 @@ async function adminNames(ids: string[]): Promise<Map<string, string>> {
 export async function listConversations(
   admin: PublicAdmin,
   filters: ListFilters = {},
-): Promise<{ conversations: ConversationRow[]; pages: InboxPage[] }> {
+): Promise<{ conversations: ConversationRow[]; pages: InboxPage[]; has_more: boolean }> {
   const pages = await visiblePages(admin);
-  if (pages.size === 0) return { conversations: [], pages: [] };
+  if (pages.size === 0) return { conversations: [], pages: [], has_more: false };
 
   // ตัวกรองเพจจากหน้าเว็บ ต้องตัดเพจที่ไม่มีสิทธิ์ทิ้งเสมอ
   const requested = filters.page_ids?.filter((id) => pages.has(id));
@@ -155,14 +161,18 @@ export async function listConversations(
       .or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
       .limit(500);
     customerIdFilter = ((data ?? []) as Array<{ id: string }>).map((c) => c.id);
-    if (customerIdFilter.length === 0) return { conversations: [], pages: [...pages.values()] };
+    if (customerIdFilter.length === 0) {
+      return { conversations: [], pages: [...pages.values()], has_more: false };
+    }
   }
 
   /* --- ตัวกรองแท็ก : หาว่าห้องไหนติดแท็กที่เลือกไว้บ้าง --- */
   let conversationIdFilter: string[] | null = null;
   if (filters.tag_ids && filters.tag_ids.length > 0) {
     conversationIdFilter = await conversationIdsWithTags(filters.tag_ids);
-    if (conversationIdFilter.length === 0) return { conversations: [], pages: [...pages.values()] };
+    if (conversationIdFilter.length === 0) {
+      return { conversations: [], pages: [...pages.values()], has_more: false };
+    }
   }
 
   let query = db()
@@ -173,11 +183,14 @@ export async function listConversations(
     )
     .in('page_id', pageIds)
     .order('last_message_at', { ascending: false })
+    // ⭐ ตัวตัดสินตอนเวลาเท่ากัน — ดูเหตุผลเดียวกับใน listMessages
+    .order('id', { ascending: false })
     .limit(limit);
 
   if (filters.unread_only) query = query.eq('is_read', false);
   if (customerIdFilter) query = query.in('customer_id', customerIdFilter);
   if (conversationIdFilter) query = query.in('id', conversationIdFilter);
+  if (filters.before) query = query.lte('last_message_at', filters.before);
 
   const { data: convRows, error } = await query;
   if (error) throw new Error(`อ่านลิสต์แชทไม่สำเร็จ: ${error.message}`);
@@ -197,7 +210,10 @@ export async function listConversations(
     referral_ref: string | null;
   }>;
 
-  if (rows.length === 0) return { conversations: [], pages: [...pages.values()] };
+  // เช็คก่อนกรองอะไรทั้งสิ้น — ได้ครบเพดาน = ยังมีของเก่ากว่านั้นอีก
+  const hasMore = rows.length === limit;
+
+  if (rows.length === 0) return { conversations: [], pages: [...pages.values()], has_more: false };
 
   const [customers, names, tagMap] = await Promise.all([
     db()
@@ -253,7 +269,7 @@ export async function listConversations(
     ];
   });
 
-  return { conversations, pages: [...pages.values()] };
+  return { conversations, pages: [...pages.values()], has_more: hasMore };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -279,27 +295,59 @@ async function requireConversationAccess(
   return row;
 }
 
+export type MessagePage = {
+  messages: MessageRow[];
+  /** true = ยังมีข้อความเก่ากว่านี้อีก — หน้าเว็บเอาไว้ตัดสินใจโชว์ปุ่ม "ดูข้อความเก่ากว่านี้" */
+  has_more: boolean;
+};
+
+/**
+ * อ่านข้อความในห้องแชท (ล่าสุดก่อน แล้วกลับลำดับให้อ่านตามเวลา)
+ *
+ * @param before ส่งเวลาของข้อความที่เก่าที่สุดที่หน้าเว็บถืออยู่ เพื่อขอของเก่ากว่านั้น
+ *
+ * ⭐ ใช้ lte ไม่ใช่ lt โดยตั้งใจ :
+ *    ข้อความที่ดึงย้อนหลังมาจาก Meta หลายข้อความมีเวลาเท่ากันเป๊ะได้
+ *    ถ้าใช้ lt ข้อความที่เวลาตรงกับขอบพอดีจะหายไปเงียบ ๆ ทั้งกลุ่ม
+ *    ผลข้างเคียงคือจะได้ของซ้ำมาหนึ่งชุดที่ขอบ — หน้าเว็บกรองด้วย id ทิ้งเอง
+ */
 export async function listMessages(
   admin: PublicAdmin,
   conversationId: string,
   limit = 100,
-): Promise<MessageRow[]> {
+  before?: string | null,
+): Promise<MessagePage> {
   await requireConversationAccess(admin, conversationId);
 
-  const { data, error } = await db()
+  const capped = Math.min(Math.max(limit, 1), 300);
+
+  let query = db()
     .from('messages')
-    .select('id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at,is_deleted')
+    .select('id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at')
     .eq('conversation_id', conversationId)
+    // ⭐ กรองข้อความที่ถูกลบ "ในฐานข้อมูล" ไม่ใช่กรองทีหลังใน JavaScript
+    //    เคยกรองทีหลังแล้วเจอปัญหา : ถ้ามีข้อความถูกลบติดกันเกินขนาดชุดหนึ่งชุด
+    //    ชุดที่ได้จะว่างเปล่า หน้าเว็บก็จะเข้าใจว่า "หมดแล้ว" แล้วอ่านของเก่ากว่านั้นไม่ได้อีกเลย
+    .eq('is_deleted', false);
+
+  if (before) query = query.lte('created_at', before);
+
+  const { data, error } = await query
     .order('created_at', { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 300));
+    // ⭐ ตัวตัดสินตอนเวลาเท่ากันเป๊ะ — จำเป็นมากกับแชทที่ดึงย้อนหลังมาจาก Meta
+    //    เพราะ created_time ของ Meta ละเอียดแค่ระดับวินาที ข้อความรัว ๆ จะเวลาซ้ำกัน
+    //    ถ้าไม่มีตัวนี้ ลำดับจะไม่คงที่ แล้วการไล่ย้อนหลังจะข้ามข้อความหายไปเงียบ ๆ
+    .order('id', { ascending: false })
+    .limit(capped);
 
   if (error) throw new Error(`อ่านข้อความไม่สำเร็จ: ${error.message}`);
 
-  const rows = ((data ?? []) as Array<MessageRow & { is_deleted: boolean }>).filter((m) => !m.is_deleted);
+  const rows = (data ?? []) as MessageRow[];
+  const hasMore = rows.length === capped;
   const names = await adminNames(rows.map((m) => m.admin_id).filter((v): v is string => Boolean(v)));
 
   // ดึงมาจากใหม่ไปเก่าเพื่อให้ได้ "ล่าสุด N ข้อความ" แล้วค่อยกลับลำดับให้อ่านตามเวลา
-  return rows
+  const messages = rows
     .map((m) => ({
       id: m.id,
       direction: m.direction,
@@ -312,6 +360,8 @@ export async function listMessages(
       created_at: m.created_at,
     }))
     .reverse();
+
+  return { messages, has_more: hasMore };
 }
 
 /* ------------------------------------------------------------------------ */

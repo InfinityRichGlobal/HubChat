@@ -19,7 +19,7 @@ export default async function InboxPage({
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
 
-  const [{ conversations, pages }, sp] = await Promise.all([
+  const [{ conversations, pages, has_more }, sp] = await Promise.all([
     listConversations(result.admin),
     searchParams,
   ]);
@@ -29,6 +29,7 @@ export default async function InboxPage({
       me={{ id: result.admin.id, name: result.admin.name }}
       canReply={can(result.admin.role, 'chat.reply')}
       initialConversations={conversations}
+      initialHasMore={has_more}
       initialConversationId={sp.c ?? null}
       pages={pages}
     />

@@ -268,7 +268,145 @@ describe.skipIf(!available)('PostgreSQL จริง — หน้าอิน�
       [ids.convA, base / 1000, (base + 1000) / 1000, (base + 2000) / 1000],
     );
 
-    const messages = await listMessages(OWNER, ids.convA);
+    const { messages } = await listMessages(OWNER, ids.convA);
     expect(messages.map((m) => m.text)).toEqual(['ข้อความที่ 1', 'ข้อความที่ 2']);
+  });
+
+  /* -------------------------------------------------------------- *
+   * รอบ 7 — ไล่อ่านข้อความเก่าย้อนหลังทีละชุด
+   * 🔴 ก่อนรอบนี้ ห้องแชทเห็นได้แค่ชุดล่าสุดเท่านั้น
+   *    พอดึงแชทเก่าจาก Meta เข้ามาเป็นพันข้อความ ก็ยังอ่านย้อนไม่ได้อยู่ดี
+   * -------------------------------------------------------------- */
+  it('⭐ ขอข้อความเก่ากว่าที่ถืออยู่ได้ และไล่ย้อนจนครบทุกข้อความ', async () => {
+    const base = Date.now() - 3_600_000;
+    const values = Array.from({ length: 12 }, (_, i) => `ข้อความที่ ${i + 1}`);
+    for (let i = 0; i < values.length; i += 1) {
+      await pool.query(
+        `insert into messages (conversation_id, direction, sender_type, text, created_at)
+         values ($1,'in','customer',$2, to_timestamp($3))`,
+        [ids.convA, values[i], (base + i * 60_000) / 1000],
+      );
+    }
+
+    const first = await listMessages(OWNER, ids.convA, 5);
+    expect(first.messages).toHaveLength(5);
+    // ได้ "ล่าสุด 5 ข้อความ" แล้วเรียงเก่า→ใหม่ให้อ่าน
+    expect(first.messages.map((m) => m.text)).toEqual([
+      'ข้อความที่ 8', 'ข้อความที่ 9', 'ข้อความที่ 10', 'ข้อความที่ 11', 'ข้อความที่ 12',
+    ]);
+    expect(first.has_more).toBe(true);
+
+    // ไล่ย้อนไปเรื่อย ๆ จนหมด — เหมือนที่หน้าเว็บกดปุ่ม "ดูข้อความเก่ากว่านี้"
+    const seen = new Map(first.messages.map((m) => [m.id, m.text]));
+    let cursor: string | null = first.messages[0].created_at;
+    for (let round = 0; round < 10 && cursor; round += 1) {
+      const older: Awaited<ReturnType<typeof listMessages>> =
+        await listMessages(OWNER, ids.convA, 5, cursor);
+      const fresh = older.messages.filter((m) => !seen.has(m.id));
+      if (fresh.length === 0) break;
+      for (const m of older.messages) seen.set(m.id, m.text);
+      cursor = older.has_more ? older.messages[0].created_at : null;
+    }
+
+    expect([...seen.values()].sort()).toEqual([...values].sort());
+  });
+
+  /* -------------------------------------------------------------- */
+  it('⭐ ใช้ lte ไม่ใช่ lt — ข้อความที่เวลาตรงขอบพอดีต้องไม่หายไปเงียบ ๆ', async () => {
+    // สามข้อความเวลาเท่ากันเป๊ะ — เกิดได้จริงกับแชทที่ดึงย้อนหลังมาจาก Meta
+    const same = Math.floor((Date.now() - 600_000) / 1000);
+    await pool.query(
+      `insert into messages (conversation_id, direction, sender_type, text, created_at)
+       values ($1,'in','customer','พร้อมกัน A', to_timestamp($2)),
+              ($1,'in','customer','พร้อมกัน B', to_timestamp($2)),
+              ($1,'in','customer','ใหม่กว่า', to_timestamp($3))`,
+      [ids.convA, same, same + 60],
+    );
+
+    const first = await listMessages(OWNER, ids.convA, 2);
+    const cursor = first.messages[0].created_at;
+    const older = await listMessages(OWNER, ids.convA, 5, cursor);
+
+    // ถ้าใช้ lt ข้อความที่เวลาตรงกับขอบจะหายไปทั้งกลุ่ม
+    const texts = new Set([...first.messages, ...older.messages].map((m) => m.text));
+    expect(texts.has('พร้อมกัน A')).toBe(true);
+    expect(texts.has('พร้อมกัน B')).toBe(true);
+    expect(texts.has('ใหม่กว่า')).toBe(true);
+  });
+
+  /* -------------------------------------------------------------- */
+  it('🔴 ข้อความที่ถูกลบติดกันเป็นพรืด ต้องไม่บังประวัติที่อยู่เก่ากว่านั้น', async () => {
+    /**
+     * เดิมกรอง is_deleted ทีหลังใน JavaScript
+     * ถ้าข้อความที่ถูกลบติดกันเกินขนาดชุดหนึ่งชุด ชุดที่ได้จะว่างเปล่า
+     * หน้าเว็บก็จะเข้าใจว่า "ถึงต้นห้องแล้ว" แล้วอ่านของเก่ากว่านั้นไม่ได้อีกเลย
+     */
+    const base = Date.now() - 3_600_000;
+    await pool.query(
+      `insert into messages (conversation_id, direction, sender_type, text, created_at)
+       values ($1,'in','customer','ของเก่าสุด', to_timestamp($2))`,
+      [ids.convA, base / 1000],
+    );
+    for (let i = 1; i <= 6; i += 1) {
+      await pool.query(
+        `insert into messages (conversation_id, direction, sender_type, text, created_at, is_deleted)
+         values ($1,'in','customer',$2, to_timestamp($3), true)`,
+        [ids.convA, `ถูกลบ ${i}`, (base + i * 60_000) / 1000],
+      );
+    }
+    await pool.query(
+      `insert into messages (conversation_id, direction, sender_type, text, created_at)
+       values ($1,'in','customer','ใหม่สุด', to_timestamp($2))`,
+      [ids.convA, (base + 7 * 60_000) / 1000],
+    );
+
+    // ขอทีละ 3 — ถ้ากรองทีหลัง ชุดแรกจะเหลือแค่ 'ใหม่สุด' แล้วบอกว่าหมดแล้ว
+    const first = await listMessages(OWNER, ids.convA, 3);
+    expect(first.messages.map((m) => m.text)).toEqual(['ของเก่าสุด', 'ใหม่สุด']);
+    expect(first.has_more).toBe(false);
+  });
+
+  /* -------------------------------------------------------------- */
+  it('⭐ ลิสต์แชทไล่ดูของเก่ากว่าได้ — จำเป็นเมื่อเพจมีลูกค้าเป็นร้อย', async () => {
+    // เพิ่มห้องแชทของเพจ A อีก 4 ห้อง ไล่เวลาถอยหลังทีละชั่วโมง
+    const extra: string[] = [];
+    for (let i = 1; i <= 4; i += 1) {
+      const customerId = randomUUID();
+      const convId = randomUUID();
+      extra.push(convId);
+      await pool.query(
+        `insert into customers (id, page_id, psid, platform, name)
+         values ($1,$2,$3,'facebook',$4)`,
+        [customerId, ids.pageA, `PSID_EXTRA_${i}`, `ลูกค้า ${i}`],
+      );
+      await pool.query(
+        `insert into conversations (id, customer_id, page_id, last_message_at, is_read)
+         values ($1,$2,$3, now() - ($4 || ' hours')::interval, true)`,
+        [convId, customerId, ids.pageA, String(i + 10)],
+      );
+    }
+
+    const first = await listConversations(ADMIN_A, { limit: 2 });
+    expect(first.conversations).toHaveLength(2);
+    expect(first.has_more).toBe(true);
+
+    const seen = new Set(first.conversations.map((c) => c.id));
+    let cursor: string | null = first.conversations[first.conversations.length - 1].last_message_at;
+    for (let round = 0; round < 10 && cursor; round += 1) {
+      const older: Awaited<ReturnType<typeof listConversations>> =
+        await listConversations(ADMIN_A, { limit: 2, before: cursor });
+      const fresh = older.conversations.filter((c) => !seen.has(c.id));
+      if (fresh.length === 0) break;
+      for (const c of older.conversations) seen.add(c.id);
+      cursor = older.has_more
+        ? older.conversations[older.conversations.length - 1].last_message_at
+        : null;
+    }
+
+    // ต้องได้ครบทุกห้องของเพจ A และต้องไม่หลุดห้องของเพจ B เข้ามา
+    expect(seen.size).toBe(5);
+    expect(seen.has(ids.convA)).toBe(true);
+    expect(seen.has(ids.convB)).toBe(false);
+    for (const id of extra) expect(seen.has(id)).toBe(true);
   });
 });

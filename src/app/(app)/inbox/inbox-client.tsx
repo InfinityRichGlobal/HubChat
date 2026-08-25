@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, ClipboardCopy, Copy, Loader2, Lock, MapPin, MessageSquareOff,
-  Megaphone, Paperclip, Quote, Search, Send, ShoppingCart, Tag as TagIcon, X,
+  ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, Loader2, Lock, MapPin,
+  MessageSquareOff, Megaphone, Paperclip, Phone, Quote, Search, Send, ShoppingCart,
+  Tag as TagIcon, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { mergeByTime } from '@/lib/inbox/merge';
 import { toast } from 'sonner';
 import type { ConversationRow, InboxPage, MessageRow } from '@/server/inbox/service';
 import type { CannedResponse, Tag } from '@/server/content/service';
@@ -54,6 +56,51 @@ function dayTh(iso: string): string {
   const sameDay = d.toDateString() === new Date().toDateString();
   if (sameDay) return clockTh(iso);
   return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+}
+
+/**
+ * ป้ายคั่นวันแบบเดียวกับ Business Suite
+ * ⚠️ เทียบด้วย toDateString() ไม่ใช่การลบเวลา — ไม่งั้นข้ามเที่ยงคืนแล้วเพี้ยน
+ */
+function dayLabelTh(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'วันนี้';
+  if (d.toDateString() === yesterday.toDateString()) return 'เมื่อวาน';
+  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function isSameDayIso(a: string, b: string): boolean {
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
+/**
+ * รวมข้อความ / ลิสต์แชท — ตรรกะจริงอยู่ที่ @/lib/inbox/merge (มีชุดทดสอบคุม)
+ * ===========================================================================
+ * 🔴 ทำไมต้อง "รวม" ไม่ใช่ "ทับทั้งก้อน" :
+ *    อินบ็อกซ์ดึงข้อมูลซ้ำทุกไม่กี่วินาที ถ้าทับทั้งก้อน ของเก่าที่เพิ่งกด
+ *    "ดูข้อความเก่ากว่านี้" มาจะหายวับไปเอง — ใช้งานจริงไม่ได้เลย
+ */
+function mergeMessages(prev: MessageRow[], incoming: MessageRow[], replaceWindow: boolean): MessageRow[] {
+  return mergeByTime(prev, incoming, {
+    timeOf: (m) => m.created_at,
+    newestFirst: false,
+    replaceWindow,
+  });
+}
+
+function mergeConversations(
+  prev: ConversationRow[],
+  incoming: ConversationRow[],
+  replaceWindow: boolean,
+): ConversationRow[] {
+  return mergeByTime(prev, incoming, {
+    timeOf: (c) => c.last_message_at,
+    newestFirst: true,
+    replaceWindow,
+  });
 }
 
 /**
@@ -159,17 +206,25 @@ export default function InboxClient({
   me,
   canReply,
   initialConversations,
+  initialHasMore,
   initialConversationId,
   pages,
 }: {
   me: { id: string; name: string };
   canReply: boolean;
   initialConversations: ConversationRow[];
+  /** ชุดแรกที่เสิร์ฟเวอร์ส่งมาชนเพดานไหม */
+  initialHasMore: boolean;
   /** เปิดห้องนี้ทันที — มาจาก /inbox?c=... ที่หน้าออเดอร์ลิงก์มา */
   initialConversationId?: string | null;
   pages: InboxPage[];
 }) {
   const [conversations, setConversations] = useState(initialConversations);
+  /** ยังมีแชทเก่ากว่าที่โหลดมาอีกไหม (สำคัญมากหลังกดดึงแชทเก่าเข้าระบบ) */
+  const [hasMoreList, setHasMoreList] = useState(initialHasMore);
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** โหลดชุดแรกของ "ตัวกรองชุดนี้" แล้วหรือยัง */
+  const listInitRef = useRef(true);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -205,33 +260,84 @@ export default function InboxClient({
    * ⚠️ ตัวดึงข้อมูล "คืนค่า" อย่างเดียว ไม่ตั้ง state เอง
    *    ผู้เรียกตั้ง state ใน .then() — กันการเรนเดอร์ซ้อนกันเป็นทอด ๆ
    */
-  const fetchList = useCallback(async (): Promise<ConversationRow[] | null> => {
-    const params = new URLSearchParams();
-    if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
-    if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
-    if (search.trim()) params.set('search', search.trim());
-    if (unreadOnly) params.set('unread', '1');
+  const fetchList = useCallback(
+    async (before?: string | null): Promise<{ rows: ConversationRow[]; has_more: boolean } | null> => {
+      const params = new URLSearchParams();
+      if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
+      if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
+      if (search.trim()) params.set('search', search.trim());
+      if (unreadOnly) params.set('unread', '1');
+      if (before) params.set('before', before);
 
-    try {
-      const res = await fetch(`/api/conversations?${params.toString()}`, { cache: 'no-store' });
-      const json = await res.json();
-      return json.ok ? (json.data.conversations as ConversationRow[]) : null;
-    } catch {
-      // เน็ตสะดุดชั่วคราว — เดี๋ยวรอบหน้าก็ได้เอง ไม่ต้องรบกวนแอดมิน
-      return null;
+      try {
+        const res = await fetch(`/api/conversations?${params.toString()}`, { cache: 'no-store' });
+        const json = await res.json();
+        if (!json.ok) return null;
+        return {
+          rows: json.data.conversations as ConversationRow[],
+          has_more: Boolean(json.data.has_more),
+        };
+      } catch {
+        // เน็ตสะดุดชั่วคราว — เดี๋ยวรอบหน้าก็ได้เอง ไม่ต้องรบกวนแอดมิน
+        return null;
+      }
+    },
+    [selectedPages, selectedTags, search, unreadOnly],
+  );
+
+  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean }) => {
+    /**
+     * 🔴 ชุดแรกของตัวกรองชุดใหม่ ต้อง "ทับทั้งก้อน" ไม่ใช่รวมกับของเดิม
+     *    ถ้ารวม ห้องเก่าที่ไม่เข้าเงื่อนไขจะค้างอยู่บนจอ
+     *    เช่น ค้นชื่อลูกค้าแล้วยังเห็นห้องที่ไม่ตรงคำค้นปนอยู่ด้วย
+     *    และ cursor ของปุ่ม "โหลดแชทเพิ่ม" จะเพี้ยนตามไปด้วย
+     */
+    if (!listInitRef.current) {
+      listInitRef.current = true;
+      setConversations(got.rows);
+      setHasMoreList(got.has_more);
+      return;
     }
-  }, [selectedPages, selectedTags, search, unreadOnly]);
+    setConversations((prev) => mergeConversations(prev, got.rows, true));
+  }, []);
 
   const loadList = useCallback(async () => {
-    const rows = await fetchList();
-    if (rows) setConversations(rows);
-  }, [fetchList]);
+    const got = await fetchList();
+    if (got) applyList(got);
+  }, [fetchList, applyList]);
+
+  /** ปุ่ม "โหลดแชทเพิ่ม" */
+  const loadMoreList = useCallback(async () => {
+    if (loadingMore || conversations.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = conversations[conversations.length - 1].last_message_at;
+      const got = await fetchList(oldest);
+      if (!got) {
+        toast.error('โหลดแชทเพิ่มไม่สำเร็จ');
+        return;
+      }
+      const known = new Set(conversations.map((c) => c.id));
+      const fresh = got.rows.filter((c) => !known.has(c.id));
+      // ไม่ได้ของใหม่เลย = หมดจริง ต้องปิดปุ่ม ไม่งั้นกดวนไม่รู้จบ
+      if (fresh.length === 0) {
+        setHasMoreList(false);
+        return;
+      }
+      setConversations((prev) => mergeConversations(prev, got.rows, false));
+      setHasMoreList(got.has_more);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [conversations, loadingMore, fetchList]);
 
   useEffect(() => {
     let alive = true;
+    // ตัวกรองเปลี่ยน = เริ่มนับหนึ่งใหม่ ของเก่าที่กดโหลดไว้ใช้ต่อไม่ได้แล้ว
+    listInitRef.current = false;
     const apply = () => {
-      void fetchList().then((rows) => {
-        if (alive && rows) setConversations(rows);
+      void fetchList().then((got) => {
+        if (alive && got) applyList(got);
       });
     };
     apply();
@@ -241,7 +347,7 @@ export default function InboxClient({
       alive = false;
       clearInterval(timer);
     };
-  }, [fetchList]);
+  }, [fetchList, applyList]);
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<string[]>>) => (id: string) =>
     setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -308,6 +414,16 @@ export default function InboxClient({
                 />
               ))}
             </ul>
+          )}
+
+          {/* ⭐ โหลดแชทเพิ่ม — จำเป็นหลังกด "ดึงแชทเก่าเข้าระบบ" เพราะห้องอาจมีเป็นร้อย */}
+          {hasMoreList && conversations.length > 0 && (
+            <div className="flex justify-center border-t p-2">
+              <Button variant="outline" size="sm" onClick={() => void loadMoreList()} disabled={loadingMore}>
+                {loadingMore ? <Loader2 className="animate-spin" /> : null}
+                โหลดแชทเพิ่ม
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -492,6 +608,12 @@ function ChatRoom({
   onChanged: () => void;
 }) {
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
+  /** ยังมีข้อความเก่ากว่าที่โหลดมาอีกไหม */
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** ผู้ใช้เลื่อนขึ้นไปอ่านของเก่าอยู่ไหม — ใช้ตัดสินว่าจะเด้งลงล่างอัตโนมัติหรือไม่ */
+  const [atBottom, setAtBottom] = useState(true);
+  const [newBelow, setNewBelow] = useState(false);
   const [policy, setPolicy] = useState<PolicyStatus | null>(null);
   const [lockedBy, setLockedBy] = useState<{ name: string; id: string } | null>(null);
   const [text, setText] = useState('');
@@ -508,19 +630,36 @@ function ChatRoom({
   /** กด Escape เพื่อซ่อนรายการชุดคำตอบชั่วคราวโดยไม่ต้องลบข้อความที่พิมพ์ไว้ */
   const [dismissedCanned, setDismissedCanned] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** true = ให้จอเด้งลงล่างเมื่อมีข้อความใหม่ (ใช้ ref เพราะ effect ต้องอ่านค่าล่าสุด) */
+  const stickBottomRef = useRef(true);
+  /** ความสูงเดิมก่อนแทรกของเก่า — ใช้ดึงจอกลับที่เดิมหลังแทรก */
+  const restoreScrollRef = useRef<number | null>(null);
+  /** โหลดครั้งแรกแล้วหรือยัง — ใช้ตั้งค่า "ยังมีของเก่าอีกไหม" เพียงครั้งเดียว */
+  const initializedRef = useRef(false);
+  /** id ของข้อความล่างสุดที่เคยเห็น — ใช้แยก "มีของใหม่จริง" ออกจาก "แค่ดึงข้อมูลรอบใหม่" */
+  const lastMessageIdRef = useRef<string | null>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 
   /* ---- ตัวดึงข้อมูล : คืนค่าอย่างเดียว ไม่ตั้ง state เอง ---- */
-  const fetchMessages = useCallback(async (): Promise<MessageRow[] | null> => {
-    try {
-      const res = await fetch(`/api/conversations/${c.id}/messages`, { cache: 'no-store' });
-      const json = await res.json();
-      return json.ok ? (json.data.messages as MessageRow[]) : null;
-    } catch {
-      return null;
-    }
-  }, [c.id]);
+  const fetchMessages = useCallback(
+    async (before?: string | null): Promise<{ rows: MessageRow[]; has_more: boolean } | null> => {
+      try {
+        const qs = before ? `?before=${encodeURIComponent(before)}` : '';
+        const res = await fetch(`/api/conversations/${c.id}/messages${qs}`, { cache: 'no-store' });
+        const json = await res.json();
+        if (!json.ok) return null;
+        return {
+          rows: json.data.messages as MessageRow[],
+          has_more: Boolean(json.data.has_more),
+        };
+      } catch {
+        return null;
+      }
+    },
+    [c.id],
+  );
 
   const fetchPolicy = useCallback(async (): Promise<PolicyStatus | null> => {
     if (!canReply) return null;
@@ -548,10 +687,53 @@ function ChatRoom({
     }
   }, [c.id, meId]);
 
+  /** รับชุดข้อความล่าสุดเข้ามารวมกับที่ถืออยู่ */
+  const applyLatest = useCallback((got: { rows: MessageRow[]; has_more: boolean }) => {
+    setMessages((prev) => (prev === null ? got.rows : mergeMessages(prev, got.rows, true)));
+    // ⚠️ ตั้ง "ยังมีของเก่าอีกไหม" เฉพาะรอบแรก
+    //    รอบหลัง ๆ ของเก่าที่กดโหลดมาแล้วยังอยู่ในมือ ค่าจาก API จึงไม่ใช่ความจริงอีกต่อไป
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      setHasOlder(got.has_more);
+    }
+  }, []);
+
   const loadMessages = useCallback(async () => {
-    const rows = await fetchMessages();
-    if (rows) setMessages(rows);
-  }, [fetchMessages]);
+    const got = await fetchMessages();
+    if (got) applyLatest(got);
+  }, [fetchMessages, applyLatest]);
+
+  /** ปุ่ม "ดูข้อความเก่ากว่านี้" */
+  const loadOlder = useCallback(async () => {
+    const current = messages;
+    if (!current || current.length === 0 || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const got = await fetchMessages(current[0].created_at);
+      if (!got) {
+        toast.error('โหลดข้อความเก่าไม่สำเร็จ');
+        return;
+      }
+      const known = new Set(current.map((m) => m.id));
+      const fresh = got.rows.filter((m) => !known.has(m.id));
+
+      // 🔴 ไม่ได้ของใหม่เลย = ถึงต้นห้องแล้วจริง ๆ ต้องปิดปุ่ม
+      //    ไม่งั้นจะกดวนได้ไม่รู้จบ (ขอบเวลาซ้ำกันพอดี)
+      if (fresh.length === 0) {
+        setHasOlder(false);
+        return;
+      }
+
+      // จำความสูงไว้ก่อน เพื่อดึงจอกลับจุดเดิมหลังแทรกของเก่าเข้าไปข้างบน
+      restoreScrollRef.current = scrollRef.current?.scrollHeight ?? null;
+      // ⚠️ ต้องรวมกับ "ค่าล่าสุดจริง ๆ" ไม่ใช่ค่าที่จับภาพไว้ก่อน await
+      //    ระหว่างที่รอ Meta ตอบ ตัวดึงอัตโนมัติอาจเพิ่งเอาข้อความใหม่เข้ามา
+      setMessages((prev) => mergeMessages(prev ?? current, got.rows, false));
+      setHasOlder(got.has_more);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [messages, loadingOlder, fetchMessages]);
 
   const loadPolicy = useCallback(async () => {
     const p = await fetchPolicy();
@@ -564,8 +746,8 @@ function ChatRoom({
     void fetch(`/api/conversations/${c.id}/read`, { method: 'POST' }).then(onChanged).catch(() => {});
 
     const pullMessages = () => {
-      void fetchMessages().then((rows) => {
-        if (alive && rows) setMessages(rows);
+      void fetchMessages().then((got) => {
+        if (alive && got) applyLatest(got);
       });
     };
     const pullLock = () => {
@@ -594,9 +776,56 @@ function ChatRoom({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [c.id]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
+  /**
+   * จัดตำแหน่งจอหลังรายการข้อความเปลี่ยน
+   *
+   * 🔴 เดิมเด้งลงล่างทุกครั้งที่ข้อความเปลี่ยน ทำให้อ่านของเก่าไม่ได้เลย
+   *    (ทุก 4 วินาทีจะกระชากลงล่างเอง) — นี่คือเหตุผลหลักที่ใช้ยากกว่า Business Suite
+   */
+  // ⚠️ ใช้ useLayoutEffect เพราะต้องขยับจอ "ก่อน" เบราว์เซอร์วาด
+  //    ถ้าใช้ useEffect จะเห็นจอกระโดดวูบหนึ่งครั้งทุกครั้งที่กดโหลดของเก่า
+  useLayoutEffect(() => {
+    // เพิ่งแทรกของเก่าเข้าไปข้างบน → ดึงจอกลับจุดที่อ่านค้างไว้
+    const before = restoreScrollRef.current;
+    if (before !== null && scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop += el.scrollHeight - before;
+      restoreScrollRef.current = null;
+      return;
+    }
+
+    /**
+     * ⭐ "มีข้อความใหม่" ต้องดูจาก id ของข้อความล่างสุด ไม่ใช่ดูว่า state เปลี่ยน
+     *    เพราะตัวดึงข้อมูลทำงานทุก 4 วินาที และคืนอาเรย์ก้อนใหม่ทุกครั้ง
+     *    ถ้าดูแค่ว่า state เปลี่ยน ป้าย "มีข้อความใหม่" จะเด้งทุก 4 วินาทีทั้งที่ไม่มีอะไรเข้า
+     */
+    const lastId = messages && messages.length > 0 ? messages[messages.length - 1].id : null;
+    const arrived = lastId !== null && lastId !== lastMessageIdRef.current;
+    lastMessageIdRef.current = lastId;
+
+    if (stickBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ block: 'end' });
+      setNewBelow(false);
+    } else if (arrived) {
+      // อยู่ระหว่างอ่านของเก่า → ไม่กระชากจอ แต่บอกให้รู้ว่ามีของใหม่ข้างล่าง
+      setNewBelow(true);
+    }
   }, [messages]);
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    // เผื่อ 60px เพราะความสูงเศษทศนิยมทำให้ไม่เคยเท่ากันเป๊ะ
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    stickBottomRef.current = near;
+    setAtBottom(near);
+    if (near) setNewBelow(false);
+  }
+
+  function jumpToBottom() {
+    stickBottomRef.current = true;
+    setNewBelow(false);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
 
   /* ---- ชุดคำตอบ : พิมพ์ / แล้วค้นทันที (สเปก 5.1) ---- */
   const slashQuery = text.startsWith('/') ? text.slice(1).trim() : null;
@@ -689,6 +918,8 @@ function ChatRoom({
       if (d.sent) {
         clearImage();
         idempotencyKey.current = newIdempotencyKey();
+        // ⭐ ส่งเองแล้วต้องเห็นของตัวเองทันที ถึงจะเลื่อนขึ้นไปอ่านของเก่าค้างอยู่ก็ตาม
+        stickBottomRef.current = true;
         await loadMessages();
         onChanged();
       } else if (d.outcome_unknown) {
@@ -741,6 +972,8 @@ function ChatRoom({
       if (d.sent) {
         setText('');
         idempotencyKey.current = newIdempotencyKey(); // กุญแจใหม่สำหรับข้อความถัดไป
+        // ⭐ ส่งเองแล้วต้องเห็นของตัวเองทันที ถึงจะเลื่อนขึ้นไปอ่านของเก่าค้างอยู่ก็ตาม
+        stickBottomRef.current = true;
         await loadMessages();
         onChanged();
       } else if (d.outcome_unknown) {
@@ -778,7 +1011,44 @@ function ChatRoom({
         <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: c.page.tag_color }} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{c.customer_name || `ลูกค้า ${c.psid.slice(-6)}`}</div>
-          <div className="truncate text-[11px] text-muted-foreground">{c.page.name}</div>
+          {/* ⭐ ข้อมูลลูกค้าย่อ ๆ ตรงหัวห้อง — จะได้ไม่ต้องเปิดฟอร์มที่อยู่เพื่อดูเบอร์ */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+            <span className="truncate">{c.page.name}</span>
+            {c.phone && (
+              <>
+                <span>·</span>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-0.5 underline decoration-dotted"
+                  onClick={() => {
+                    void copyText(c.phone!).then((done) =>
+                      done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'),
+                    );
+                  }}
+                >
+                  <Phone className="size-3" />
+                  {c.phone}
+                </button>
+              </>
+            )}
+            {(() => {
+              const hint = windowHint(c.last_customer_message_at);
+              if (!hint) return null;
+              return (
+                <>
+                  <span>·</span>
+                  <span
+                    className={cn(
+                      hint.tone === 'over' && 'text-destructive',
+                      hint.tone === 'warn' && 'text-amber-600 dark:text-amber-500',
+                    )}
+                  >
+                    กรอบ 24 ชม. {hint.text}
+                  </span>
+                </>
+              );
+            })()}
+          </div>
         </div>
 
         {canReply && (
@@ -828,23 +1098,71 @@ function ChatRoom({
       )}
 
       {/* ---------- ข้อความ ---------- */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {messages === null ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-10 w-2/3" />
-            <Skeleton className="ml-auto h-10 w-1/2" />
-            <Skeleton className="h-10 w-3/5" />
-          </div>
-        ) : messages.length === 0 ? (
-          <p className="py-8 text-center text-xs text-muted-foreground">ยังไม่มีข้อความในห้องนี้</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} onTap={() => setMenuFor(m)} onSwipeRight={() => quote(m)} />
-            ))}
-          </div>
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3">
+          {/* ⭐ ปุ่มโหลดของเก่า — เดิมเห็นได้แค่ชุดล่าสุดเท่านั้น เลื่อนขึ้นไปก็ไม่มีอะไรเพิ่ม */}
+          {hasOlder && (
+            <div className="mb-2 flex justify-center">
+              <Button variant="outline" size="sm" onClick={() => void loadOlder()} disabled={loadingOlder}>
+                {loadingOlder ? <Loader2 className="animate-spin" /> : <ChevronUp />}
+                ดูข้อความเก่ากว่านี้
+              </Button>
+            </div>
+          )}
+          {messages !== null && messages.length > 0 && !hasOlder && (
+            <p className="mb-2 text-center text-[11px] text-muted-foreground">— ต้นห้องแชท —</p>
+          )}
+
+          {messages === null ? (
+            <div className="flex flex-col gap-3">
+              <Skeleton className="h-10 w-2/3" />
+              <Skeleton className="ml-auto h-10 w-1/2" />
+              <Skeleton className="h-10 w-3/5" />
+            </div>
+          ) : messages.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">ยังไม่มีข้อความในห้องนี้</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {messages.map((m, i) => {
+                // ⭐ ป้ายคั่นวัน — จำเป็นมากเมื่อดึงแชทเก่าเข้ามาเป็นปี ๆ
+                const prev = i > 0 ? messages[i - 1] : null;
+                const showDay = prev === null || !isSameDayIso(prev.created_at, m.created_at);
+                return (
+                  <div key={m.id} className="flex flex-col gap-2">
+                    {showDay && (
+                      <div className="my-1 flex items-center gap-2">
+                        <span className="h-px flex-1 bg-border" />
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                          {dayLabelTh(m.created_at)}
+                        </span>
+                        <span className="h-px flex-1 bg-border" />
+                      </div>
+                    )}
+                    <MessageBubble
+                      message={m}
+                      onTap={() => setMenuFor(m)}
+                      onSwipeRight={() => quote(m)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* ⭐ ปุ่มลงล่างสุด — โผล่เฉพาะตอนเลื่อนขึ้นไปอ่านของเก่าอยู่ */}
+        {!atBottom && messages !== null && messages.length > 0 && (
+          <Button
+            size="sm"
+            variant={newBelow ? 'default' : 'secondary'}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-md"
+            onClick={jumpToBottom}
+          >
+            <ArrowDown />
+            {newBelow ? 'มีข้อความใหม่' : 'ลงล่างสุด'}
+          </Button>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* ---------- ช่องพิมพ์ ---------- */}
