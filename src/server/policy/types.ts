@@ -41,6 +41,18 @@ export type SendContent = {
   /** ใช้กับ transport ที่ต้องใช้เทมเพลตที่ได้รับอนุมัติ */
   template_name?: string;
   template_params?: Record<string, string>;
+
+  /**
+   * ⭐ mid ของข้อความที่กำลังตอบกลับ (สำหรับ reply_to.mid ของ Meta)
+   *
+   * 🔴 ค่านี้ต้องถูก "แปลงมาจาก id ข้อความในระบบเรา" ที่ฝั่งเซิร์ฟเวอร์เท่านั้น
+   *    ห้ามรับมาจากหน้าเว็บโดยตรงเด็ดขาด ไม่งั้นจะยัด mid ของห้องอื่นมาได้
+   *    (ดู resolve_reply_target ใน migration 0015)
+   *
+   * ⚠️ ใส่มาไม่ได้แปลว่าจะถูกส่ง — adapter จะใส่ลง payload
+   *    ก็ต่อเมื่อช่องทางนั้นรองรับจริงตาม policy config
+   */
+  reply_to_meta_mid?: string | null;
 };
 
 /**

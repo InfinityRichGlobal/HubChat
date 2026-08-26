@@ -41,6 +41,8 @@ const patchSchema = z.object({
   phone: z.string().trim().max(30).optional().nullable(),
   postcode: z.string().trim().max(10).optional().nullable(),
   address: z.string().trim().max(500).optional().nullable(),
+  /** ข้อมูลชุดนี้ดึงมาจากข้อความไหน — เก็บไว้ตรวจย้อนหลังได้ (ข้อ 1.5) */
+  source_message_id: z.string().uuid().nullish(),
 });
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
@@ -49,7 +51,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params;
     const body = patchSchema.parse(await req.json());
 
-    await updateCustomerContact(admin, id, body);
+    const { source_message_id, ...contact } = body;
+    await updateCustomerContact(admin, id, contact, source_message_id ?? null);
     const current = await getCustomerContact(admin, id);
     return ok({ current });
   } catch (err) {

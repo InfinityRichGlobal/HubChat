@@ -38,10 +38,19 @@ const store = {
   resolveResult: null as unknown,
   /** ⭐ ประวัติข้อความจริง — ชุดทดสอบจะยืนยันว่าค่านี้ห้ามเปลี่ยน */
   factualLastCustomerMessageAt: new Date('2026-08-23T11:00:00Z'),
+  /** ผลการแปลง "ข้อความที่จะตอบกลับ" — ตั้งต้นเป็นไม่ได้ตอบกลับอะไร */
+  replyTarget: { ok: true, meta_message_id: null } as
+    | { ok: true; meta_message_id: string | null }
+    | { ok: false; reason_th: string },
 };
 
 vi.mock('../store', () => ({
   resolveSendContext: vi.fn(async () => store.resolveResult),
+  /**
+   * ⭐ ตัวแปลง "ข้อความที่จะตอบกลับ" — ของจริงคุยกับฐานข้อมูล
+   *    ชุดนี้ให้คืนค่าตามที่ตั้งไว้ เพื่อทดสอบทั้งกรณีผ่านและกรณีถูกปฏิเสธ
+   */
+  resolveReplyTarget: vi.fn(async () => store.replyTarget),
   claimSend: vi.fn(async () => ({
     send_id: 'send-1',
     won: store.nextClaim.won,
@@ -144,6 +153,7 @@ beforeEach(() => {
   store.outbound = [];
   store.nextClaim = { won: true, status: 'claimed' };
   store.factualLastCustomerMessageAt = new Date('2026-08-23T11:00:00Z');
+  store.replyTarget = { ok: true, meta_message_id: null };
   seedContext();
 });
 
@@ -443,5 +453,109 @@ describe('รอบ 3B — ข้อความที่ส่งสำเร�
 
     expect(result.outcome_unknown).toBe(true);
     expect(store.outbound).toHaveLength(0);
+  });
+});
+
+/* ================================================================== */
+/* ตอบกลับข้อความ (ก้อน 2 ข้อ 1.3)                                     */
+/* ================================================================== */
+
+describe('🔴 ตอบกลับข้อความ ต้องซื่อสัตย์กับความสามารถจริงของแต่ละช่องทาง', () => {
+  it('Messenger รองรับ reply_to ตามเอกสาร → ใส่ลง payload จริง', async () => {
+    store.replyTarget = { ok: true, meta_message_id: 'mid.ORIGINAL' };
+    const calls = fakeMeta([{ status: 200, body: { message_id: 'mid.NEW' } }]);
+
+    const res = await sendMessage(req({ reply_to_message_id: 'our-msg-1' }), {
+      now: NOW,
+      sleep: noSleep,
+    });
+
+    expect(res.sent).toBe(true);
+    expect((calls[0].body as Record<string, unknown>).reply_to).toEqual({ mid: 'mid.ORIGINAL' });
+
+    // บันทึกตามความจริง : ส่ง native ไปจริง
+    expect(store.outbound[0].reply_native).toBe(true);
+    expect(store.outbound[0].reply_to_message_id).toBe('our-msg-1');
+  });
+
+  it('⭐ Instagram ไม่มี reply_to ในเอกสาร → ห้ามใส่ลง payload', async () => {
+    /**
+     * 🔴 หัวใจของข้อนี้ : ห้ามเดา payload
+     *    ยัดฟิลด์ที่เอกสารไม่ได้ระบุ แล้วถ้า Meta เงียบ ๆ ไม่สนใจ
+     *    เราจะบันทึกว่า "ตอบกลับแล้ว" ทั้งที่ลูกค้าไม่เห็นเส้นโยงอะไรเลย
+     *    = โกหกตัวเองในประวัติข้อความ
+     */
+    seedContext({ channel: 'instagram' });
+    store.replyTarget = { ok: true, meta_message_id: 'mid.ORIGINAL' };
+    const calls = fakeMeta([{ status: 200, body: { message_id: 'mid.NEW' } }]);
+
+    const res = await sendMessage(req({ reply_to_message_id: 'our-msg-1' }), {
+      now: NOW,
+      sleep: noSleep,
+    });
+
+    expect(res.sent).toBe(true);
+    expect(
+      (calls[0].body as Record<string, unknown>).reply_to,
+      'ยัด reply_to ให้ Instagram ทั้งที่เอกสารไม่มี',
+    ).toBeUndefined();
+
+    // ⭐ แต่ความสัมพันธ์ฝั่งเรายังถูกเก็บไว้ครบ
+    expect(store.outbound[0].reply_to_message_id).toBe('our-msg-1');
+    // 🔴 และต้องบันทึกตามความจริงว่า "ไม่ใช่ native"
+    expect(store.outbound[0].reply_native).toBe(false);
+  });
+
+  it('ข้อความต้นทางไม่มี mid → ยังส่งได้ แต่ไม่ใช่ native reply', async () => {
+    store.replyTarget = { ok: true, meta_message_id: null };
+    const calls = fakeMeta([{ status: 200, body: { message_id: 'mid.NEW' } }]);
+
+    const res = await sendMessage(req({ reply_to_message_id: 'our-msg-1' }), {
+      now: NOW,
+      sleep: noSleep,
+    });
+
+    expect(res.sent).toBe(true);
+    expect((calls[0].body as Record<string, unknown>).reply_to).toBeUndefined();
+    expect(store.outbound[0].reply_native).toBe(false);
+    expect(store.outbound[0].reply_to_message_id).toBe('our-msg-1');
+  });
+
+  it('🔴 ตอบกลับข้ามห้อง → ปฏิเสธทั้งคำขอ ไม่ใช่ส่งไปเฉย ๆ', async () => {
+    /**
+     * แอดมินตั้งใจอ้างอิงข้อความหนึ่ง ถ้าเงียบ ๆ ส่งไปโดยไม่ตอบกลับ
+     * ข้อความจะถึงลูกค้าโดยขาดบริบทที่ตั้งใจ ซึ่งอาจทำให้เข้าใจผิด
+     */
+    store.replyTarget = { ok: false, reason_th: 'ตอบกลับข้ามห้องแชทไม่ได้' };
+    const calls = fakeMeta([{ status: 200, body: { message_id: 'ไม่ควรถูกเรียก' } }]);
+
+    const res = await sendMessage(req({ reply_to_message_id: 'msg-ของห้องอื่น' }), {
+      now: NOW,
+      sleep: noSleep,
+    });
+
+    expect(res.sent).toBe(false);
+    expect(res.reason_th).toContain('ข้ามห้อง');
+    expect(calls.length, '🔴 ยิงออกไปหา Meta ทั้งที่ควรถูกปฏิเสธก่อน').toBe(0);
+  });
+
+  it('🔴 ผู้เรียกยัด reply_to_meta_mid มาเองใน content → ต้องถูกทับทิ้ง', async () => {
+    /**
+     * กฎเดียวกับ psid / transport / tag :
+     * ค่าที่ชี้ไปหาข้อมูลจริงของ Meta ต้องมาจากฐานข้อมูลเราเท่านั้น
+     * ไม่งั้นหน้าเว็บจะยัด mid ของห้องอื่นหรือของเพจอื่นมาแปะได้
+     */
+    store.replyTarget = { ok: true, meta_message_id: null };
+    const calls = fakeMeta([{ status: 200, body: { message_id: 'mid.NEW' } }]);
+
+    await sendMessage(
+      req({ content: { text: 'สวัสดีค่ะ', reply_to_meta_mid: 'mid.ปลอมจากเบราว์เซอร์' } }),
+      { now: NOW, sleep: noSleep },
+    );
+
+    expect(
+      (calls[0].body as Record<string, unknown>).reply_to,
+      'mid ที่ผู้เรียกยัดมาหลุดออกไปถึง Meta',
+    ).toBeUndefined();
   });
 });

@@ -39,6 +39,8 @@ export type ConversationRow = {
   page: InboxPage;
   customer_name: string | null;
   profile_pic_url: string | null;
+  /** ยังไม่มีชื่อเพราะอะไร — null = ไม่มีปัญหา (D-33) */
+  profile_error_th: string | null;
   psid: string;
   phone: string | null;
   last_message_at: string;
@@ -70,6 +72,17 @@ export type MessageRow = {
   attachments: Array<{ type: string; url?: string; media_id?: string }>;
   sent_with_human_agent_tag: boolean;
   created_at: string;
+
+  /** ตอบกลับข้อความไหน (id ในระบบเรา) */
+  reply_to_message_id?: string | null;
+  /**
+   * ⭐ ส่ง reply_to ไปกับ payload ของ Meta จริงไหม
+   *    false = เราเก็บความสัมพันธ์ไว้เองเท่านั้น ลูกค้าไม่เห็นเส้นโยงในแอป Meta
+   *    หน้าเว็บต้องไม่บอกว่า "ตอบกลับแล้ว" แบบเดียวกันทั้งสองกรณี
+   */
+  reply_native?: boolean;
+  /** ตัวอย่างข้อความต้นทาง — เอาไว้แสดงในฟองข้อความโดยไม่ต้องยิงถามซ้ำ */
+  reply_preview?: { text: string | null; from_customer: boolean } | null;
 };
 
 export type ListFilters = {
@@ -218,7 +231,12 @@ export async function listConversations(
   const [customers, names, tagMap] = await Promise.all([
     db()
       .from('customers')
-      .select('id,name,profile_pic_url,psid,phone')
+      /**
+       * ⭐ profile_error_th มาด้วย เพื่อให้หน้าแชทบอกได้ว่า
+       *    "ทำไมยังไม่มีชื่อ" แทนที่จะปล่อยให้แอดมินเดา (D-33)
+       * ⚠️ ข้อความนี้ถูกรับประกันแล้วว่าไม่มี token ปน (ดู explainProfileError)
+       */
+      .select('id,name,profile_pic_url,psid,phone,profile_error_th')
       .in('id', [...new Set(rows.map((r) => r.customer_id))]),
     adminNames(rows.map((r) => r.locked_by_admin_id).filter((v): v is string => Boolean(v))),
     tagsForConversations(rows.map((r) => r.id)),
@@ -230,6 +248,7 @@ export async function listConversations(
       name: string | null;
       profile_pic_url: string | null;
       psid: string;
+      profile_error_th: string | null;
       phone: string | null;
     }>).map((c) => [c.id, c]),
   );
@@ -253,6 +272,7 @@ export async function listConversations(
         page,
         customer_name: customer.name,
         profile_pic_url: customer.profile_pic_url,
+        profile_error_th: customer.profile_error_th,
         psid: customer.psid,
         phone: customer.phone,
         last_message_at: r.last_message_at,
@@ -276,8 +296,14 @@ export async function listConversations(
 /* 2) ข้อความในห้องแชท                                                        */
 /* ------------------------------------------------------------------------ */
 
-/** ตรวจสิทธิ์เข้าถึงห้องแชท — ทุกฟังก์ชันด้านล่างต้องผ่านตัวนี้ก่อนเสมอ */
-async function requireConversationAccess(
+/**
+ * ตรวจสิทธิ์เข้าถึงห้องแชท — ทุกฟังก์ชันด้านล่างต้องผ่านตัวนี้ก่อนเสมอ
+ *
+ * ⭐ ส่งออกไปให้โมดูลอื่นใช้ด้วย (เช่น customers/workspace)
+ *    เพื่อให้มีด่านสิทธิ์ **ชุดเดียว** ในระบบ
+ *    ด่านที่มีสองชุดคือด่านที่จะไม่ตรงกันในวันที่มีคนแก้ชุดเดียว
+ */
+export async function requireConversationAccess(
   admin: PublicAdmin,
   conversationId: string,
 ): Promise<{ id: string; customer_id: string; page_id: string }> {
@@ -323,7 +349,7 @@ export async function listMessages(
 
   let query = db()
     .from('messages')
-    .select('id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at')
+    .select('id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at,reply_to_message_id,reply_native')
     .eq('conversation_id', conversationId)
     // ⭐ กรองข้อความที่ถูกลบ "ในฐานข้อมูล" ไม่ใช่กรองทีหลังใน JavaScript
     //    เคยกรองทีหลังแล้วเจอปัญหา : ถ้ามีข้อความถูกลบติดกันเกินขนาดชุดหนึ่งชุด
@@ -346,6 +372,28 @@ export async function listMessages(
   const hasMore = rows.length === capped;
   const names = await adminNames(rows.map((m) => m.admin_id).filter((v): v is string => Boolean(v)));
 
+  /**
+   * ⭐ ดึงข้อความต้นทางของ "ตอบกลับ" มาทีเดียวทั้งชุด
+   *    ไม่ใช่วนถามทีละข้อความ — 100 ข้อความ = 100 รอบไป-กลับฐานข้อมูล
+   *
+   * ⚠️ ต้องจำกัดเฉพาะห้องนี้ด้วย แม้ trigger จะกันข้ามห้องไว้แล้ว
+   *    เป็นการกันชั้นที่สองเผื่อมีข้อมูลเก่าที่เข้ามาก่อนมี trigger
+   */
+  const replyIds = [...new Set(
+    rows.map((m) => m.reply_to_message_id).filter((v): v is string => Boolean(v)),
+  )];
+  const replyMap = new Map<string, { text: string | null; from_customer: boolean }>();
+  if (replyIds.length > 0) {
+    const { data: originals } = await db()
+      .from('messages')
+      .select('id,text,direction')
+      .eq('conversation_id', conversationId)
+      .in('id', replyIds);
+    for (const o of (originals ?? []) as Array<{ id: string; text: string | null; direction: 'in' | 'out' }>) {
+      replyMap.set(o.id, { text: o.text, from_customer: o.direction === 'in' });
+    }
+  }
+
   // ดึงมาจากใหม่ไปเก่าเพื่อให้ได้ "ล่าสุด N ข้อความ" แล้วค่อยกลับลำดับให้อ่านตามเวลา
   const messages = rows
     .map((m) => ({
@@ -358,6 +406,10 @@ export async function listMessages(
       attachments: Array.isArray(m.attachments) ? m.attachments : [],
       sent_with_human_agent_tag: m.sent_with_human_agent_tag,
       created_at: m.created_at,
+      reply_to_message_id: m.reply_to_message_id ?? null,
+      reply_native: m.reply_native ?? false,
+      // ไม่เจอต้นทาง = ถูกลบไปแล้ว → แสดงว่า "ข้อความถูกลบ" ดีกว่าซ่อนเงียบ ๆ
+      reply_preview: m.reply_to_message_id ? (replyMap.get(m.reply_to_message_id) ?? null) : null,
     }))
     .reverse();
 
@@ -462,6 +514,13 @@ export async function updateCustomerContact(
   admin: PublicAdmin,
   conversationId: string,
   contact: CustomerContact,
+  /**
+   * ⭐ ข้อมูลชุดนี้ดึงมาจากข้อความไหน (ข้อ 1.5)
+   *
+   *    ทำไมต้องเก็บ : วันหลังถ้าที่อยู่ผิด จะไม่มีใครรู้ว่ามันมาจากข้อความไหน
+   *    ต้องไล่อ่านแชททั้งห้องเพื่อหาว่าลูกค้าพิมพ์อะไรไว้กันแน่
+   */
+  sourceMessageId?: string | null,
 ): Promise<void> {
   const conv = await requireConversationAccess(admin, conversationId);
 
@@ -471,6 +530,24 @@ export async function updateCustomerContact(
   if (contact.postcode !== undefined) patch.postcode = contact.postcode?.trim() || null;
   if (contact.address !== undefined) patch.address = contact.address?.trim() || null;
   if (Object.keys(patch).length === 0) return;
+
+  patch.contact_updated_at = new Date().toISOString();
+  patch.contact_updated_by = admin.id;
+
+  /**
+   * ⚠️ ต้องตรวจว่าข้อความต้นทางอยู่ห้องนี้จริง ก่อนเก็บเป็นร่องรอย
+   *    ไม่งั้นหน้าเว็บจะยัด id ข้อความของห้องอื่นมาผูกไว้ได้
+   *    (กฎเดียวกับการตอบกลับข้อความใน 0015)
+   */
+  if (sourceMessageId) {
+    const { data: src } = await db()
+      .from('messages')
+      .select('id')
+      .eq('id', sourceMessageId)
+      .eq('conversation_id', conversationId)
+      .maybeSingle();
+    if (src) patch.contact_source_message_id = sourceMessageId;
+  }
 
   const { error } = await db().from('customers').update(patch).eq('id', conv.customer_id);
   if (error) throw new Error(`บันทึกข้อมูลลูกค้าไม่สำเร็จ: ${error.message}`);

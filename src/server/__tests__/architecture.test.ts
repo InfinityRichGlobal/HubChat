@@ -881,3 +881,84 @@ describe('🔴 ที่เก็บไฟล์ต้องอยู่ฝั�
     expect(read(media!)).toContain('isStorageConfigured');
   });
 });
+
+/* ========================================================================== */
+/* ก้อน 2 — พื้นที่ทำงานลูกค้า + ปุ่มลัดในห้องแชท                                */
+/* ========================================================================== */
+
+describe('🔴 บันทึกภายในห้ามมีทางหลุดไปถึงลูกค้า', () => {
+  it('โมดูลบันทึกภายในต้องไม่ import สายส่งข้อความเลย', () => {
+    /**
+     * บันทึกภายในคือที่ที่แอดมินจดเรื่องอย่าง "ลูกค้ารายนี้เคยเคลมสองรอบ"
+     * ถ้าหลุดไปถึงลูกค้าคือเรื่องใหญ่ที่แก้ทีหลังไม่ได้
+     * วิธีกันที่แน่นอนที่สุดคือ "ไม่มีเส้นทางให้ส่งเลย" ไม่ใช่ "ระวังไม่ส่ง"
+     */
+    const ws = CODE_FILES.find((f) => rel(f) === 'server/customers/workspace.ts');
+    expect(ws, 'ไม่พบโมดูล workspace').toBeDefined();
+    const src = read(ws!);
+
+    for (const banned of ['send-message', 'sendMessage', 'transports/', 'meta/client']) {
+      expect(src, `workspace.ts แตะ ${banned}`).not.toContain(banned);
+    }
+  });
+
+  it('route ของบันทึกภายในต้องไม่ import สายส่งข้อความเลย', () => {
+    const route = CODE_FILES.find((f) => rel(f) === 'app/api/conversations/[id]/notes/route.ts');
+    expect(route, 'ไม่พบ route notes').toBeDefined();
+    const src = read(route!);
+    for (const banned of ['send-message', 'sendMessage', 'meta/client']) {
+      expect(src, `notes route แตะ ${banned}`).not.toContain(banned);
+    }
+  });
+});
+
+describe('🔴 ค่าที่เป็น "ความจริงของร้าน" ต้องมาจากเซิร์ฟเวอร์', () => {
+  it('ที่อยู่ประกอบข้อความต้องไม่รับราคา/ยอด/เลขพัสดุจากเบราว์เซอร์', () => {
+    /**
+     * ถ้ารับมาได้ ใครก็แก้ค่าในเบราว์เซอร์แล้วส่งยอดผิดให้ลูกค้าได้
+     * และสูตรราคาจะมีสองที่ ซึ่งวันหนึ่งจะไม่ตรงกัน (บทเรียน D-5)
+     */
+    const route = CODE_FILES.find((f) => rel(f) === 'app/api/conversations/[id]/compose/route.ts');
+    expect(route, 'ไม่พบ route compose').toBeDefined();
+    const src = read(route!);
+
+    // schema ต้องไม่มีช่องรับค่าพวกนี้
+    for (const banned of ['price', 'total', 'tracking_no', 'carrier', 'customer_name']) {
+      expect(src, `compose route รับ ${banned} จากเบราว์เซอร์`).not.toMatch(
+        new RegExp(`${banned}\\s*:\\s*z\\.`),
+      );
+    }
+  });
+
+  it('ตัวเลือกสินค้าฝั่งเบราว์เซอร์ต้องส่งไปแค่ id ไม่ใช่ราคา', () => {
+    const picker = CODE_FILES.find((f) => rel(f) === 'app/(app)/inbox/product-picker.tsx');
+    expect(picker, 'ไม่พบ product-picker').toBeDefined();
+    const src = read(picker!);
+
+    // body ที่ส่งไปต้องมีแต่ product_ids
+    const bodyLine = src.split('\n').find((l) => l.includes('JSON.stringify({ kind:'));
+    expect(bodyLine).toBeDefined();
+    expect(bodyLine!, 'ส่งราคาจากเบราว์เซอร์').not.toContain('price');
+  });
+
+  it('ปุ่มลัดทุกตัวต้องผ่านด่านสิทธิ์ห้องแชทก่อนเสมอ', () => {
+    const qa = CODE_FILES.find((f) => rel(f) === 'server/chat/quick-actions.ts');
+    const src = read(qa!);
+    // ทุกฟังก์ชันที่ export ต้องเรียก requireConversationAccess
+    const exported = src.match(/export async function (\w+)/g) ?? [];
+    expect(exported.length).toBeGreaterThan(0);
+    const calls = (src.match(/requireConversationAccess\(/g) ?? []).length;
+    expect(calls, 'มีฟังก์ชันที่ไม่ได้ผ่านด่านสิทธิ์').toBeGreaterThanOrEqual(exported.length);
+  });
+});
+
+describe('🔴 ปุ่มลัดต้องวางข้อความในช่องพิมพ์ ไม่ใช่ส่งเอง', () => {
+  it('compose route ต้องไม่เรียก sendMessage', () => {
+    /**
+     * แอดมินต้องได้อ่านก่อนทุกครั้ง
+     * ข้อความที่ระบบส่งเองโดยไม่มีใครอ่าน คือข้อความที่ผิดแล้วไม่มีใครรู้
+     */
+    const route = CODE_FILES.find((f) => rel(f) === 'app/api/conversations/[id]/compose/route.ts');
+    expect(read(route!)).not.toContain('sendMessage');
+  });
+});

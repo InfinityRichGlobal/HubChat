@@ -359,6 +359,10 @@ export async function recordOutboundMessage(params: {
   attachments: unknown[];
   meta_message_id: string | null;
   human_agent_tag: boolean;
+  /** ตอบกลับข้อความไหน (id ในระบบเรา) */
+  reply_to_message_id?: string | null;
+  /** ⭐ ส่ง reply_to ไปกับ payload ของ Meta จริงไหม — ไม่ใช่แค่ "ตั้งใจจะตอบกลับ" */
+  reply_native?: boolean;
 }): Promise<string | null> {
   try {
     const { data, error } = await db().rpc('record_outbound_message', {
@@ -369,6 +373,8 @@ export async function recordOutboundMessage(params: {
       p_attachments: params.attachments,
       p_meta_message_id: params.meta_message_id,
       p_human_agent_tag: params.human_agent_tag,
+      p_reply_to_message_id: params.reply_to_message_id ?? null,
+      p_reply_native: params.reply_native ?? false,
     });
     if (error) {
       console.error('[messaging] บันทึกข้อความขาออกลงประวัติไม่สำเร็จ:', error.message);
@@ -379,4 +385,45 @@ export async function recordOutboundMessage(params: {
     console.error('[messaging] บันทึกข้อความขาออกลงประวัติไม่สำเร็จ:', e);
     return null;
   }
+}
+
+/* ------------------------------------------------------------------------ */
+/* ตอบกลับข้อความ (ก้อน 2 ข้อ 1.3)                                            */
+/* ------------------------------------------------------------------------ */
+
+export type ReplyTarget =
+  | { ok: true; meta_message_id: string | null }
+  | { ok: false; reason_th: string };
+
+/**
+ * แปลง "id ข้อความในระบบเรา" → mid ของ Meta พร้อมตรวจว่าอยู่ห้องเดียวกันจริง
+ *
+ * 🔴 นี่คือด่านกันการปลอมที่สำคัญที่สุดของฟีเจอร์ตอบกลับ
+ *    หน้าเว็บส่งมาได้แค่ id ของข้อความในระบบเรา ห้ามส่ง mid ของ Meta มาเอง
+ *    ถ้ายอมให้ส่ง mid มาตรง ๆ จะยัด mid ของห้องอื่นหรือของเพจอื่นมาแปะได้
+ *
+ * ⚠️ ฐานข้อมูลเป็นคนตรวจ ไม่ใช่โค้ดนี้ (resolve_reply_target ใน 0015)
+ *    และยังมี trigger กันซ้ำอีกชั้นตอน insert จริง
+ */
+export async function resolveReplyTarget(
+  conversationId: string,
+  messageId: string | null | undefined,
+): Promise<ReplyTarget> {
+  if (!messageId) return { ok: true, meta_message_id: null };
+
+  const { data, error } = await db().rpc('resolve_reply_target', {
+    p_conversation_id: conversationId,
+    p_message_id: messageId,
+  });
+
+  if (error) return { ok: false, reason_th: `ตรวจข้อความที่จะตอบกลับไม่สำเร็จ: ${error.message}` };
+
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { ok: boolean; meta_message_id: string | null; reason_th: string | null }
+    | undefined;
+
+  if (!row) return { ok: false, reason_th: 'ตรวจข้อความที่จะตอบกลับไม่สำเร็จ' };
+  if (!row.ok) return { ok: false, reason_th: row.reason_th ?? 'ตอบกลับข้อความนี้ไม่ได้' };
+
+  return { ok: true, meta_message_id: row.meta_message_id };
 }

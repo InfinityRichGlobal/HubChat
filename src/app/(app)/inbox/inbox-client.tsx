@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, Loader2, Lock, MapPin,
-  MessageSquareOff, Megaphone, Paperclip, Phone, Quote, Search, Send, ShoppingCart,
+  MessageSquareOff, Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShoppingCart, User,
   Tag as TagIcon, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
+import CustomerDrawer from './customer-drawer';
+import ProductPicker from './product-picker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +19,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import CustomerAvatar from '@/components/customer-avatar';
+import { displayName, hasRealName } from '@/lib/customer-name';
 import { mergeByTime } from '@/lib/inbox/merge';
 import { toast } from 'sonner';
 import type { ConversationRow, InboxPage, MessageRow } from '@/server/inbox/service';
@@ -174,6 +178,9 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 type PolicyStatus = {
   can_send: boolean;
   label_th: string;
+  /** ป้ายสั้นสำหรับหัวห้อง — เหตุผลเต็มอยู่ที่ detail_th */
+  badge_th?: string;
+  detail_th?: string;
   hours_left: number | null;
   alternatives_th: string[];
 };
@@ -524,10 +531,13 @@ function ConversationItem({
           aria-label={c.is_read ? undefined : 'ยังไม่ตอบ'}
         />
 
+        {/* ⭐ รูปลูกค้า — ขนาดคงที่เสมอ ไม่ว่าจะมีรูปจริงหรือไม่ ไม่งั้นลิสต์จะกระตุกตอนรูปโหลดเสร็จ */}
+        <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" className="mt-0.5" />
+
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className={cn('truncate text-sm', !c.is_read && 'font-semibold')}>
-              {c.customer_name || `ลูกค้า ${c.psid.slice(-6)}`}
+              {displayName(c)}
             </span>
             <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
           </div>
@@ -617,6 +627,12 @@ function ChatRoom({
   const [policy, setPolicy] = useState<PolicyStatus | null>(null);
   const [lockedBy, setLockedBy] = useState<{ name: string; id: string } | null>(null);
   const [text, setText] = useState('');
+  /** ข้อความที่กำลังจะตอบกลับ — null = ส่งข้อความธรรมดา */
+  const [replyTarget, setReplyTarget] = useState<MessageRow | null>(null);
+  /** แผงข้อมูลลูกค้า (ข้อ 1.6) */
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  /** ตัวเลือกสินค้า (ข้อ 1.10) */
+  const [productOpen, setProductOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [menuFor, setMenuFor] = useState<MessageRow | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
@@ -851,17 +867,56 @@ function ChatRoom({
   const cannedVisible = slashQuery === null || dismissedCanned ? [] : canned;
 
   /** หยิบชุดคำตอบมาวางในช่องพิมพ์ — ⚠️ ไม่ได้ส่งออกไป แอดมินต้องกดส่งเอง */
-  function applyCanned(item: CannedResponse) {
-    setText(item.text ?? '');
+  /**
+   * หยิบชุดคำตอบมาวางในช่องพิมพ์ (ข้อ 1.9)
+   *
+   * ⭐ ถ้ามีตัวแปร {{...}} ต้องให้ **เซิร์ฟเวอร์** แทนค่าให้
+   *    เบราว์เซอร์แทนเองไม่ได้เด็ดขาด เพราะยอดเงิน/เลขพัสดุคือความจริงของร้าน
+   *    (ถ้าเบราว์เซอร์แทนได้ ก็แก้ยอดแล้วส่งค่าผิดให้ลูกค้าได้)
+   *
+   * 🔴 ตัวแปรที่ยังไม่มีค่า จะคง {{...}} ไว้ + ขึ้นคำเตือน
+   *    ไม่แทนด้วยช่องว่าง เพราะข้อความที่ "ดูปกติพอจะกดส่ง" คือสิ่งที่อันตรายที่สุด
+   */
+  async function applyCanned(item: CannedResponse) {
+    const template = item.text ?? '';
     setDismissedCanned(false);
     void apiCall(`/api/canned/${item.id}`, { method: 'POST' });
+
+    if (!template.includes('{{')) {
+      setText(template);
+      inputRef.current?.focus();
+      return;
+    }
+
+    const res = await apiCall<{ text: string; ready: boolean; warning_th: string | null }>(
+      `/api/conversations/${c.id}/compose`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'canned', template }),
+      },
+    );
+
+    // เรียกไม่สำเร็จ = วางต้นแบบไว้ให้แอดมินแก้เอง ดีกว่าไม่ได้อะไรเลย
+    setText(res?.text ?? template);
+    if (res && !res.ready && res.warning_th) {
+      toast.warning(res.warning_th, { duration: 8000 });
+    }
     inputRef.current?.focus();
   }
 
   /** ยกข้อความมาอ้างอิงในช่องพิมพ์ (สเปก 5.1 : ปัดขวา / เมนูแตะ) */
-  function quote(m: MessageRow) {
-    const body = (m.text ?? '[ไฟล์แนบ]').split('\n').map((l) => `> ${l}`).join('\n');
-    setText((prev) => `${body}\n${prev}`);
+  /**
+   * ⭐ ตอบกลับข้อความจริง — ไม่ใช่การก๊อปข้อความมาใส่ `>` ในช่องพิมพ์
+   *
+   * 🔴 ต่างกันตรงไหน :
+   *    แบบเดิม ข้อความที่ยกมาจะกลายเป็น "เนื้อข้อความ" ที่ลูกค้าได้รับจริง
+   *    ลูกค้าจึงเห็นข้อความตัวเองซ้ำอีกรอบแบบมี > นำหน้า ซึ่งอ่านแล้วงง
+   *    แบบใหม่เก็บเป็น "ความสัมพันธ์" แยกจากเนื้อข้อความ
+   *    และถ้าช่องทางรองรับ Meta จะผูกเส้นโยงให้เหมือนตอบกลับในแอปจริง
+   */
+  function replyTo(m: MessageRow) {
+    setReplyTarget(m);
     setMenuFor(null);
     inputRef.current?.focus();
   }
@@ -953,7 +1008,12 @@ function ChatRoom({
       const res = await fetch(`/api/conversations/${c.id}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: body, idempotency_key: idempotencyKey.current }),
+        body: JSON.stringify({
+          text: body,
+          idempotency_key: idempotencyKey.current,
+          // ⭐ ส่ง id ของข้อความในระบบเรา ไม่ใช่ mid ของ Meta (เซิร์ฟเวอร์แปลงให้เอง)
+          reply_to_message_id: replyTarget?.id ?? null,
+        }),
       });
       const json = await res.json();
 
@@ -971,6 +1031,7 @@ function ChatRoom({
 
       if (d.sent) {
         setText('');
+        setReplyTarget(null);
         idempotencyKey.current = newIdempotencyKey(); // กุญแจใหม่สำหรับข้อความถัดไป
         // ⭐ ส่งเองแล้วต้องเห็นของตัวเองทันที ถึงจะเลื่อนขึ้นไปอ่านของเก่าค้างอยู่ก็ตาม
         stickBottomRef.current = true;
@@ -1008,9 +1069,22 @@ function ChatRoom({
         <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack} aria-label="กลับ">
           <ArrowLeft />
         </Button>
-        <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: c.page.tag_color }} />
+        <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{c.customer_name || `ลูกค้า ${c.psid.slice(-6)}`}</div>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: c.page.tag_color }}
+              aria-hidden="true"
+            />
+            <span className="truncate text-sm font-medium">{displayName(c)}</span>
+            {/**
+              * ⭐ ยังไม่รู้ชื่อจริง → บอกเหตุผล + ให้กดลองใหม่ได้ตรงนี้เลย (D-33)
+              *    เดิมแอดมินเห็นแค่ "ลูกค้า xxxxxx" แล้วไม่มีทางรู้ว่าทำไม
+              *    และไม่มีอะไรให้กดเพื่อแก้ ต้องรอให้ระบบทำเอง ซึ่งไม่เคยทำ
+              */}
+            {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
+          </div>
           {/* ⭐ ข้อมูลลูกค้าย่อ ๆ ตรงหัวห้อง — จะได้ไม่ต้องเปิดฟอร์มที่อยู่เพื่อดูเบอร์ */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
             <span className="truncate">{c.page.name}</span>
@@ -1053,6 +1127,10 @@ function ChatRoom({
 
         {canReply && (
           <>
+            {/* ⭐ แผงข้อมูลลูกค้า / ออเดอร์ / บันทึก (ข้อ 1.6) */}
+            <Button variant="ghost" size="icon" aria-label="ข้อมูลลูกค้า" onClick={() => setDrawerOpen(true)}>
+              <User />
+            </Button>
             {/* ⭐ สร้างออเดอร์จากในห้องแชท (สเปก 5.3) — ไม่ส่งข้อความหาลูกค้าเอง */}
             <Button variant="ghost" size="icon" aria-label="สร้างออเดอร์" onClick={() => setOrderOpen(true)}>
               <ShoppingCart />
@@ -1063,8 +1141,18 @@ function ChatRoom({
           </>
         )}
         {policy && (
-          <Badge variant={policy.can_send ? 'outline' : 'destructive'} className="shrink-0">
-            {policy.label_th}
+          /**
+           * 🔴 ป้ายนี้ต้อง "สั้นเสมอ" และ shrink-0 + whitespace-nowrap
+           *    เดิมใช้ label_th ซึ่งตอนส่งไม่ได้เป็นประโยคเต็ม
+           *    ทำให้แถวหัวห้องถูกดันจนรูป/ชื่อ/ปุ่มเบียดกันจนใช้ไม่ได้บนมือถือ
+           *    เหตุผลเต็มย้ายไปอยู่ใต้ช่องพิมพ์ ซึ่งมีที่ให้อ่านจริง ๆ
+           */
+          <Badge
+            variant={policy.can_send ? 'outline' : 'destructive'}
+            className="shrink-0 whitespace-nowrap"
+            title={policy.detail_th ?? policy.label_th}
+          >
+            {policy.badge_th ?? policy.label_th}
           </Badge>
         )}
       </div>
@@ -1141,7 +1229,7 @@ function ChatRoom({
                     <MessageBubble
                       message={m}
                       onTap={() => setMenuFor(m)}
-                      onSwipeRight={() => quote(m)}
+                      onSwipeRight={() => replyTo(m)}
                     />
                   </div>
                 );
@@ -1174,7 +1262,7 @@ function ChatRoom({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => applyCanned(item)}
+                onClick={() => void applyCanned(item)}
                 className="flex w-full flex-col gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-accent"
               >
                 <span className="flex items-center gap-1.5 text-sm font-medium">
@@ -1186,6 +1274,34 @@ function ChatRoom({
                 <span className="line-clamp-2 text-xs text-muted-foreground">{item.text}</span>
               </button>
             ))}
+          </div>
+        )}
+
+        {/* ---------- ⭐ กำลังตอบกลับข้อความไหน ---------- */}
+        {canReply && replyTarget && (
+          /**
+           * ⚠️ ต้องเห็นชัดว่ากำลังตอบกลับอะไรอยู่ และยกเลิกได้ง่าย
+           *    ถ้าซ่อนไว้ แอดมินจะเผลอตอบกลับข้อความเก่าโดยไม่รู้ตัว
+           *    แล้วลูกค้าจะเห็นเส้นโยงไปข้อความที่ไม่เกี่ยวกัน
+           */
+          <div className="mb-2 flex items-start gap-2 rounded-md border-l-2 border-l-primary bg-muted/50 px-2.5 py-1.5">
+            <Reply className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-medium text-muted-foreground">
+                ตอบกลับ{replyTarget.direction === 'in' ? 'ลูกค้า' : 'ข้อความของเรา'}
+              </div>
+              <div className="truncate text-xs">
+                {replyTarget.text || '[ไฟล์แนบ]'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyTarget(null)}
+              className="shrink-0 rounded p-0.5 hover:bg-accent"
+              aria-label="ยกเลิกการตอบกลับ"
+            >
+              <X className="size-3.5" />
+            </button>
           </div>
         )}
 
@@ -1260,6 +1376,16 @@ function ChatRoom({
               disabled={sending}
             />
             {/* ⭐ ปุ่มส่งปุ่มเดียว — ไม่มีตัวเลือกช่องทางให้แอดมินกดเลย */}
+            {/* ⭐ ใส่สินค้า (ข้อ 1.10) — วางลงช่องพิมพ์ ไม่ส่งเอง */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="ใส่สินค้า"
+              onClick={() => setProductOpen(true)}
+            >
+              <Package />
+            </Button>
             <Button onClick={() => void send()} disabled={sending || text.trim().length === 0}>
               {sending ? <Loader2 className="animate-spin" /> : <Send />}
               ส่ง
@@ -1267,13 +1393,50 @@ function ChatRoom({
           </div>
         )}
 
-        {policy && !policy.can_send && policy.alternatives_th.length > 0 && (
-          <p className="mt-1.5 flex items-start gap-1 text-[11px] text-muted-foreground">
-            <X className="mt-0.5 size-3 shrink-0" />
-            {policy.alternatives_th.join(' · ')}
-          </p>
+        {/**
+          * ⭐ เหตุผลเต็มอยู่ตรงนี้ ไม่ใช่บนหัวห้อง
+          *    เพราะเป็นจังหวะที่แอดมินกำลังจะพิมพ์พอดี = ต้องการคำอธิบายตอนนี้
+          *    และตรงนี้มีความกว้างเต็มบรรทัดให้ข้อความยาวได้โดยไม่ดันอะไรพัง
+          */}
+        {policy && !policy.can_send && (
+          <div className="mt-2 rounded-md border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-2.5 py-2">
+            <p className="flex items-start gap-1.5 text-xs text-[var(--destructive)]">
+              <X className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0">{policy.detail_th ?? policy.label_th}</span>
+            </p>
+            {policy.alternatives_th.length > 0 && (
+              <p className="mt-1 pl-5 text-[11px] text-muted-foreground">
+                ทำได้ : {policy.alternatives_th.join(' · ')}
+              </p>
+            )}
+          </div>
         )}
       </div>
+
+      {/* ---------- แผงข้อมูลลูกค้า (ข้อ 1.6 / 1.11) ---------- */}
+      <CustomerDrawer
+        conversationId={c.id}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        /**
+         * ⭐ วางข้อความลงช่องพิมพ์เท่านั้น ไม่ส่งเอง
+         *    ต่อท้ายของเดิมถ้ามี เพื่อไม่ให้ลบสิ่งที่แอดมินพิมพ์ค้างไว้
+         */
+        onInsertText={(t) => {
+          setText((prev) => (prev.trim() ? `${prev}\n${t}` : t));
+          inputRef.current?.focus();
+        }}
+      />
+
+      <ProductPicker
+        conversationId={c.id}
+        open={productOpen}
+        onClose={() => setProductOpen(false)}
+        onInsertText={(t) => {
+          setText((prev) => (prev.trim() ? `${prev}\n${t}` : t));
+          inputRef.current?.focus();
+        }}
+      />
 
       {/* ---------- เมนูแตะข้อความ ---------- */}
       <MessageMenu
@@ -1284,7 +1447,7 @@ function ChatRoom({
           setMenuFor(null);
           inputRef.current?.focus();
         }}
-        onQuote={quote}
+        onQuote={replyTo}
         onExtract={(m) => {
           setContactSource(m.text ?? '');
           setMenuFor(null);
@@ -1324,6 +1487,61 @@ function ChatRoom({
 
 /* ================================================================== */
 
+/* ------------------------------------------------------------------------ */
+/* ปุ่ม "ลองดึงชื่ออีกครั้ง" (D-33)                                              */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * ⚠️ ปุ่มนี้ขึ้นเฉพาะตอน "ยังไม่รู้ชื่อจริง" เท่านั้น
+ *    ถ้ารู้ชื่อแล้วต้องหายไป ไม่งั้นจะกลายเป็นปุ่มรกที่ไม่มีใครใช้
+ */
+function RefreshNameButton({
+  conversationId,
+  reason,
+}: {
+  conversationId: string;
+  reason?: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function run() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/refresh-profile`, { method: 'POST' });
+      const json = (await res.json()) as {
+        ok: boolean;
+        data?: { name: string | null };
+        error?: { message_th: string };
+      };
+      if (json.ok) {
+        toast.success(json.data?.name ? `ได้ชื่อแล้ว : ${json.data.name}` : 'ดึงข้อมูลได้แล้ว');
+        window.location.reload();
+      } else {
+        // ⭐ บอกเหตุผลจริงที่ทำอะไรต่อได้ ไม่ใช่ "ไม่สำเร็จ" ลอย ๆ
+        toast.error(json.error?.message_th ?? 'ดึงชื่อไม่สำเร็จ', { duration: 10_000 });
+      }
+    } catch {
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void run()}
+      disabled={busy}
+      title={reason ?? 'ยังไม่รู้ชื่อจริงของลูกค้ารายนี้ — กดเพื่อลองดึงจาก Meta อีกครั้ง'}
+      className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-muted-foreground hover:bg-accent disabled:opacity-50"
+      aria-label="ลองดึงชื่อลูกค้าอีกครั้ง"
+    >
+      {busy ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+      ดึงชื่อ
+    </button>
+  );
+}
+
 function MessageBubble({
   message: m,
   onTap,
@@ -1336,7 +1554,7 @@ function MessageBubble({
   const outgoing = m.direction === 'out';
   const touchStart = useRef<{ x: number; y: number } | null>(null);
 
-  /** ปัดขวา → ยกมาอ้างอิงทันที (สเปก 5.1) */
+  /** ปัดขวา → ตอบกลับข้อความนี้ทันที (สเปก 5.1) */
   function onTouchStart(e: React.TouchEvent) {
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
@@ -1365,6 +1583,30 @@ function MessageBubble({
           outgoing ? 'bg-primary text-primary-foreground' : 'bg-muted',
         )}
       >
+        {/**
+          * ⭐ ข้อความที่ถูกตอบกลับ — แสดงเป็นแถบเล็กในฟอง ไม่ใช่ปนกับเนื้อข้อความ
+          *
+          * 🔴 ไม่ใส่ป้าย "ตอบกลับแล้ว" ต่างกันตาม reply_native โดยตั้งใจ
+          *    เพราะในมุมแอดมิน มันคือการตอบกลับเหมือนกันทั้งสองแบบ
+          *    ความต่างอยู่ที่ "ลูกค้าเห็นเส้นโยงในแอป Meta ไหม" ซึ่งเป็นเรื่องของ
+          *    ความสามารถของช่องทาง ไม่ใช่สิ่งที่แอดมินควบคุมได้
+          *    (แต่ฐานข้อมูลเก็บความจริงไว้ครบ เผื่อวันหนึ่งต้องไล่ตรวจ)
+          */}
+        {m.reply_to_message_id && (
+          <span
+            className={cn(
+              'mb-1 block rounded border-l-2 px-2 py-1 text-xs',
+              outgoing
+                ? 'border-l-primary-foreground/50 bg-primary-foreground/10 text-primary-foreground/80'
+                : 'border-l-muted-foreground/40 bg-background/60 text-muted-foreground',
+            )}
+          >
+            {m.reply_preview
+              ? (m.reply_preview.text || '[ไฟล์แนบ]')
+              : 'ข้อความต้นทางถูกลบไปแล้ว'}
+          </span>
+        )}
+
         {m.text && <p className="whitespace-pre-wrap">{m.text}</p>}
 
         {m.attachments.map((a, i) => {
@@ -1452,11 +1694,20 @@ function MessageMenu({
   onQuote: (m: MessageRow) => void;
   onExtract: (m: MessageRow) => void;
 }) {
+  /**
+   * ⭐ เมนูนี้เป็นของ "ข้อความนี้" เท่านั้น
+   *    ห้ามเอา action ระดับห้อง (แท็ก / สร้างออเดอร์เปล่า / ข้อมูลจัดส่ง) มาปนที่นี่
+   *    เพราะเวลาแอดมินแตะข้อความ เขากำลังคิดถึงข้อความนั้น ไม่ใช่ทั้งห้อง
+   *    ของระดับห้องอยู่บนหัวห้องซึ่งเป็นที่ที่มองหาโดยสัญชาตญาณอยู่แล้ว
+   *
+   * ลำดับเรียงตาม "ความถี่ที่ใช้จริง" ไม่ใช่ตามตัวอักษร
+   * ตอบกลับคือสิ่งที่ทำบ่อยที่สุด จึงอยู่บนสุด
+   */
   const items = message
     ? [
+        { icon: Reply, label: 'ตอบกลับข้อความนี้', run: () => onQuote(message) },
+        { icon: MapPin, label: 'ดึงข้อมูลลูกค้าจากข้อความนี้', run: () => onExtract(message) },
         { icon: ClipboardCopy, label: 'คัดลอกไปช่องพิมพ์', run: () => onCopyToInput(message) },
-        { icon: Quote, label: 'ยกมาอ้างอิง', run: () => onQuote(message) },
-        { icon: MapPin, label: 'ดึงที่อยู่ + เบอร์', run: () => onExtract(message) },
         {
           icon: Copy,
           label: 'คัดลอกข้อความ',

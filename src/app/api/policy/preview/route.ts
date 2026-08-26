@@ -122,6 +122,9 @@ export async function GET(req: NextRequest) {
     return ok({
       can_send: summary.can_send,
       label_th: summary.label_th,
+      // ⭐ ป้ายสั้นสำหรับหัวห้อง + เหตุผลเต็มสำหรับใต้ช่องพิมพ์ (ดู summariseForAdmin)
+      badge_th: summary.badge_th,
+      detail_th: summary.detail_th,
       hours_left: summary.hours_left,
       estimated_cost: summary.estimated_cost,
       // ถ้าส่งไม่ได้ บอกทางเลือกที่ทำได้จริงและถูกกฎ

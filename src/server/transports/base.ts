@@ -5,6 +5,7 @@ import 'server-only';
  */
 import { sendToMeta, type MetaPage, type MetaSendPayload, type MetaSendResult } from '@/server/meta/client';
 import type { SendContent, SendContext } from '@/server/policy/types';
+import { policyConfig } from '@/server/policy/config';
 
 /** ทุก adapter ยิงผ่านตัวนี้ */
 export function dispatch(page: MetaPage, payload: MetaSendPayload): Promise<MetaSendResult> {
@@ -39,4 +40,32 @@ export function baseEnvelope(recipientPsid: string): Record<string, unknown> {
 /** ข้อความว่างเปล่า = ไม่ต้องส่ง */
 export function requireBody(ctx: SendContext): Record<string, unknown> | null {
   return buildMessageBody(ctx.content);
+}
+
+/**
+ * ⭐ ใส่ reply_to ลง payload — เฉพาะช่องทางที่ Meta รองรับจริง
+ *
+ * 🔴 กฎเหล็ก :
+ *    ช่องทางที่เอกสารของ Meta ไม่ได้ระบุ reply_to ไว้ **ห้ามใส่**
+ *    ไม่ใช่เพราะกลัว error แต่เพราะ :
+ *      1. ยัดฟิลด์ที่ไม่มีในเอกสาร = เดา payload ซึ่งเป็นสิ่งที่ห้ามทำในโปรเจกต์นี้
+ *      2. ถ้า Meta เงียบ ๆ ไม่สนใจฟิลด์นั้น เราจะบันทึกว่า "ตอบกลับแล้ว"
+ *         ทั้งที่ลูกค้าไม่เห็นเส้นโยงอะไรเลย = โกหกตัวเองในประวัติข้อความ
+ *
+ *    ระบบยังตอบกลับได้ตามปกติ แค่เก็บความสัมพันธ์ไว้ฝั่งเราเอง
+ *
+ * @returns payload ที่อาจมี reply_to + ธงว่าใส่จริงไหม (เอาไปบันทึกลง DB)
+ */
+export function withReplyTo(
+  payload: Record<string, unknown>,
+  ctx: SendContext,
+): { payload: Record<string, unknown>; native: boolean } {
+  const mid = ctx.content.reply_to_meta_mid;
+  if (!mid) return { payload, native: false };
+
+  if (!policyConfig().native_reply[ctx.channel]) {
+    return { payload, native: false };
+  }
+
+  return { payload: { ...payload, message: payload.message, reply_to: { mid } }, native: true };
 }

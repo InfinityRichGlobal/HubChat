@@ -637,3 +637,57 @@ describe('🔴 ตัวกันพลาดตอนตั้งค่าเ�
     );
   });
 });
+
+/* ========================================================================== */
+/* ป้ายบนหัวห้องแชท — แก้บั๊กเลย์เอาต์หัวห้องพัง                                  */
+/* ========================================================================== */
+
+describe('🔴 ป้ายสถานะบนหัวห้อง ต้องสั้นเสมอ', () => {
+  /**
+   * บั๊กจริง : ตอนส่งไม่ได้ ป้ายใช้ประโยคเต็ม
+   * "ตอนนี้ยังส่งข้อความหาลูกค้ารายนี้ไม่ได้ตามกฎของ Meta ..."
+   * ซึ่งอยู่ในแถวเดียวกับรูป/ชื่อ/ปุ่ม → ดันจนใช้งานบนมือถือไม่ได้
+   *
+   * ⚠️ นี่เป็นเรื่องการแสดงผลล้วน ๆ — can_send และการตัดสินของ engine ห้ามเปลี่ยน
+   */
+  const LIMIT = 30;
+
+  it('ส่งไม่ได้ → ป้ายสั้น แต่เหตุผลเต็มยังอยู่ครบ', () => {
+    const summary = summariseForAdmin(
+      {
+        allowed: false,
+        transport: null,
+        reason_th:
+          'ตอนนี้ยังส่งข้อความหาลูกค้ารายนี้ไม่ได้ตามกฎของ Meta เพราะเลยกรอบเวลา 24 ชั่วโมงนับจากข้อความล่าสุดของลูกค้าแล้ว',
+        alternatives_th: ['รอให้ลูกค้าทักกลับมาก่อน'],
+        expires_at: null,
+        estimated_cost: null,
+      } as Parameters<typeof summariseForAdmin>[0],
+      new Date('2026-08-26T10:00:00Z'),
+    );
+
+    expect(summary.can_send).toBe(false);
+    expect(summary.badge_th.length).toBeLessThanOrEqual(LIMIT);
+    // เหตุผลเต็มต้องไม่หายไปไหน แค่ย้ายที่แสดง
+    expect(summary.detail_th).toContain('24 ชั่วโมง');
+    expect(summary.label_th).toContain('24 ชั่วโมง');
+  });
+
+  it('ส่งได้ → ป้ายก็ต้องสั้น', () => {
+    const summary = summariseForAdmin(
+      {
+        allowed: true,
+        transport: 'STANDARD',
+        reason_th: '',
+        alternatives_th: [],
+        expires_at: new Date('2026-08-27T04:00:00Z').toISOString(),
+        estimated_cost: null,
+      } as unknown as Parameters<typeof summariseForAdmin>[0],
+      new Date('2026-08-26T10:00:00Z'),
+    );
+
+    expect(summary.can_send).toBe(true);
+    expect(summary.badge_th.length).toBeLessThanOrEqual(LIMIT);
+    expect(summary.badge_th).toContain('เหลือ');
+  });
+});

@@ -34,6 +34,9 @@ const eslintConfig = defineConfig([
       // คอมเมนต์ใช้ endpoint คนละตัวกับ Send API (ตอบใต้โพสต์ / ทักส่วนตัว / ซ่อน)
       // ซึ่งมีกฎของตัวเองต่างหาก — แต่ห้ามส่งข้อความแชท มีกฎเฉพาะในบล็อกถัดไป
       "src/server/comments/**",
+      // งานระดับลูกค้า (ดึงชื่อ/รูปใหม่) ต้องอ่านโปรไฟล์จาก Meta ได้
+      // แต่ห้ามส่งข้อความ — มีกฎเฉพาะของมันอยู่ในบล็อกถัดไป
+      "src/server/customers/**",
       "src/**/__tests__/**",
     ],
     rules: {
@@ -83,6 +86,7 @@ const eslintConfig = defineConfig([
       "src/server/ingest/**/*.ts",
       "src/server/pages/**/*.ts",
       "src/server/comments/**/*.ts",
+      "src/server/customers/**/*.ts",
     ],
     ignores: ["src/**/__tests__/**"],
     rules: {

@@ -12,7 +12,7 @@ import 'server-only';
  *   4. การกันข้อความซ้ำ ให้ฐานข้อมูลเป็นคนตัดสิน ไม่ใช่โค้ดนี้
  */
 import { db } from '@/lib/supabase/admin';
-import { fetchCustomerProfile } from '@/server/meta/profile';
+import { syncCustomerProfile } from '@/server/meta/profile-sync';
 import type { MetaPage } from '@/server/meta/client';
 import type { Platform } from '@/types/db';
 import { parseWebhookPayload } from './parse';
@@ -171,31 +171,16 @@ function firstRow(data: unknown): IngestRow {
  * ดึงโปรไฟล์เฉพาะลูกค้าที่ยังไม่เคยดึง
  * ⚠️ ล้มเหลวได้ ห้ามทำให้ทั้งงานพัง — ข้อความสำคัญกว่าชื่อ
  */
+/**
+ * เติมชื่อ/รูปลูกค้า
+ *
+ * 🔴 เดิมโค้ดตรงนี้จด profile_synced_at "ทุกครั้งแม้ดึงไม่สำเร็จ"
+ *    แล้วรอบถัดไปเช็คว่าเคยจดแล้วก็ข้าม → กลายเป็นยอมแพ้ถาวร (D-33)
+ *    ตอนนี้ย้ายการตัดสินใจ "ถึงเวลาลองใหม่หรือยัง" ไปไว้ที่ฐานข้อมูลแทน
+ *    (claim_profile_sync ใน migration 0014) ซึ่งกันสอง worker ยิงซ้อนกันได้ด้วย
+ */
 async function syncProfileIfNeeded(page: PageRow, customerId: string, psid: string): Promise<void> {
-  try {
-    const { data } = await db()
-      .from('customers')
-      .select('id,profile_synced_at')
-      .eq('id', customerId)
-      .maybeSingle();
-
-    if (!data || (data as { profile_synced_at: string | null }).profile_synced_at) return;
-    if (!page.access_token) return; // ยังไม่ได้ใส่ token ของเพจนี้
-
-    const profile = await fetchCustomerProfile(page, psid);
-
-    // จดเวลาไว้เสมอแม้ดึงไม่ได้ — ไม่งั้นจะวนยิงถาม Meta ทุกข้อความไม่จบ
-    await db()
-      .from('customers')
-      .update({
-        ...(profile?.name ? { name: profile.name } : {}),
-        ...(profile?.profile_pic_url ? { profile_pic_url: profile.profile_pic_url } : {}),
-        profile_synced_at: new Date().toISOString(),
-      })
-      .eq('id', customerId);
-  } catch (err) {
-    console.warn('[ingest] เติมโปรไฟล์ลูกค้าไม่สำเร็จ (ข้ามไป):', err);
-  }
+  await syncCustomerProfile(page, customerId, psid);
 }
 
 /* ------------------------------------------------------------------------ */

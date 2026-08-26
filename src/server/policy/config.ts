@@ -52,8 +52,27 @@ export type TransportCapability = {
 };
 
 export type ChannelPolicy = Record<Transport, TransportCapability>;
+/**
+ * ⭐ ช่องทางนี้รองรับ "ตอบกลับข้อความแบบ native" ของ Meta ไหม
+ *
+ * 🔴 ทำไมต้องอยู่ในไฟล์นี้ ไม่ใช่ใน UI หรือ adapter :
+ *    นี่คือ **กฎของ Meta** ไม่ใช่ค่าตั้งทั่วไปของแอป
+ *    กฎของ Meta ทุกข้อต้องอยู่ที่เดียวกันเสมอ เพื่อให้วันที่ Meta เปลี่ยนกฎ
+ *    เรารู้ว่าต้องไปแก้ตรงไหน (กฎเหล็กข้อเดียวกับ transports)
+ *
+ * ⚠️ สถานะ ณ ที่ตรวจเอกสารล่าสุด :
+ *    • Messenger — เอกสาร Send API ระบุ `reply_to: { mid }` ไว้ชัดเจน → เปิดได้
+ *    • Instagram — เอกสาร Send Messages **ไม่ได้ระบุ** reply_to ไว้เลย → ปิดไว้
+ *
+ * 🔴 ค่าเริ่มต้นของ Instagram คือ false และห้ามเปิดเพราะ "เดาว่าน่าจะได้"
+ *    ต้องยืนยันกับเอกสารก่อนเสมอ — กฎเดียวกับ transports ที่ยังไม่ verified
+ *    ระบบยังตอบกลับได้ตามปกติ แค่เก็บความสัมพันธ์ไว้ฝั่งเราเอง
+ *    ซึ่งซื่อสัตย์กว่าการยัด payload ที่ไม่มีในเอกสารแล้วหวังว่าจะผ่าน
+ */
 export type PolicyConfig = {
   channels: Record<Channel, ChannelPolicy>;
+  /** ตอบกลับข้อความแบบ native ได้ไหม แยกตามช่องทาง */
+  native_reply: Record<Channel, boolean>;
   /** ผลตรวจ eligibility เก่าเกินกี่ชั่วโมงถือว่าใช้ไม่ได้ ต้องตรวจใหม่ */
   marketing_eligibility_max_age_hours: number;
   /**
@@ -262,6 +281,15 @@ export function loadPolicyConfig(env: EnvBag = process.env): PolicyConfig {
       instagram: instagramPolicy(env),
     },
     marketing_eligibility_max_age_hours: num(env, 'POLICY_MARKETING_ELIGIBILITY_MAX_AGE_HOURS', 24),
+
+    /**
+     * ⚠️ Instagram ตั้งต้นเป็น false เพราะเอกสารไม่ได้ระบุ reply_to ไว้
+     *    เปิดได้ก็ต่อเมื่อยืนยันกับเอกสารของ Meta แล้วเท่านั้น
+     */
+    native_reply: {
+      messenger: bool(env, 'POLICY_MESSENGER_NATIVE_REPLY', true),
+      instagram: bool(env, 'POLICY_INSTAGRAM_NATIVE_REPLY', false),
+    },
     allow_unverified: allowUnverified,
   };
 }

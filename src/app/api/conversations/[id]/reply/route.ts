@@ -31,6 +31,16 @@ const bodySchema = z.object({
    * ถ้าเน็ตกระตุกแล้วกดส่งซ้ำด้วยกุญแจเดิม ลูกค้าจะไม่ได้ข้อความสองรอบ
    */
   idempotency_key: z.string().trim().min(8).max(120).optional(),
+
+  /**
+   * ⭐ ตอบกลับข้อความไหน — **id ของข้อความในระบบเรา** เท่านั้น
+   *
+   * 🔴 สังเกตว่ารับเป็น uuid ของเรา ไม่ใช่ mid ของ Meta
+   *    ถ้ารับ mid ตรง ๆ หน้าเว็บจะยัด mid ของห้องอื่นหรือเพจอื่นมาแปะได้
+   *    sendMessage() จะแปลงเป็น mid ให้เอง พร้อมตรวจว่าอยู่ห้องเดียวกันจริง
+   *    (กฎเดียวกับ transport / tag / psid ที่หน้าเว็บกำหนดเองไม่ได้)
+   */
+  reply_to_message_id: z.string().uuid('ข้อความที่จะตอบกลับไม่ถูกต้อง').nullish(),
 });
 
 export async function POST(req: NextRequest, ctx: Ctx) {
@@ -53,6 +63,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       provenance,
       content: { text: body.text },
       idempotency_key: body.idempotency_key,
+      reply_to_message_id: body.reply_to_message_id ?? null,
     });
 
     // ⭐ จดผลลงล็อกของเซิร์ฟเวอร์ด้วย

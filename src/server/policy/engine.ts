@@ -252,6 +252,23 @@ function suggestAlternatives(ctx: SendContext): string[] {
 export function summariseForAdmin(decision: PolicyDecision, now: Date): {
   can_send: boolean;
   label_th: string;
+  /**
+   * ⭐ ป้ายสั้นสำหรับหัวห้องแชท
+   *
+   * 🔴 ทำไมต้องแยกจาก label_th :
+   *    ตอนส่งไม่ได้ label_th คือประโยคเต็ม เช่น
+   *    "ตอนนี้ยังส่งข้อความหาลูกค้ารายนี้ไม่ได้ตามกฎของ Meta ..."
+   *    ซึ่งยาวเกินกว่าจะอยู่ในแถวเดียวกับรูป/ชื่อ/ปุ่ม → ดันเลย์เอาต์หัวห้องพัง
+   *
+   *    ป้ายบอกแค่ "ส่งได้ไหม" ส่วนเหตุผลเต็มไปอยู่ใต้ช่องพิมพ์
+   *    ที่ซึ่งมีที่ให้อ่านจริง ๆ และเป็นจังหวะที่แอดมินต้องการมันพอดี
+   *
+   * ⚠️ นี่เป็นการเปลี่ยน "วิธีแสดงผล" เท่านั้น
+   *    can_send / reason_th / การตัดสินของ Policy Engine ไม่ถูกแตะเลย
+   */
+  badge_th: string;
+  /** เหตุผลเต็ม เอาไว้แสดงในที่ที่มีพื้นที่พอ */
+  detail_th: string;
   hours_left: number | null;
   estimated_cost: number | null;
 } {
@@ -260,7 +277,14 @@ export function summariseForAdmin(decision: PolicyDecision, now: Date): {
     : null;
 
   if (!decision.allowed) {
-    return { can_send: false, label_th: decision.reason_th, hours_left: null, estimated_cost: null };
+    return {
+      can_send: false,
+      label_th: decision.reason_th,
+      badge_th: 'ส่งไม่ได้ตามนโยบาย Meta',
+      detail_th: decision.reason_th,
+      hours_left: null,
+      estimated_cost: null,
+    };
   }
 
   const label =
@@ -270,9 +294,19 @@ export function summariseForAdmin(decision: PolicyDecision, now: Date): {
         ? `ส่งข้อความได้ · เหลือ ${Math.floor(hoursLeft)} ชม.`
         : `ส่งข้อความได้ · เหลือ ${Math.max(1, Math.round(hoursLeft * 60))} นาที`;
 
+  /** ป้ายตอนส่งได้ ต้องสั้นด้วย — เอาเฉพาะเวลาที่เหลือ ซึ่งเป็นสิ่งที่ต้องเห็นตลอด */
+  const badge =
+    hoursLeft === null
+      ? 'ส่งได้'
+      : hoursLeft >= 1
+        ? `เหลือ ${Math.floor(hoursLeft)} ชม.`
+        : `เหลือ ${Math.max(1, Math.round(hoursLeft * 60))} นาที`;
+
   return {
     can_send: true,
     label_th: label,
+    badge_th: badge,
+    detail_th: label,
     hours_left: hoursLeft,
     estimated_cost: decision.estimated_cost,
   };

@@ -46,6 +46,7 @@ import {
   recordOutboundMessage,
   recordPolicyObservation,
   recordSendVerified,
+  resolveReplyTarget,
   resolveSendContext,
   type ContextExpectation,
   type SendStatus,
@@ -87,6 +88,15 @@ export type SendRequest = {
    * ใช้เป็นตาข่ายกันเคสที่โค้ดเรียกผิดห้องแชท
    */
   expect?: ContextExpectation;
+
+  /**
+   * ⭐ ตอบกลับข้อความไหน — เป็น **id ของข้อความในระบบเรา** เท่านั้น
+   *
+   * 🔴 ห้ามรับ mid ของ Meta จากผู้เรียกเด็ดขาด
+   *    sendMessage จะแปลงเป็น mid ให้เอง พร้อมตรวจว่าอยู่ห้องเดียวกันจริง
+   *    (กฎเดียวกับ psid / transport / tag ที่ผู้เรียกกำหนดเองไม่ได้)
+   */
+  reply_to_message_id?: string | null;
 };
 
 export type SendResult = {
@@ -146,6 +156,22 @@ export async function sendMessage(req: SendRequest, options: SendOptions = {}): 
     return earlyFailure(decision, idempotencyKey);
   }
 
+  /**
+   * ---- 2.5) ⭐ แปลง "ข้อความที่จะตอบกลับ" เป็น mid ของ Meta -------------
+   *
+   * 🔴 ทำ **หลัง** resolveSendContext เสมอ เพราะต้องใช้ conversation_id
+   *    ที่ยืนยันจากฐานข้อมูลแล้ว ไม่ใช่ค่าที่ผู้เรียกส่งมา
+   *
+   * ⚠️ ตอบกลับข้อความที่ผิดห้อง = ปฏิเสธทั้งคำขอ ไม่ใช่ "ส่งไปโดยไม่ตอบกลับ"
+   *    เพราะแอดมินตั้งใจอ้างอิงข้อความหนึ่ง ถ้าเงียบ ๆ ส่งไปเฉย ๆ
+   *    ข้อความจะไปถึงลูกค้าโดยขาดบริบทที่ตั้งใจไว้ ซึ่งอาจทำให้เข้าใจผิด
+   */
+  const replyTarget = await resolveReplyTarget(resolved.conversation_id, req.reply_to_message_id);
+  if (!replyTarget.ok) {
+    const decision = blockedDecision(REASON.CONTEXT_MISMATCH, replyTarget.reason_th);
+    return earlyFailure(decision, idempotencyKey);
+  }
+
   // ---- 3) ⭐ จองสิทธิ์ส่งกับฐานข้อมูล ------------------------------------
   const claim = await claimSend({
     idempotency_key: idempotencyKey,
@@ -174,9 +200,21 @@ export async function sendMessage(req: SendRequest, options: SendOptions = {}): 
     channel: resolved.channel,
     message_type: req.message_type,
     provenance: prov,
-    content: req.content,
+    /**
+     * ⚠️ mid มาจากฐานข้อมูลเท่านั้น (resolveReplyTarget) ไม่ใช่จากผู้เรียก
+     *    ต่อให้ผู้เรียกยัด reply_to_meta_mid มาใน content เอง ก็จะถูกทับตรงนี้
+     */
+    content: { ...req.content, reply_to_meta_mid: replyTarget.meta_message_id },
     idempotency_key: idempotencyKey,
   };
+
+  /**
+   * ⭐ ช่องทางนี้จะส่ง reply_to ไปกับ payload จริงไหม
+   *    ต้องคำนวณจากค่าเดียวกับที่ adapter ใช้ ไม่ใช่เดาเอา
+   *    เพราะค่านี้จะถูกบันทึกเป็น "ความจริงเชิงประวัติ" ลงฐานข้อมูล
+   */
+  const replyNative =
+    Boolean(replyTarget.meta_message_id) && policyConfig().native_reply[resolved.channel];
 
   // ---- 4) ถาม Policy Engine ----------------------------------------------
   const decision = decide(ctx, resolved.state, {
@@ -272,6 +310,10 @@ export async function sendMessage(req: SendRequest, options: SendOptions = {}): 
         })),
         meta_message_id: result.message_id,
         human_agent_tag: decision.transport === 'HUMAN_AGENT',
+        reply_to_message_id: req.reply_to_message_id ?? null,
+        // 🔴 บันทึกตามความจริง : ใส่ reply_to ลง payload ไปจริงหรือเปล่า
+        //    ไม่ใช่ "ตั้งใจจะตอบกลับ" ซึ่งเป็นคนละเรื่องกัน
+        reply_native: replyNative,
       });
 
       return {
