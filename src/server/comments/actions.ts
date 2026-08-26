@@ -37,7 +37,7 @@ async function loadPage(pageId: string): Promise<MetaPage> {
     .eq('id', pageId)
     .maybeSingle();
   if (!data) throw new CommentError('ไม่พบเพจของคอมเมนต์นี้');
-  return data as unknown as MetaPage;
+  return data as MetaPage;
 }
 
 function validateText(text: string): string {

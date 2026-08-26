@@ -24,8 +24,8 @@ export default async function NotificationSettingsPage() {
   return (
     <NotificationsClient
       initial={await getPrefs(result.admin)}
-      pushConfigured={isPushConfigured()}
-      telegramConfigured={isTelegramConfigured()}
+      pushConfigured={await isPushConfigured()}
+      telegramConfigured={await isTelegramConfigured()}
       isOwner={can(result.admin.role, 'page.manage')}
       canReply={can(result.admin.role, 'chat.reply')}
     />

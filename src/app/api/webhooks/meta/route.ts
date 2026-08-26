@@ -18,7 +18,7 @@
  * งานหนักทั้งหมดทำ "หลังตอบไปแล้ว" ด้วย after() ของ Next.js
  */
 import { after, type NextRequest } from 'next/server';
-import { serverEnv } from '@/config/env';
+import { getRuntimeSetting } from '@/server/settings/service';
 import { enqueueWebhook } from '@/server/ingest/queue';
 import { processWebhookBatch } from '@/server/ingest/processor';
 import { verifyHubToken, verifyMetaSignature } from '@/server/ingest/signature';
@@ -37,9 +37,9 @@ export async function GET(req: NextRequest) {
   const token = params.get('hub.verify_token');
   const challenge = params.get('hub.challenge');
 
-  const expected = serverEnv().META_VERIFY_TOKEN;
+  const expected = await getRuntimeSetting('META_VERIFY_TOKEN');
 
-  if (mode === 'subscribe' && verifyHubToken(token, expected) && challenge) {
+  if (mode === 'subscribe' && verifyHubToken(token, expected ?? undefined) && challenge) {
     // ต้องตอบกลับเป็นข้อความล้วน ๆ ตามที่ Meta กำหนด ห้ามหุ้ม JSON
     return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain' } });
   }
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   const signature = verifyMetaSignature(
     rawBody,
     req.headers.get('x-hub-signature-256'),
-    serverEnv().META_APP_SECRET,
+    (await getRuntimeSetting('META_APP_SECRET')) ?? undefined,
   );
 
   if (!signature.ok) {

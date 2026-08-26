@@ -962,3 +962,30 @@ describe('🔴 ปุ่มลัดต้องวางข้อความ�
     expect(read(route!)).not.toContain('sendMessage');
   });
 });
+
+describe('🔴 Block 3–4 hardening contracts', () => {
+  it('ห้ามฝืนชนิดข้อมูลด้วยการแคสต์สองชั้น', () => {
+    const offenders = CODE_FILES.filter((file) => /as\s+unknown\s+as/.test(read(file))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ทุก method ของ system settings ต้องผ่าน owner gate', () => {
+    const route = CODE_FILES.find((file) => rel(file) === 'app/api/settings/system/route.ts');
+    const source = read(route!);
+    expect((source.match(/requireOwner\(\)/g) ?? []).length).toBe(4);
+    expect(source).not.toContain('requirePermission(');
+  });
+
+  it('หน้าเว็บตั้งค่าต้องไม่ import crypto หรือ service role', () => {
+    const client = CODE_FILES.find((file) => rel(file) === 'app/(app)/settings/system/system-settings-client.tsx');
+    const source = read(client!);
+    for (const banned of ['decryptSecret', 'encryptSecret', 'SUPABASE_SERVICE_ROLE_KEY', 'encrypted_value']) {
+      expect(source).not.toContain(banned);
+    }
+  });
+
+  it('สถานะไม่ทราบผลต้องบอกชัดว่าห้ามส่งซ้ำ', () => {
+    const service = CODE_FILES.find((file) => rel(file) === 'server/messaging/status-service.ts');
+    expect(read(service!)).toContain('ไม่ทราบผล — ห้ามส่งซ้ำ');
+  });
+});

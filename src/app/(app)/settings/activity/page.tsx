@@ -46,13 +46,15 @@ export default async function ActivityPage() {
   if (!result.ok) redirect('/login');
   if (!can(result.admin.role, 'activity.view')) redirect('/settings');
 
-  const { data } = await db()
+  const { data, error } = await db()
     .from('activity_logs')
     .select('id,admin_id,action,target_type,target_id,ip_address,created_at,admins(name,email)')
     .order('created_at', { ascending: false })
-    .limit(200);
+    .limit(200)
+    .overrideTypes<LogRow[], { merge: false }>();
+  if (error) throw new Error(`อ่านประวัติการใช้งานไม่สำเร็จ: ${error.message}`);
 
-  const logs = (data ?? []) as unknown as LogRow[];
+  const logs = data ?? [];
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">

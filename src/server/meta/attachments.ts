@@ -34,7 +34,7 @@ async function pageOfConversation(conversationId: string): Promise<MetaPage> {
     .maybeSingle();
   if (!page) throw new AttachmentError('ไม่พบเพจของห้องแชทนี้');
 
-  return page as unknown as MetaPage;
+  return page as MetaPage;
 }
 
 /**

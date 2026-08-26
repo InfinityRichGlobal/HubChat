@@ -232,6 +232,7 @@ export default function InboxClient({
   const [loadingMore, setLoadingMore] = useState(false);
   /** โหลดชุดแรกของ "ตัวกรองชุดนี้" แล้วหรือยัง */
   const listInitRef = useRef(true);
+  const newestConversationAtRef = useRef(initialConversations[0]?.last_message_at ?? null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -252,6 +253,10 @@ export default function InboxClient({
 
   const tagById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
 
+  useEffect(() => {
+    newestConversationAtRef.current = conversations[0]?.last_message_at ?? null;
+  }, [conversations]);
+
   /* ---- โหลดรายชื่อแท็กครั้งเดียวตอนเปิดหน้า ---- */
   useEffect(() => {
     let alive = true;
@@ -268,21 +273,23 @@ export default function InboxClient({
    *    ผู้เรียกตั้ง state ใน .then() — กันการเรนเดอร์ซ้อนกันเป็นทอด ๆ
    */
   const fetchList = useCallback(
-    async (before?: string | null): Promise<{ rows: ConversationRow[]; has_more: boolean } | null> => {
+    async (before?: string | null, since?: string | null, signal?: AbortSignal): Promise<{ rows: ConversationRow[]; has_more: boolean; truncated: boolean } | null> => {
       const params = new URLSearchParams();
       if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
       if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
       if (search.trim()) params.set('search', search.trim());
       if (unreadOnly) params.set('unread', '1');
       if (before) params.set('before', before);
+      if (since) params.set('since', since);
 
       try {
-        const res = await fetch(`/api/conversations?${params.toString()}`, { cache: 'no-store' });
+        const res = await fetch(`/api/conversations?${params.toString()}`, { cache: 'no-store', signal });
         const json = await res.json();
         if (!json.ok) return null;
         return {
           rows: json.data.conversations as ConversationRow[],
           has_more: Boolean(json.data.has_more),
+          truncated: Boolean(json.data.truncated),
         };
       } catch {
         // เน็ตสะดุดชั่วคราว — เดี๋ยวรอบหน้าก็ได้เอง ไม่ต้องรบกวนแอดมิน
@@ -292,7 +299,7 @@ export default function InboxClient({
     [selectedPages, selectedTags, search, unreadOnly],
   );
 
-  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean }) => {
+  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean; truncated: boolean }) => {
     /**
      * 🔴 ชุดแรกของตัวกรองชุดใหม่ ต้อง "ทับทั้งก้อน" ไม่ใช่รวมกับของเดิม
      *    ถ้ารวม ห้องเก่าที่ไม่เข้าเงื่อนไขจะค้างอยู่บนจอ
@@ -306,6 +313,7 @@ export default function InboxClient({
       return;
     }
     setConversations((prev) => mergeConversations(prev, got.rows, true));
+    if (got.truncated) toast.warning('มีแชทใหม่เกินเพดานหนึ่งรอบ ระบบกำลังดึงต่อและไม่ได้ทิ้งรายการ');
   }, []);
 
   const loadList = useCallback(async () => {
@@ -349,10 +357,25 @@ export default function InboxClient({
     };
     apply();
     // ดึงซ้ำทุก 8 วินาที (ดู DEFERRED_REVIEW D-21 เรื่อง Realtime)
-    const timer = setInterval(apply, 8000);
+    let controller: AbortController | null = null;
+    let running = false;
+    const poll = () => {
+      if (document.hidden || running) return;
+      running = true;
+      controller = new AbortController();
+      const since = newestConversationAtRef.current;
+      void fetchList(undefined, since, controller.signal).then((got) => {
+        if (alive && got) applyList(got);
+      }).finally(() => { running = false; });
+    };
+    const onVisibility = () => { if (!document.hidden) poll(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    const timer = setInterval(poll, 8000);
     return () => {
       alive = false;
+      controller?.abort();
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [fetchList, applyList]);
 
@@ -371,7 +394,7 @@ export default function InboxClient({
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="ค้นหาชื่อลูกค้า หรือเบอร์โทร"
+              placeholder="ชื่อ เบอร์ ออเดอร์ หรือเลขพัสดุ"
               className="pl-8"
             />
           </div>
@@ -638,6 +661,8 @@ function ChatRoom({
   const [tagsOpen, setTagsOpen] = useState(false);
   const [contactSource, setContactSource] = useState<string | null>(null);
   const [orderOpen, setOrderOpen] = useState(false);
+  const [orderSource, setOrderSource] = useState<MessageRow | null>(null);
+  const [mediaOrder, setMediaOrder] = useState<{ mediaId: string } | null>(null);
   /** รูปที่เลือกไว้แต่ยังไม่ได้ส่ง — ต้องกดส่งเองเสมอ */
   const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -656,19 +681,24 @@ function ChatRoom({
   const initializedRef = useRef(false);
   /** id ของข้อความล่างสุดที่เคยเห็น — ใช้แยก "มีของใหม่จริง" ออกจาก "แค่ดึงข้อมูลรอบใหม่" */
   const lastMessageIdRef = useRef<string | null>(null);
+  const newestMessageAtRef = useRef<string | null>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 
   /* ---- ตัวดึงข้อมูล : คืนค่าอย่างเดียว ไม่ตั้ง state เอง ---- */
   const fetchMessages = useCallback(
-    async (before?: string | null): Promise<{ rows: MessageRow[]; has_more: boolean } | null> => {
+    async (before?: string | null, after?: string | null, signal?: AbortSignal): Promise<{ rows: MessageRow[]; has_more: boolean; truncated: boolean } | null> => {
       try {
-        const qs = before ? `?before=${encodeURIComponent(before)}` : '';
-        const res = await fetch(`/api/conversations/${c.id}/messages${qs}`, { cache: 'no-store' });
+        const params = new URLSearchParams();
+        if (before) params.set('before', before);
+        if (after) params.set('after', after);
+        const qs = params.size ? `?${params.toString()}` : '';
+        const res = await fetch(`/api/conversations/${c.id}/messages${qs}`, { cache: 'no-store', signal });
         const json = await res.json();
         if (!json.ok) return null;
         return {
           rows: json.data.messages as MessageRow[],
           has_more: Boolean(json.data.has_more),
+          truncated: Boolean(json.data.truncated),
         };
       } catch {
         return null;
@@ -704,7 +734,9 @@ function ChatRoom({
   }, [c.id, meId]);
 
   /** รับชุดข้อความล่าสุดเข้ามารวมกับที่ถืออยู่ */
-  const applyLatest = useCallback((got: { rows: MessageRow[]; has_more: boolean }) => {
+  const applyLatest = useCallback((got: { rows: MessageRow[]; has_more: boolean; truncated: boolean }) => {
+    const newest = got.rows[got.rows.length - 1]?.created_at;
+    if (newest && (!newestMessageAtRef.current || newest > newestMessageAtRef.current)) newestMessageAtRef.current = newest;
     setMessages((prev) => (prev === null ? got.rows : mergeMessages(prev, got.rows, true)));
     // ⚠️ ตั้ง "ยังมีของเก่าอีกไหม" เฉพาะรอบแรก
     //    รอบหลัง ๆ ของเก่าที่กดโหลดมาแล้วยังอยู่ในมือ ค่าจาก API จึงไม่ใช่ความจริงอีกต่อไป
@@ -712,6 +744,7 @@ function ChatRoom({
       initializedRef.current = true;
       setHasOlder(got.has_more);
     }
+    if (got.truncated) toast.warning('มีข้อความใหม่เกินเพดานหนึ่งรอบ ระบบกำลังดึงต่อและไม่ได้ทิ้งข้อความ');
   }, []);
 
   const loadMessages = useCallback(async () => {
@@ -759,17 +792,25 @@ function ChatRoom({
   /* ---- เปิดห้อง : อ่านแล้ว + โหลดทุกอย่าง + จับล็อก ---- */
   useEffect(() => {
     let alive = true;
+    let messageController: AbortController | null = null;
+    let messagesRunning = false;
+    let lockRunning = false;
     void fetch(`/api/conversations/${c.id}/read`, { method: 'POST' }).then(onChanged).catch(() => {});
 
     const pullMessages = () => {
-      void fetchMessages().then((got) => {
+      if (document.hidden || messagesRunning) return;
+      messagesRunning = true;
+      messageController = new AbortController();
+      void fetchMessages(undefined, newestMessageAtRef.current, messageController.signal).then((got) => {
         if (alive && got) applyLatest(got);
-      });
+      }).finally(() => { messagesRunning = false; });
     };
     const pullLock = () => {
+      if (document.hidden || lockRunning) return;
+      lockRunning = true;
       void fetchLock().then((holder) => {
         if (alive) setLockedBy(holder);
-      });
+      }).finally(() => { lockRunning = false; });
     };
 
     pullMessages();
@@ -781,11 +822,15 @@ function ChatRoom({
     const msgTimer = setInterval(pullMessages, 4000);
     // ต่ออายุล็อกทุก 45 วินาที — สั้นกว่าอายุล็อก 3 นาทีพอสมควร เผื่อเน็ตสะดุดหนึ่งรอบ
     const lockTimer = setInterval(pullLock, 45_000);
+    const onVisibility = () => { if (!document.hidden) { pullMessages(); pullLock(); } };
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       alive = false;
       clearInterval(msgTimer);
       clearInterval(lockTimer);
+      messageController?.abort();
+      document.removeEventListener('visibilitychange', onVisibility);
       // ออกจากห้อง = ปล่อยล็อกทันที ไม่ต้องรอหมดเวลา 3 นาที
       void fetch(`/api/conversations/${c.id}/lock`, { method: 'DELETE' }).catch(() => {});
     };
@@ -1132,7 +1177,7 @@ function ChatRoom({
               <User />
             </Button>
             {/* ⭐ สร้างออเดอร์จากในห้องแชท (สเปก 5.3) — ไม่ส่งข้อความหาลูกค้าเอง */}
-            <Button variant="ghost" size="icon" aria-label="สร้างออเดอร์" onClick={() => setOrderOpen(true)}>
+            <Button variant="ghost" size="icon" aria-label="สร้างออเดอร์" onClick={() => { setOrderSource(null); setOrderOpen(true); }}>
               <ShoppingCart />
             </Button>
             <Button variant="ghost" size="icon" aria-label="แท็ก" onClick={() => setTagsOpen(true)}>
@@ -1452,6 +1497,8 @@ function ChatRoom({
           setContactSource(m.text ?? '');
           setMenuFor(null);
         }}
+        onCreateOrder={(m) => { setOrderSource(m); setOrderOpen(true); setMenuFor(null); }}
+        onUseMedia={(mediaId) => { setMediaOrder({ mediaId }); setMenuFor(null); }}
       />
 
       {/* ---------- กล่องแท็ก ---------- */}
@@ -1469,8 +1516,16 @@ function ChatRoom({
       <OrderDialog
         key={orderOpen ? `order-${c.id}` : 'order-closed'}
         conversationId={orderOpen ? c.id : null}
-        onClose={() => setOrderOpen(false)}
+        sourceText={orderSource?.text ?? null}
+        sourceMessageId={orderSource?.id ?? null}
+        onClose={() => { setOrderOpen(false); setOrderSource(null); }}
         onCreated={onChanged}
+      />
+
+      <MediaOrderDialog
+        conversationId={c.id}
+        mediaId={mediaOrder?.mediaId ?? null}
+        onClose={() => setMediaOrder(null)}
       />
 
       {/* ---------- ฟอร์มที่อยู่ ---------- */}
@@ -1687,12 +1742,16 @@ function MessageMenu({
   onCopyToInput,
   onQuote,
   onExtract,
+  onCreateOrder,
+  onUseMedia,
 }: {
   message: MessageRow | null;
   onClose: () => void;
   onCopyToInput: (m: MessageRow) => void;
   onQuote: (m: MessageRow) => void;
   onExtract: (m: MessageRow) => void;
+  onCreateOrder: (m: MessageRow) => void;
+  onUseMedia: (mediaId: string) => void;
 }) {
   /**
    * ⭐ เมนูนี้เป็นของ "ข้อความนี้" เท่านั้น
@@ -1703,10 +1762,13 @@ function MessageMenu({
    * ลำดับเรียงตาม "ความถี่ที่ใช้จริง" ไม่ใช่ตามตัวอักษร
    * ตอบกลับคือสิ่งที่ทำบ่อยที่สุด จึงอยู่บนสุด
    */
+  const mediaId = message?.attachments.find((attachment) => attachment.media_id)?.media_id ?? null;
   const items = message
     ? [
         { icon: Reply, label: 'ตอบกลับข้อความนี้', run: () => onQuote(message) },
         { icon: MapPin, label: 'ดึงข้อมูลลูกค้าจากข้อความนี้', run: () => onExtract(message) },
+        { icon: ShoppingCart, label: 'สร้างออเดอร์จากข้อความนี้', run: () => onCreateOrder(message) },
+        ...(mediaId ? [{ icon: Package, label: 'แนบรูปนี้กับออเดอร์ / ตั้งเป็นสลิป', run: () => onUseMedia(mediaId) }] : []),
         { icon: ClipboardCopy, label: 'คัดลอกไปช่องพิมพ์', run: () => onCopyToInput(message) },
         {
           icon: Copy,
@@ -1744,8 +1806,59 @@ function MessageMenu({
           ))}
         </div>
 
-        {/* สร้างออเดอร์จากข้อความนี้ = รอบถัดไป จงใจยังไม่ใส่ปุ่มหลอก */}
-        <p className="text-xs text-muted-foreground">&quot;สร้างออเดอร์จากข้อความนี้&quot; จะมาพร้อมระบบออเดอร์</p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ================================================================== */
+
+function MediaOrderDialog({
+  conversationId, mediaId, onClose,
+}: { conversationId: string; mediaId: string | null; onClose: () => void }) {
+  const [orders, setOrders] = useState<Array<{ id: string; order_no: string }>>([]);
+  const [selected, setSelected] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!mediaId) return;
+    void apiCall<{ orders: Array<{ id: string; order_no: string }> }>(
+      `/api/orders?conversation_id=${encodeURIComponent(conversationId)}`,
+    ).then((data) => {
+      const found = data?.orders ?? [];
+      setOrders(found);
+      setSelected(found[0]?.id ?? '');
+    });
+  }, [conversationId, mediaId]);
+
+  async function link(purpose: 'attachment' | 'payment_slip') {
+    if (!mediaId || !selected) return;
+    setBusy(true);
+    try {
+      const result = await apiCall(`/api/orders/${selected}/media`, {
+        method: 'POST', body: JSON.stringify({ media_id: mediaId, purpose }),
+      });
+      if (!result) throw new Error('ผูกรูปไม่สำเร็จ');
+      toast.success(purpose === 'payment_slip' ? 'ตั้งรูปเป็นสลิปแล้ว' : 'แนบรูปกับออเดอร์แล้ว');
+      onClose();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'ผูกรูปไม่สำเร็จ'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Dialog open={mediaId !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>ใช้รูปกับออเดอร์</DialogTitle><DialogDescription>เลือกได้เฉพาะออเดอร์ของห้องแชทนี้</DialogDescription></DialogHeader>
+        {orders.length === 0 ? <p className="text-sm text-muted-foreground">ห้องนี้ยังไม่มีออเดอร์ สร้างออเดอร์ก่อนแล้วกลับมาเลือกอีกครั้ง</p> : (
+          <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={selected} onChange={(event) => setSelected(event.target.value)}>
+            {orders.map((order) => <option key={order.id} value={order.id}>{order.order_no}</option>)}
+          </select>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>ยกเลิก</Button>
+          <Button variant="secondary" disabled={!selected || busy} onClick={() => void link('attachment')}>แนบกับออเดอร์</Button>
+          <Button disabled={!selected || busy} onClick={() => void link('payment_slip')}>ตั้งเป็นสลิป</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

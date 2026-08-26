@@ -22,7 +22,7 @@ import 'server-only';
  */
 import { AwsClient } from 'aws4fetch';
 import { createHash } from 'node:crypto';
-import { serverEnv } from '@/config/env';
+import { getRuntimeSetting } from '@/server/settings/service';
 
 export class StorageNotConfiguredError extends Error {}
 
@@ -56,22 +56,20 @@ type R2Config = {
   bucket: string;
 };
 
-function readConfig(): R2Config | null {
-  const env = serverEnv();
-  if (!env.R2_ACCOUNT_ID || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.R2_BUCKET) {
+async function readConfig(): Promise<R2Config | null> {
+  const [accountId, accessKeyId, secretAccessKey, bucket] = await Promise.all([
+    getRuntimeSetting('R2_ACCOUNT_ID'), getRuntimeSetting('R2_ACCESS_KEY_ID'),
+    getRuntimeSetting('R2_SECRET_ACCESS_KEY'), getRuntimeSetting('R2_BUCKET'),
+  ]);
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
     return null;
   }
-  return {
-    accountId: env.R2_ACCOUNT_ID,
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-    bucket: env.R2_BUCKET,
-  };
+  return { accountId, accessKeyId, secretAccessKey, bucket };
 }
 
 /** ตั้งค่าครบหรือยัง — ที่อื่นใช้ตัวนี้ตัดสินใจว่าจะเก็บไฟล์หรือข้ามไป */
-export function isStorageConfigured(): boolean {
-  return readConfig() !== null;
+export async function isStorageConfigured(): Promise<boolean> {
+  return (await readConfig()) !== null;
 }
 
 /**
@@ -170,7 +168,7 @@ export async function putObject(
   bytes: ArrayBuffer,
   mime: string,
 ): Promise<StoredObject> {
-  const cfg = readConfig();
+  const cfg = await readConfig();
   if (!cfg) throw new StorageNotConfiguredError('ยังไม่ได้ตั้งค่า Cloudflare R2');
 
   const res = await signedFetch(cfg, endpoint(cfg, key), {
@@ -195,7 +193,7 @@ export async function putObject(
 export async function getObject(
   key: string,
 ): Promise<{ body: ArrayBuffer; mime: string } | null> {
-  const cfg = readConfig();
+  const cfg = await readConfig();
   if (!cfg) throw new StorageNotConfiguredError('ยังไม่ได้ตั้งค่า Cloudflare R2');
 
   const res = await signedFetch(cfg, endpoint(cfg, key), { method: 'GET' });

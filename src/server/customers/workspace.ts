@@ -98,7 +98,8 @@ export async function loadWorkspace(
       )
       .eq('customer_id', conv.customer_id)
       .order('created_at', { ascending: false })
-      .limit(ORDER_LIMIT),
+      .limit(ORDER_LIMIT)
+      .overrideTypes<WorkspaceOrder[], { merge: false }>(),
     db()
       .from('customer_notes')
       .select('id,body,admin_id,created_at,updated_at')
@@ -140,7 +141,7 @@ export async function loadWorkspace(
       name: pageRow?.display_name || pageRow?.page_name || '(ไม่ทราบเพจ)',
       platform: pageRow?.platform ?? '',
     },
-    orders: ((orderRes.data ?? []) as unknown as WorkspaceOrder[]).map((o) => ({
+    orders: (orderRes.data ?? []).map((o) => ({
       ...o,
       total: Number(o.total ?? 0),
     })),

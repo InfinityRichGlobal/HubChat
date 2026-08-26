@@ -9,6 +9,12 @@ import { db } from '@/lib/supabase/admin';
 import type { PublicAdmin } from '@/types/db';
 import { ALL_EVENTS, cleanEvents, EVENT_LABEL_TH, type NotifyEvent } from './events';
 
+export const NOTIFICATION_SELECTS = {
+  prefs: 'enabled_events,page_ids,quiet_hours_start,quiet_hours_end,sound_enabled',
+  pages: 'id,page_name,display_name,platform',
+  jobs: 'id,admin_id,title,body,link,conversation_id',
+} as const;
+
 export type PrefsPayload = {
   enabled_events: NotifyEvent[];
   page_ids: string[];
@@ -39,7 +45,7 @@ async function visiblePages(admin: PublicAdmin) {
    */
   let q = db()
     .from('pages')
-    .select('id,page_name,display_name,platform')
+    .select(NOTIFICATION_SELECTS.pages)
     .eq('is_active', true)
     .order('page_name');
 
@@ -66,12 +72,13 @@ async function visiblePages(admin: PublicAdmin) {
 }
 
 export async function getPrefs(admin: PublicAdmin): Promise<PrefsView> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('notification_prefs')
-    .select('enabled_events,page_ids,quiet_hours_start,quiet_hours_end,sound_enabled')
+    .select(NOTIFICATION_SELECTS.prefs)
     .eq('admin_id', admin.id)
     .maybeSingle();
 
+  if (error) throw new Error(`อ่านค่าตั้งแจ้งเตือนไม่สำเร็จ: ${error.message}`);
   const row = data as {
     enabled_events: string[] | null;
     page_ids: string[] | null;

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot } from 'lucide-react';
+import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot, ShieldCheck, Send } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can, ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +17,17 @@ export default async function SettingsPage() {
   const admin = result.admin;
 
   const ready = [
+    {
+      href: '/send-status', icon: Send, title: 'สถานะการส่ง',
+      description: 'ดูว่าส่งแล้ว ถูกกฎบล็อก ล้มเหลว หรือไม่ทราบผล', show: true,
+    },
+    {
+      href: '/settings/system',
+      icon: ShieldCheck,
+      title: 'ระบบ + ความลับ',
+      description: 'ตั้งค่า Meta, ที่เก็บไฟล์ และแจ้งเตือน โดยไม่ต้องแก้ไฟล์บนเซิร์ฟเวอร์',
+      show: admin.role === 'owner',
+    },
     {
       href: '/settings/pages',
       icon: Store,

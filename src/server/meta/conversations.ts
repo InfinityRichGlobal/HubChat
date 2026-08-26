@@ -44,7 +44,7 @@ export async function loadPageForSync(pageId: string): Promise<MetaPage & { disp
     .eq('id', pageId)
     .maybeSingle();
   if (!data) throw new PageNotFoundError('ไม่พบเพจนี้');
-  return data as unknown as MetaPage & { display_name: string | null; page_name: string };
+  return data as MetaPage & { display_name: string | null; page_name: string };
 }
 
 /**

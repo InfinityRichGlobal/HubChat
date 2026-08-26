@@ -196,7 +196,7 @@ export async function loadDashboard(
   const { data: orderRows, error: orderErr } = await orderQuery;
   if (orderErr) throw new Error(`อ่านออเดอร์สำหรับสรุปยอดไม่สำเร็จ: ${orderErr.message}`);
 
-  const orders = ((orderRows ?? []) as unknown as OrderFact[]).map((o) => ({
+  const orders = ((orderRows ?? []) as OrderFact[]).map((o) => ({
     ...o,
     total: Number(o.total ?? 0),
     items: Array.isArray(o.items) ? o.items : [],
@@ -221,7 +221,7 @@ export async function loadDashboard(
   /**
    * ⭐ ใช้ตัวบอกชนิด (type predicate) ไม่ใช่ .filter() เฉย ๆ
    *    เพื่อให้ TypeScript รู้จริงว่าหลังกรองแล้ว first_contact_at ไม่เป็น null แน่นอน
-   *    (แคสต์ทับด้วย `as unknown as` แบบเดิมคือสิ่งที่ทำให้ D-87 หลุดมาได้)
+   *    การฝืนชนิดสองชั้นแบบเดิมคือสิ่งที่ทำให้ D-87 หลุดมาได้
    */
   const base = ((contactRows ?? []) as Array<{
     id: string; page_id: string; first_contact_at: string | null;

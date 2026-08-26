@@ -45,7 +45,7 @@ export async function listProducts(activeOnly = false): Promise<Product[]> {
   if (activeOnly) q = q.eq('is_active', true);
   const { data, error } = await q;
   if (error) throw new Error(`อ่านรายการสินค้าไม่สำเร็จ: ${error.message}`);
-  return (data ?? []) as unknown as Product[];
+  return (data ?? []) as Product[];
 }
 
 export type ProductInput = {
@@ -77,7 +77,7 @@ export async function createProduct(input: ProductInput): Promise<Product> {
     if (error.code === '23505') throw new CatalogError('รหัสสินค้า (SKU) นี้ถูกใช้ไปแล้ว');
     throw new Error(`บันทึกสินค้าไม่สำเร็จ: ${error.message}`);
   }
-  return data as unknown as Product;
+  return data as Product;
 }
 
 export async function updateProduct(
@@ -108,7 +108,7 @@ export async function updateProduct(
     .select(PRODUCT_COLUMNS)
     .maybeSingle();
   if (error) throw new Error(`แก้ไขสินค้าไม่สำเร็จ: ${error.message}`);
-  return (data as unknown as Product) ?? null;
+  return (data as Product) ?? null;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -124,7 +124,7 @@ export async function listPromotions(activeOnly = false): Promise<PromotionRow[]
   if (activeOnly) q = q.eq('is_active', true);
   const { data, error } = await q;
   if (error) throw new Error(`อ่านรายการโปรโมชันไม่สำเร็จ: ${error.message}`);
-  return ((data ?? []) as unknown as PromotionRow[]).map((p) => ({
+  return ((data ?? []) as PromotionRow[]).map((p) => ({
     ...p,
     config: p.config ?? {},
     price: p.price === null || p.price === undefined ? null : Number(p.price),
@@ -154,7 +154,7 @@ export async function createPromotion(input: PromotionInput): Promise<PromotionR
     .select(PROMO_COLUMNS)
     .single();
   if (error) throw new Error(`บันทึกโปรโมชันไม่สำเร็จ: ${error.message}`);
-  return data as unknown as PromotionRow;
+  return data as PromotionRow;
 }
 
 export async function updatePromotion(
@@ -181,7 +181,7 @@ export async function updatePromotion(
     .select(PROMO_COLUMNS)
     .maybeSingle();
   if (error) throw new Error(`แก้ไขโปรโมชันไม่สำเร็จ: ${error.message}`);
-  return (data as unknown as PromotionRow) ?? null;
+  return (data as PromotionRow) ?? null;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -229,13 +229,19 @@ export type OrderRow = {
   updated_at: string | null;
 };
 
-const ORDER_COLUMNS =
+export const ORDER_SELECTS = {
+  orders:
   'id,order_no,conversation_id,customer_id,page_id,recipient_name,phone,address,postcode,' +
   'items,subtotal,shipping_fee,discount,total,payment_method,payment_status,slip_url,slip_media_id,' +
   'shipping_carrier,shipping_method_id,shipping_snapshot,tracking_no,shipped_at,delivered_at,' +
   'tracking_source,tracking_updated_at,tracking_import_id,tracking_notified_at,' +
   'tracking_notify_status,tracking_notify_reason_th,status,referral_ad_id,' +
-  'internal_note,created_by_admin_id,created_at,updated_at';
+  'internal_note,created_by_admin_id,created_at,updated_at',
+  products: 'id,name,variant,sku,price,sort_order,is_active,archived_at,created_at,updated_at',
+  promotions: 'id,name,type,config,price,sort_order,is_active,archived_at,created_at,updated_at',
+} as const;
+
+const ORDER_COLUMNS = ORDER_SELECTS.orders;
 
 /** เพจที่แอดมินคนนี้เห็นได้ — ใช้กรองออเดอร์ */
 async function visiblePageIds(admin: PublicAdmin): Promise<string[]> {
@@ -253,6 +259,7 @@ export type OrderFilters = {
   shipping_method_id?: string;
   admin_id?: string;
   search?: string;
+  conversation_id?: string;
   limit?: number;
 };
 
@@ -272,6 +279,7 @@ export async function listOrders(admin: PublicAdmin, filters: OrderFilters = {})
   if (filters.payment_status) query = query.eq('payment_status', filters.payment_status);
   if (filters.shipping_method_id) query = query.eq('shipping_method_id', filters.shipping_method_id);
   if (filters.admin_id) query = query.eq('created_by_admin_id', filters.admin_id);
+  if (filters.conversation_id) query = query.eq('conversation_id', filters.conversation_id);
 
   const term = filters.search?.trim();
   if (term) {
@@ -280,9 +288,22 @@ export async function listOrders(admin: PublicAdmin, filters: OrderFilters = {})
     );
   }
 
-  const { data, error } = await query;
+  const { data, error } = await query.overrideTypes<OrderRow[], { merge: false }>();
   if (error) throw new Error(`อ่านรายการออเดอร์ไม่สำเร็จ: ${error.message}`);
-  return normalise((data ?? []) as unknown as OrderRow[]);
+  return normalise(data ?? []);
+}
+
+export async function linkOrderMedia(
+  admin: PublicAdmin,
+  orderId: string,
+  mediaId: string,
+  purpose: 'attachment' | 'payment_slip',
+): Promise<void> {
+  await getOrder(admin, orderId);
+  const { error } = await db().rpc('link_order_media', {
+    p_order_id: orderId, p_media_id: mediaId, p_purpose: purpose, p_admin_id: admin.id,
+  });
+  if (error) throw new Error(`ผูกรูปกับออเดอร์ไม่สำเร็จ: ${error.message}`);
 }
 
 function normalise(rows: OrderRow[]): OrderRow[] {
@@ -301,10 +322,12 @@ function normalise(rows: OrderRow[]): OrderRow[] {
 }
 
 export async function getOrder(admin: PublicAdmin, id: string): Promise<OrderRow> {
-  const { data } = await db().from('orders').select(ORDER_COLUMNS).eq('id', id).maybeSingle();
+  const { data, error } = await db().from('orders').select(ORDER_COLUMNS).eq('id', id).maybeSingle()
+    .overrideTypes<OrderRow | null, { merge: false }>();
+  if (error) throw new Error(`อ่านออเดอร์ไม่สำเร็จ: ${error.message}`);
   if (!data) throw new OrderAccessError('ไม่พบออเดอร์นี้');
 
-  const row = normalise([data as unknown as OrderRow])[0];
+  const row = normalise([data])[0];
   if (row.page_id && !canSeePage(admin.role, admin.allowed_page_ids, row.page_id)) {
     throw new OrderAccessError('คุณไม่มีสิทธิ์เข้าถึงเพจของออเดอร์นี้');
   }

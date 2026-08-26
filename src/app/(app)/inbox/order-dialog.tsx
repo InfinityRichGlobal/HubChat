@@ -58,11 +58,15 @@ export default function OrderDialog({
   conversationId,
   onClose,
   onCreated,
+  sourceText,
+  sourceMessageId,
 }: {
   /** null = ปิดอยู่ */
   conversationId: string | null;
   onClose: () => void;
   onCreated: () => void;
+  sourceText?: string | null;
+  sourceMessageId?: string | null;
 }) {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
@@ -91,7 +95,7 @@ export default function OrderDialog({
     void Promise.all([
       getJson<{ products: Product[] }>('/api/products?active=1'),
       getJson<{ promotions: PromotionRow[] }>('/api/promotions?active=1'),
-      getJson<{ current: Contact }>(`/api/conversations/${conversationId}/contact`),
+      getJson<{ current: Contact; extracted?: Contact }>(`/api/conversations/${conversationId}/contact${sourceText ? `?from=${encodeURIComponent(sourceText)}` : ''}`),
       getJson<{ methods: ShippingMethod[] }>('/api/shipping-methods?active=1'),
     ]).then(([p, promo, contact, ship]) => {
       if (!alive) return;
@@ -101,12 +105,13 @@ export default function OrderDialog({
       setShipping(methods);
       // เลือกวิธีจัดส่งอันแรกให้เลย — แอดมินเปลี่ยนได้ แต่ไม่ต้องเริ่มจากศูนย์
       if (methods.length > 0) setShippingMethodId(methods[0].id);
-      if (contact?.current) {
+      if (contact?.current || contact?.extracted) {
+        const seed: Partial<Contact> = contact.extracted ?? {};
         setForm({
-          recipient_name: contact.current.recipient_name ?? '',
-          phone: contact.current.phone ?? '',
-          address: contact.current.address ?? '',
-          postcode: contact.current.postcode ?? '',
+          recipient_name: seed.recipient_name ?? contact.current?.recipient_name ?? '',
+          phone: seed.phone ?? contact.current?.phone ?? '',
+          address: seed.address ?? contact.current?.address ?? '',
+          postcode: seed.postcode ?? contact.current?.postcode ?? '',
         });
       }
       setLoading(false);
@@ -115,7 +120,7 @@ export default function OrderDialog({
     return () => {
       alive = false;
     };
-  }, [conversationId]);
+  }, [conversationId, sourceText]);
 
   /* ---- ขอราคาจากเซิร์ฟเวอร์ทุกครั้งที่การเลือกเปลี่ยน ---- */
   const fetchPrice = useCallback(async (): Promise<
@@ -194,6 +199,7 @@ export default function OrderDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversation_id: conversationId,
+          source_message_id: sourceMessageId ?? null,
           promotion_id: promotionId,
           product_ids: pickedIds,
           recipient_name: form.recipient_name?.trim() || null,

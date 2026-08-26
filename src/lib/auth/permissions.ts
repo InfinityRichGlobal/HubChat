@@ -51,6 +51,10 @@ export function can(role: AdminRole, permission: Permission): boolean {
   return MATRIX[role].includes(permission);
 }
 
+export function canManageRuntimeSettings(role: AdminRole): boolean {
+  return role === 'owner';
+}
+
 /** ชื่อสิทธิ์ภาษาไทย ใช้แสดงในหน้าจัดการแอดมิน */
 export const ROLE_LABEL_TH: Record<AdminRole, string> = {
   owner: 'เจ้าของ',

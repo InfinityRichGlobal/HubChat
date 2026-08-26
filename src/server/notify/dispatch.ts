@@ -12,7 +12,7 @@ import 'server-only';
  *      ทุกฟังก์ชันในนี้จึงกลืน error เอง ไม่โยนออกไปหาสายรับข้อมูล
  */
 import { db } from '@/lib/supabase/admin';
-import { serverEnv } from '@/config/env';
+import { getRuntimeSetting } from '@/server/settings/service';
 import {
   ALL_EVENTS, cleanEvents, dedupeKey, inQuietHours, shouldNotify,
   type NotifyAdmin, type NotifyEvent,
@@ -51,11 +51,12 @@ type AdminWithPrefs = NotifyAdmin & {
 };
 
 async function loadAdmins(): Promise<AdminWithPrefs[]> {
-  const { data: adminRows } = await db()
+  const { data: adminRows, error: adminError } = await db()
     .from('admins')
     .select('id,role,allowed_page_ids,is_active')
     .eq('is_active', true);
 
+  if (adminError) throw new Error(`อ่านรายชื่อแอดมินแจ้งเตือนไม่สำเร็จ: ${adminError.message}`);
   const admins = (adminRows ?? []) as Array<{
     id: string;
     role: 'owner' | 'admin' | 'viewer';
@@ -64,11 +65,12 @@ async function loadAdmins(): Promise<AdminWithPrefs[]> {
   }>;
   if (admins.length === 0) return [];
 
-  const { data: prefRows } = await db()
+  const { data: prefRows, error: prefError } = await db()
     .from('notification_prefs')
     .select('admin_id,enabled_events,page_ids,quiet_hours_start,quiet_hours_end')
     .in('admin_id', admins.map((a) => a.id));
 
+  if (prefError) throw new Error(`อ่านค่าตั้งแจ้งเตือนไม่สำเร็จ: ${prefError.message}`);
   const prefs = new Map(
     ((prefRows ?? []) as Array<{
       admin_id: string;
@@ -105,8 +107,7 @@ export async function dispatchNotification(input: DispatchInput): Promise<{ queu
   try {
     const admins = await loadAdmins();
     const nowHHMM = nowInBangkok();
-    const pushOn = isPushConfigured();
-    const telegramOn = isTelegramConfigured();
+    const [pushOn, telegramOn] = await Promise.all([isPushConfigured(), isTelegramConfigured()]);
 
     if (!pushOn && !telegramOn) return { queued: 0 };
 
@@ -182,10 +183,10 @@ type JobRow = {
   conversation_id: string | null;
 };
 
-function absoluteLink(link: string | null): string | null {
+async function absoluteLink(link: string | null): Promise<string | null> {
   if (!link) return null;
   if (/^https?:\/\//i.test(link)) return link;
-  const base = serverEnv().APP_BASE_URL;
+  const base = await getRuntimeSetting('APP_BASE_URL');
   return base ? `${base.replace(/\/$/, '')}${link}` : null;
 }
 
@@ -208,12 +209,13 @@ export async function flushNotifications(): Promise<FlushSummary> {
   const adminIndex = new Map((await loadAdmins()).map((a) => [a.id, a]));
 
   /* ---- Push ---- */
-  if (isPushConfigured()) {
-    const { data } = await db().rpc('claim_notifications', {
+  if (await isPushConfigured()) {
+    const { data, error } = await db().rpc('claim_notifications', {
       p_channel: 'push',
       p_limit: BATCH_LIMIT,
     });
-    const jobs = (data ?? []) as unknown as JobRow[];
+    if (error) throw new Error(`หยิบคิว push ไม่สำเร็จ: ${error.message}`);
+    const jobs = (data ?? []) as JobRow[];
 
     /**
      * ⭐ นับเลขบนไอคอนแอป "ครั้งเดียวต่อแอดมินหนึ่งคน" ต่อรอบ
@@ -256,12 +258,13 @@ export async function flushNotifications(): Promise<FlushSummary> {
   }
 
   /* ---- Telegram (รวบส่ง) ---- */
-  if (isTelegramConfigured()) {
-    const { data } = await db().rpc('claim_notifications', {
+  if (await isTelegramConfigured()) {
+    const { data, error } = await db().rpc('claim_notifications', {
       p_channel: 'telegram',
       p_limit: BATCH_LIMIT,
     });
-    const jobs = (data ?? []) as unknown as JobRow[];
+    if (error) throw new Error(`หยิบคิว Telegram ไม่สำเร็จ: ${error.message}`);
+    const jobs = (data ?? []) as JobRow[];
 
     if (jobs.length > 0) {
       /**
@@ -278,7 +281,7 @@ export async function flushNotifications(): Promise<FlushSummary> {
         const found = byKey.get(key);
         if (found) { found.jobs.push(job); continue; }
         byKey.set(key, {
-          item: { title: job.title, body: job.body, link: absoluteLink(job.link) },
+          item: { title: job.title, body: job.body, link: await absoluteLink(job.link) },
           jobs: [job],
         });
       }

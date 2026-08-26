@@ -19,17 +19,23 @@ export class CommentError extends Error {
   }
 }
 
+export const COMMENT_SELECTS = {
+  comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
+  setting: 'value',
+} as const;
+
 /* ------------------------------------------------------------------------ */
 /* คำกรอง (เก็บใน app_settings)                                               */
 /* ------------------------------------------------------------------------ */
 
 export async function getFilterWords(): Promise<string[]> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('app_settings')
-    .select('value')
+    .select(COMMENT_SELECTS.setting)
     .eq('key', 'comment_filter_words')
     .maybeSingle();
 
+  if (error) throw new CommentError(`อ่านคำกรองไม่สำเร็จ: ${error.message}`);
   const raw = (data as { value: unknown } | null)?.value;
   const words = cleanFilterWords(raw);
   return words.length > 0 ? words : [...DEFAULT_FILTER_WORDS];
@@ -130,10 +136,7 @@ export type CommentRow = {
   created_at: string;
 };
 
-const COLUMNS =
-  'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,message,post_permalink,' +
-  'attachment_url,matched_keyword,is_handled,is_hidden,is_from_page,replied_public,replied_private,' +
-  'public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at';
+const COLUMNS = COMMENT_SELECTS.comments;
 
 export type CommentFilters = {
   /** เฉพาะที่ยังไม่จัดการ */
@@ -147,7 +150,8 @@ export type CommentFilters = {
 };
 
 async function visiblePageIds(admin: PublicAdmin): Promise<string[]> {
-  const { data } = await db().from('pages').select('id');
+  const { data, error } = await db().from('pages').select('id');
+  if (error) throw new CommentError(`อ่านรายชื่อเพจไม่สำเร็จ: ${error.message}`);
   return ((data ?? []) as Array<{ id: string }>)
     .map((p) => p.id)
     .filter((id) => canSeePage(admin.role, admin.allowed_page_ids, id));
@@ -184,22 +188,24 @@ export async function listComments(
   const { data, error } = await query;
   if (error) throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${error.message}`);
 
-  const rows = (data ?? []) as unknown as CommentRow[];
+  const rows = (data ?? []) as CommentRow[];
 
-  const { count } = await db()
+  const { count, error: countError } = await db()
     .from('comments')
     .select('id', { count: 'exact', head: true })
     .in('page_id', scoped)
     .eq('is_from_page', false)
     .eq('is_handled', false);
 
+  if (countError) throw new CommentError(`นับคอมเมนต์ค้างไม่สำเร็จ: ${countError.message}`);
   return { comments: rows, has_more: rows.length === limit, unhandled_count: count ?? 0 };
 }
 
 export async function getComment(admin: PublicAdmin, id: string): Promise<CommentRow> {
-  const { data } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle();
+  const { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle();
+  if (error) throw new CommentError(`อ่านคอมเมนต์ไม่สำเร็จ: ${error.message}`);
   if (!data) throw new CommentError('ไม่พบคอมเมนต์นี้');
-  const row = data as unknown as CommentRow;
+  const row = data as CommentRow;
   if (!canSeePage(admin.role, admin.allowed_page_ids, row.page_id)) {
     throw new CommentError('คุณไม่มีสิทธิ์เข้าถึงเพจของคอมเมนต์นี้');
   }

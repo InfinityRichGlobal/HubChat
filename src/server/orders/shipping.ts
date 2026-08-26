@@ -42,12 +42,12 @@ export async function listShippingMethods(activeOnly = false): Promise<ShippingM
   if (activeOnly) q = q.eq('is_active', true);
   const { data, error } = await q;
   if (error) throw new Error(`อ่านวิธีจัดส่งไม่สำเร็จ: ${error.message}`);
-  return normalise((data ?? []) as unknown as ShippingMethod[]);
+  return normalise((data ?? []) as ShippingMethod[]);
 }
 
 export async function getShippingMethod(id: string): Promise<ShippingMethod | null> {
   const { data } = await db().from('shipping_methods').select(COLUMNS).eq('id', id).maybeSingle();
-  return data ? normalise([data as unknown as ShippingMethod])[0] : null;
+  return data ? normalise([data as ShippingMethod])[0] : null;
 }
 
 export type ShippingInput = {
@@ -94,7 +94,7 @@ export async function createShippingMethod(input: ShippingInput): Promise<Shippi
     if (error.code === '23505') throw new ShippingError('มีวิธีจัดส่งชื่อนี้อยู่แล้ว');
     throw new Error(`บันทึกวิธีจัดส่งไม่สำเร็จ: ${error.message}`);
   }
-  return normalise([data as unknown as ShippingMethod])[0];
+  return normalise([data as ShippingMethod])[0];
 }
 
 export async function updateShippingMethod(
@@ -128,7 +128,7 @@ export async function updateShippingMethod(
     if (error.code === '23505') throw new ShippingError('มีวิธีจัดส่งชื่อนี้อยู่แล้ว');
     throw new Error(`แก้ไขวิธีจัดส่งไม่สำเร็จ: ${error.message}`);
   }
-  return data ? normalise([data as unknown as ShippingMethod])[0] : null;
+  return data ? normalise([data as ShippingMethod])[0] : null;
 }
 
 /* ------------------------------------------------------------------------ */

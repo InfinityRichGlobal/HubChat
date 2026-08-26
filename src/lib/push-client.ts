@@ -18,7 +18,7 @@ export type PushSupport =
 /** เปิดเป็นแอปที่ติดตั้งแล้วอยู่หรือเปล่า */
 export function isStandalone(): boolean {
   if (typeof window === 'undefined') return false;
-  const iosStandalone = (window.navigator as unknown as { standalone?: boolean }).standalone;
+  const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone;
   return window.matchMedia?.('(display-mode: standalone)').matches === true || iosStandalone === true;
 }
 

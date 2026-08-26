@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
       limit: params.get('limit') ? Number(params.get('limit')) : undefined,
       // cursor = last_message_at ของห้องสุดท้ายที่หน้าเว็บถืออยู่ (ขอของเก่ากว่านั้น)
       before: params.get('before'),
+      since: params.get('since'),
     });
 
     return ok(result);

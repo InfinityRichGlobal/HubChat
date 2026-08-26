@@ -103,7 +103,7 @@ describe('การเทียบคำ', () => {
   });
 
   it('กฎที่ keywords ไม่ใช่อาเรย์ ต้องไม่ทำให้ระเบิด', () => {
-    const broken = { ...rule(), keywords: null as unknown as string[] };
+    const broken = { ...rule(), keywords: null! };
     expect(findMatchingRule('ราคา', PAGE_A, [broken])).toBeNull();
   });
 });

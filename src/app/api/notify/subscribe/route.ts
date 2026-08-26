@@ -33,7 +33,7 @@ const subscribeSchema = z.object({
 export async function GET() {
   try {
     await requireAdmin();
-    return ok({ configured: isPushConfigured(), public_key: publicVapidKey() });
+    return ok({ configured: await isPushConfigured(), public_key: await publicVapidKey() });
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -42,7 +42,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const admin = await requireAdmin();
-    if (!isPushConfigured()) {
+    if (!(await isPushConfigured())) {
       return fail(
         'push_not_configured',
         'ยังไม่ได้ตั้งค่ากุญแจแจ้งเตือน — เจ้าของร้านต้องรัน npm run vapid แล้วใส่ค่าใน .env.local ก่อน',

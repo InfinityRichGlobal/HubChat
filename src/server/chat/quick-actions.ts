@@ -206,7 +206,7 @@ export async function composeProducts(
 
   if (error) throw new Error(`อ่านข้อมูลสินค้าไม่สำเร็จ: ${error.message}`);
 
-  const rows = (data ?? []) as unknown as Array<{
+  const rows = (data ?? []) as Array<{
     id: string; name: string; variant: string | null; price: number | string;
   }>;
 

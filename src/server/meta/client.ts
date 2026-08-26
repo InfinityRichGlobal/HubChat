@@ -13,8 +13,8 @@ import 'server-only';
  * ไฟล์นี้ "ไม่รู้จัก" กฎของ Meta เรื่องกรอบเวลา — นั่นเป็นหน้าที่ของ Policy Engine
  * หน้าที่ของที่นี่คือ "ยิงตามที่สั่ง แล้วรายงานผลกลับให้ตรงความจริง" เท่านั้น
  */
-import { serverEnv } from '@/config/env';
 import { decryptSecret } from '@/lib/crypto';
+import { getRuntimeSetting } from '@/server/settings/service';
 import { classifyMetaError, type MetaErrorInfo, type RawMetaError } from './errors';
 
 const GRAPH_HOST = 'https://graph.facebook.com';
@@ -28,6 +28,10 @@ export type MetaPage = {
   /** token ที่เข้ารหัสไว้ในฐานข้อมูล */
   access_token: string | null;
 };
+
+async function graphVersion(): Promise<string> {
+  return (await getRuntimeSetting('META_GRAPH_VERSION')) ?? 'v21.0';
+}
 
 /** payload ที่ adapter ประกอบขึ้นมา — client ไม่แก้ไขเนื้อหา ส่งตามนั้น */
 export type MetaSendPayload = Record<string, unknown>;
@@ -84,9 +88,8 @@ function pageToken(page: MetaPage): string {
  * @param payload เนื้อหาที่ adapter ประกอบมาแล้ว
  */
 export async function sendToMeta(page: MetaPage, payload: MetaSendPayload): Promise<MetaSendResult> {
-  const env = serverEnv();
   const token = pageToken(page);
-  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${encodeURIComponent(page.page_id)}/messages`;
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(page.page_id)}/messages`;
 
   let res: Response;
   try {
@@ -148,12 +151,11 @@ export async function metaPost(
   pathSegment: string,
   payload: Record<string, unknown>,
 ): Promise<MetaPostResult> {
-  const env = serverEnv();
   const token = pageToken(page);
 
   // เข้ารหัสทีละท่อน — ดู D-62 (เข้ารหัสทั้งเส้นจะกินเครื่องหมาย / ของ path)
   const safePath = pathSegment.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${safePath}`;
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${safePath}`;
 
   let res: Response;
   try {
@@ -209,7 +211,6 @@ export async function metaGet(
   pathSegment: string,
   params: Record<string, string> = {},
 ): Promise<MetaGetResult> {
-  const env = serverEnv();
   const token = pageToken(page);
   const qs = new URLSearchParams(params).toString();
   /**
@@ -219,7 +220,7 @@ export async function metaGet(
    *    (เดิมไม่มีใครเรียกเส้นทางที่มีเครื่องหมาย / จึงไม่เคยเจอ — รอบ 7 เป็นรายแรก)
    */
   const safePath = pathSegment.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${safePath}` + (qs ? `?${qs}` : '');
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${safePath}` + (qs ? `?${qs}` : '');
 
   let res: Response;
   try {
@@ -248,9 +249,11 @@ export async function metaGet(
 }
 
 /** ตรวจว่าตั้งค่า Meta App ครบหรือยัง — ใช้ตอนเปิดใช้ adapter */
-export function isMetaConfigured(): boolean {
-  const env = serverEnv();
-  return Boolean(env.META_APP_ID && env.META_APP_SECRET);
+export async function isMetaConfigured(): Promise<boolean> {
+  const [appId, appSecret] = await Promise.all([
+    getRuntimeSetting('META_APP_ID'), getRuntimeSetting('META_APP_SECRET'),
+  ]);
+  return Boolean(appId && appSecret);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -282,9 +285,8 @@ export async function uploadAttachmentToMeta(
   page: MetaPage,
   file: { bytes: ArrayBuffer; mime: string; filename: string },
 ): Promise<MetaUploadResult> {
-  const env = serverEnv();
   const token = pageToken(page);
-  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${encodeURIComponent(page.page_id)}/message_attachments`;
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(page.page_id)}/message_attachments`;
 
   const form = new FormData();
   form.append(

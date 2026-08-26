@@ -12,7 +12,7 @@ import 'server-only';
  *    ถ้าส่งทีละข้อความ วันที่ลูกค้าทักพร้อมกัน 30 คน บอทจะโดนจำกัด
  *    แล้วแจ้งเตือนจะหายทั้งหมด ซึ่งแย่กว่าไม่มีระบบแจ้งเตือนเสียอีก
  */
-import { serverEnv } from '@/config/env';
+import { getRuntimeSetting } from '@/server/settings/service';
 
 const TELEGRAM_HOST = 'https://api.telegram.org';
 
@@ -36,16 +36,17 @@ function fetcher(): Fetcher {
 
 export type TelegramConfig = { bot_token: string; chat_id: string };
 
-export function telegramConfig(chatIdOverride?: string | null): TelegramConfig | null {
-  const env = serverEnv();
-  const token = env.TELEGRAM_BOT_TOKEN;
-  const chatId = chatIdOverride?.trim() || env.TELEGRAM_CHAT_ID;
+export async function telegramConfig(chatIdOverride?: string | null): Promise<TelegramConfig | null> {
+  const [token, savedChatId] = await Promise.all([
+    getRuntimeSetting('TELEGRAM_BOT_TOKEN'), getRuntimeSetting('TELEGRAM_CHAT_ID'),
+  ]);
+  const chatId = chatIdOverride?.trim() || savedChatId;
   if (!token || !chatId) return null;
   return { bot_token: token, chat_id: chatId };
 }
 
-export function isTelegramConfigured(chatIdOverride?: string | null): boolean {
-  return telegramConfig(chatIdOverride) !== null;
+export async function isTelegramConfigured(chatIdOverride?: string | null): Promise<boolean> {
+  return (await telegramConfig(chatIdOverride)) !== null;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -215,7 +216,7 @@ export async function sendTelegramBatch(
   items: TelegramItem[],
   chatIdOverride?: string | null,
 ): Promise<TelegramResult & { used: number }> {
-  const cfg = telegramConfig(chatIdOverride);
+  const cfg = await telegramConfig(chatIdOverride);
   if (!cfg) {
     return { ok: false, error_th: 'ยังไม่ได้ตั้งค่า Telegram', retryable: false, used: 0 };
   }
@@ -249,7 +250,7 @@ export async function sendTelegramTest(chatIdOverride?: string | null): Promise<
 export async function discoverChatIds(): Promise<
   { ok: true; chats: Array<{ id: string; title: string }> } | { ok: false; error_th: string }
 > {
-  const cfg = telegramConfig();
+  const cfg = await telegramConfig();
   if (!cfg) return { ok: false, error_th: 'ยังไม่ได้ใส่ bot token ในไฟล์ตั้งค่า (.env.local)' };
 
   /**

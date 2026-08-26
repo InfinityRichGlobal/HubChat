@@ -138,7 +138,7 @@ export async function scanIdleAndClosing(now = new Date()): Promise<ScanSummary>
 
     if (error) throw new Error(error.message);
 
-    const rows = (data ?? []) as unknown as ConvRow[];
+    const rows = (data ?? []) as ConvRow[];
     summary.scanned = rows.length;
     if (rows.length === 0) return summary;
 
@@ -147,18 +147,20 @@ export async function scanIdleAndClosing(now = new Date()): Promise<ScanSummary>
 
     // ชื่อลูกค้า — ดึงทีเดียวทั้งชุด
     const names = new Map<string, string>();
-    const { data: custRows } = await db()
+    const { data: custRows, error: customerError } = await db()
       .from('customers')
       .select('id,name')
       .in('id', rows.map((r) => r.customer_id));
+    if (customerError) throw new Error(`อ่านชื่อลูกค้าไม่สำเร็จ: ${customerError.message}`);
     for (const c of (custRows ?? []) as Array<{ id: string; name: string | null }>) {
       names.set(c.id, c.name || 'ลูกค้า');
     }
 
-    const { data: prevRows } = await db()
+    const { data: prevRows, error: previewError } = await db()
       .from('conversations')
       .select('id,last_message_preview')
       .in('id', [...pending]);
+    if (previewError) throw new Error(`อ่านข้อความตัวอย่างไม่สำเร็จ: ${previewError.message}`);
     const previews = new Map(
       ((prevRows ?? []) as Array<{ id: string; last_message_preview: string | null }>)
         .map((p) => [p.id, p.last_message_preview]),
