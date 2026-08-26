@@ -53,6 +53,13 @@ export default async function SettingsPage() {
       show: can(admin.role, 'content.view'),
     },
     {
+      href: '/settings/notifications',
+      icon: Bell,
+      title: 'แจ้งเตือน',
+      description: 'เปิดแจ้งเตือนบนมือถือ เลือกเรื่องที่อยากรู้ ตั้งช่วงเวลาห้ามรบกวน',
+      show: true,
+    },
+    {
       href: '/settings/activity',
       icon: ScrollText,
       title: 'ประวัติการใช้งาน',
@@ -61,10 +68,10 @@ export default async function SettingsPage() {
     },
   ].filter((i) => i.show);
 
-  const upcoming = [
-    { icon: Package, title: 'นำเข้าเลขพัสดุ + แจ้งลูกค้า', round: 'รอบ 7' },
-    { icon: Bell, title: 'แจ้งเตือน (PWA + Telegram)', round: 'รอบ 9' },
-  ];
+  /**
+   * รอบ 7-10 ทำครบทุกข้อในรายการนี้แล้ว จึงไม่มีหัวข้อ "กำลังจะมา" อีกต่อไป
+   * ถ้าจะเพิ่มของใหม่ในอนาคต ให้เอาโครงเดิมจาก git history มาใช้ได้
+   */
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -98,17 +105,6 @@ export default async function SettingsPage() {
         </Card>
       )}
 
-      <Card className="py-0">
-        <div className="divide-y">
-          {upcoming.map((item) => (
-            <div key={item.title} className="flex items-center gap-3 px-4 py-4 opacity-60">
-              <item.icon className="size-5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1 text-sm">{item.title}</div>
-              <Badge variant="secondary">{item.round}</Badge>
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }

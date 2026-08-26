@@ -155,15 +155,12 @@ export function parseWebhookPayload(payload: unknown): IngestEvent[] {
       continue;
     }
 
-    // เหตุการณ์ที่ไม่ใช่ข้อความ (คอมเมนต์ / ฟีด) มาใน `changes` — เป็นงานของรอบคอมเมนต์
-    if (arr(entry.changes).length > 0 && arr(entry.messaging).length === 0) {
-      events.push({
-        kind: 'ignored',
-        reason: 'เหตุการณ์แบบ changes (คอมเมนต์/ฟีด) ยังไม่รองรับในรอบนี้',
-        platform,
-        page_meta_id: pageMetaId,
-      });
-      continue;
+    /**
+     * คอมเมนต์ / เหตุการณ์บนฟีด มาใน `changes` ไม่ใช่ `messaging` (รอบ 9)
+     * ⚠️ entry เดียวมีได้ทั้งสองแบบ จึงไม่ใช้ continue แล้วข้าม messaging ทิ้ง
+     */
+    for (const changeRaw of arr(entry.changes)) {
+      events.push(...parseChange(changeRaw, platform, pageMetaId));
     }
 
     // `standby` = แชทที่แอปอื่นถือสิทธิ์ตอบอยู่ (handover protocol) — ไม่ยุ่ง
@@ -185,6 +182,85 @@ export function parseWebhookPayload(payload: unknown): IngestEvent[] {
     events.push({ kind: 'ignored', reason: 'ไม่มีเหตุการณ์ในก้อนนี้', platform, page_meta_id: null });
   }
   return events;
+}
+
+/**
+ * แกะเหตุการณ์บนฟีด (คอมเมนต์) — สเปกหัวข้อ 5.5
+ *
+ * รูปแบบจาก Meta :
+ *   { field: 'feed', value: { item: 'comment', verb: 'add', comment_id, post_id,
+ *                             from: {id,name}, message, parent_id, created_time, ... } }
+ *
+ * 🔴 รับเฉพาะ item = 'comment' และ verb = 'add' เท่านั้น
+ *    verb 'edited' / 'remove' ยังไม่รองรับโดยตั้งใจ — การแก้คอมเมนต์ย้อนหลัง
+ *    ทำให้ "สิ่งที่แอดมินเห็นตอนตัดสินใจ" กับ "สิ่งที่อยู่บนโพสต์" ไม่ตรงกัน
+ *    ซึ่งอันตรายกว่าการไม่รู้ (ดู DEFERRED_REVIEW)
+ */
+function parseChange(raw: unknown, platform: Platform, pageMetaId: string): IngestEvent[] {
+  const change = obj(raw);
+  if (!change) return [];
+
+  const field = str(change.field);
+  const value = obj(change.value);
+
+  if (field !== 'feed' && field !== 'comments') {
+    return [{ kind: 'ignored', reason: `เหตุการณ์บนฟีดชนิด "${field ?? '(ว่าง)'}" ยังไม่รองรับ`, platform, page_meta_id: pageMetaId }];
+  }
+  if (!value) {
+    return [{ kind: 'ignored', reason: 'เหตุการณ์บนฟีดไม่มีเนื้อข้อมูล', platform, page_meta_id: pageMetaId }];
+  }
+
+  const item = str(value.item);
+  const verb = str(value.verb);
+
+  if (item !== 'comment') {
+    return [{ kind: 'ignored', reason: `เหตุการณ์บนฟีดเกี่ยวกับ "${item ?? '(ว่าง)'}" ไม่ใช่คอมเมนต์`, platform, page_meta_id: pageMetaId }];
+  }
+  if (verb !== 'add') {
+    return [{ kind: 'ignored', reason: `คอมเมนต์แบบ "${verb ?? '(ว่าง)'}" ยังไม่รองรับ (รับเฉพาะคอมเมนต์ใหม่)`, platform, page_meta_id: pageMetaId }];
+  }
+
+  const commentId = str(value.comment_id);
+  if (!commentId) {
+    return [{ kind: 'ignored', reason: 'คอมเมนต์ไม่มี comment_id — กันซ้ำไม่ได้จึงข้าม', platform, page_meta_id: pageMetaId }];
+  }
+
+  const from = obj(value.from);
+  const fromId = str(from?.id);
+
+  /**
+   * created_time ของ Meta เป็นวินาที (unix) — ต้องคูณพันก่อนเสมอ
+   * ถ้าลืม จะได้ปี 1970 แล้วคอมเมนต์ใหม่จะดูเก่ากว่า 7 วันทันที
+   * แล้วปุ่ม "ทักส่วนตัว" จะถูกปฏิเสธทั้งที่คอมเมนต์เพิ่งมา
+   */
+  const createdRaw = value.created_time;
+  const commentedAt =
+    typeof createdRaw === 'number' && Number.isFinite(createdRaw)
+      ? new Date(createdRaw * 1000).toISOString()
+      : typeof createdRaw === 'string' && createdRaw !== ''
+        ? new Date(createdRaw).toISOString()
+        : new Date().toISOString();
+
+  return [
+    {
+      kind: 'comment',
+      platform,
+      page_meta_id: pageMetaId,
+      comment_id: commentId,
+      post_id: str(value.post_id),
+      parent_comment_id: str(value.parent_id),
+      from_id: fromId,
+      from_name: str(from?.name),
+      message: str(value.message),
+      permalink: str(value.permalink_url),
+      attachment_url: str(obj(value.photo)?.url) ?? str(value.photo) ?? str(value.video),
+      // เพจเราเองคอมเมนต์ = ไม่ต้องให้แอดมินมาจัดการ
+      is_from_page: fromId !== null && fromId === pageMetaId,
+      commented_at: commentedAt,
+      verb,
+      raw: (value as Record<string, unknown>) ?? {},
+    },
+  ];
 }
 
 function parseMessagingEvent(raw: unknown, platform: Platform, pageMetaId: string): IngestEvent[] {

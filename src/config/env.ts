@@ -73,6 +73,15 @@ const futureSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
 
+  // PWA Push (รอบ 10) — สร้างคู่กุญแจด้วย `npm run vapid`
+  // ⚠️ VAPID_PRIVATE_KEY ห้ามหลุดไปฝั่งเบราว์เซอร์เด็ดขาด
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
+
+  // ที่อยู่ของแอปสำหรับประกอบลิงก์ในแจ้งเตือน (ต้องเป็น https ตอนใช้จริง)
+  APP_BASE_URL: z.string().url().optional(),
+
   // หมายเหตุ : ค่าตั้งของ Message Policy Engine (กรอบเวลา / เปิด-ปิด transport)
   // ไม่ได้อยู่ที่นี่โดยตั้งใจ — อยู่ที่ src/server/policy/config.ts ที่เดียว
   // เพราะเป็น "กฎของ Meta" ไม่ใช่ค่าตั้งทั่วไปของแอป และต้องหาเจอง่ายเวลากฎเปลี่ยน

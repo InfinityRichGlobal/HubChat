@@ -74,6 +74,34 @@ export type EchoMessageEvent = {
   sent_at: string;
 };
 
+/**
+ * คอมเมนต์ใต้โพสต์ของเพจ (รอบ 9 — สเปกหัวข้อ 5.5)
+ *
+ * ⚠️ มาคนละทางกับข้อความ : อยู่ใน entry.changes ไม่ใช่ entry.messaging
+ *    และ "ไม่ตอบอัตโนมัติ" เด็ดขาด — แอดมินกดเองทุกครั้ง
+ */
+export type CommentEvent = {
+  kind: 'comment';
+  platform: Platform;
+  page_meta_id: string;
+  /** id ของคอมเมนต์ฝั่ง Meta — ใช้กันซ้ำ */
+  comment_id: string;
+  post_id: string | null;
+  /** คอมเมนต์ที่ตอบใต้คอมเมนต์อื่น */
+  parent_comment_id: string | null;
+  from_id: string | null;
+  from_name: string | null;
+  message: string | null;
+  permalink: string | null;
+  attachment_url: string | null;
+  /** true = เพจเราเองเป็นคนคอมเมนต์ (ไม่ต้องให้แอดมินมาจัดการ) */
+  is_from_page: boolean;
+  commented_at: string;
+  /** เหตุการณ์ที่ไม่ใช่ "เพิ่มคอมเมนต์" เช่น แก้ไข / ลบ */
+  verb: string | null;
+  raw: Record<string, unknown>;
+};
+
 /** เหตุการณ์ที่เรารับรู้แต่ยังไม่ทำอะไรในรอบนี้ (เก็บเหตุผลไว้ดูตอนแก้ปัญหา) */
 export type IgnoredEvent = {
   kind: 'ignored';
@@ -82,4 +110,4 @@ export type IgnoredEvent = {
   page_meta_id: string | null;
 };
 
-export type IngestEvent = InboundMessageEvent | EchoMessageEvent | IgnoredEvent;
+export type IngestEvent = InboundMessageEvent | EchoMessageEvent | CommentEvent | IgnoredEvent;

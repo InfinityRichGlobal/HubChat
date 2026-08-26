@@ -247,6 +247,35 @@ async function handle(
     const op = v.slice(0, dot);
     const val = v.slice(dot + 1);
 
+    /* ---- col=not.<op>.<value> ----
+     * ⚠️ PostgREST ใช้ not.is.null / not.eq.x สำหรับการปฏิเสธเงื่อนไข
+     *    🔴 ตอนแรกตัวจำลองไม่รู้จัก แล้ว "เมินเงียบ ๆ"
+     *       ผลคือตัวกรอง .not('matched_keyword','is',null) ไม่ทำงานเลย
+     *       แต่เทสต์ผ่าน เพราะไม่มีใครสังเกตว่าได้ผลลัพธ์เกินมา
+     *       (บทเรียนซ้ำรอย D-50 / D-61 / D-69 — ตัวจำลองที่เงียบคือกับดัก)
+     */
+    if (op === 'not') {
+      const rest = val;
+      const d = rest.indexOf('.');
+      const innerOp = d === -1 ? rest : rest.slice(0, d);
+      const innerVal = d === -1 ? '' : rest.slice(d + 1);
+
+      if (innerOp === 'is') {
+        const target = innerVal.toLowerCase();
+        if (target === 'null') where.push(`${q(k)} is not null`);
+        else if (target === 'true') where.push(`${q(k)} is not true`);
+        else if (target === 'false') where.push(`${q(k)} is not false`);
+        continue;
+      }
+      if (OPS[innerOp]) {
+        params.push(innerVal);
+        where.push(`not (${q(k)} ${OPS[innerOp]} $${params.length})`);
+        continue;
+      }
+      // ไม่รู้จัก = ต้องดังทันที ห้ามเมินเงียบ ๆ
+      throw new Error(`ตัวจำลอง PostgREST ยังไม่รองรับ not.${innerOp} — เพิ่มใน tests/pg/harness.ts ก่อน`);
+    }
+
     /* ---- col=is.null / col=is.not.null ----
      * ⚠️ PostgREST ใช้ตัวนี้แทน eq สำหรับค่าว่าง เพราะ SQL เทียบ null ด้วย = ไม่ได้
      *    (ตอนแรกลืมใส่ในตัวจำลอง ทำให้ตัวกรอง .is('archived_at', null) เงียบหายไปเฉย ๆ

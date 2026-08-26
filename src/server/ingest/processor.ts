@@ -19,7 +19,9 @@ import { parseWebhookPayload } from './parse';
 import { runAutoReply } from '@/server/autoreply/runner';
 import { captureInboundMedia } from '@/server/storage/media';
 import { claimJobs, finishJob, nextStatusAfterFailure, type QueueJob } from './queue';
-import type { EchoMessageEvent, InboundMessageEvent } from './types';
+import type { EchoMessageEvent, IngestEvent, InboundMessageEvent } from './types';
+import { getFilterWords, saveIncomingComment } from '@/server/comments/service';
+import { dispatchNotification } from '@/server/notify/dispatch';
 
 /** สรุปผลของการทำงานหนึ่งรอบ — ใช้ตอบกลับหน้าจอและใช้ในชุดทดสอบ */
 export type ProcessSummary = {
@@ -38,6 +40,12 @@ export type ProcessSummary = {
   media_stored: number;
   /** ไฟล์แนบที่เก็บไม่ได้ — รวมกรณีลิงก์หมดอายุ ซึ่งกู้ไม่ได้ */
   media_failed: number;
+  /** คอมเมนต์ที่บันทึกใหม่ (รอบ 9) — ⚠️ ไม่มีการตอบอัตโนมัติใด ๆ */
+  comments_saved: number;
+  /** คอมเมนต์ที่เข้าคำกรอง — ใช้ตัดสินว่าจะแจ้งเตือนไหม */
+  comments_flagged: number;
+  /** แจ้งเตือนที่เข้าคิวได้จริงในรอบนี้ (รอบ 10) */
+  notifications_queued: number;
 };
 
 const EMPTY_SUMMARY: ProcessSummary = {
@@ -52,6 +60,9 @@ const EMPTY_SUMMARY: ProcessSummary = {
   auto_blocked: 0,
   media_stored: 0,
   media_failed: 0,
+  comments_saved: 0,
+  comments_flagged: 0,
+  notifications_queued: 0,
 };
 
 /** ความผิดที่ลองใหม่ไปก็ไม่มีวันหาย */
@@ -261,6 +272,144 @@ async function maybeAutoReply(
 }
 
 /* ------------------------------------------------------------------------ */
+/* แจ้งเตือน (รอบ 10)                                                         */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * แจ้งเตือนแอดมินว่ามีข้อความใหม่จากลูกค้า
+ *
+ * 🔴 "ทักใหม่" กับ "ตอบกลับ" ต่างกันที่ว่ามีคนรับแชทนี้ไว้หรือยัง
+ *    • ยังไม่มีใครรับ → new_chat  → บอกทุกคนที่ดูเพจนั้น (ไม่งั้นไม่มีใครรู้)
+ *    • มีคนรับแล้ว    → reply     → บอกเฉพาะคนนั้น (ไม่งั้นทุกคนโดนกวนเปล่า ๆ)
+ *
+ * ⚠️ ห่อ try/catch เสมอ — แจ้งเตือนพังต้องไม่ทำให้ข้อความของลูกค้าหาย
+ */
+async function maybeNotifyInbound(
+  page: PageRow,
+  row: IngestRow,
+  ev: InboundMessageEvent,
+  summary: ProcessSummary,
+): Promise<void> {
+  if (!row.message_id) return;
+
+  try {
+    const { data } = await db()
+      .from('conversations')
+      .select('id,assigned_admin_id,customer_id')
+      .eq('id', row.conversation_id)
+      .maybeSingle();
+
+    const conv = data as { assigned_admin_id: string | null; customer_id: string } | null;
+    if (!conv) return;
+
+    const { data: cust } = await db()
+      .from('customers')
+      .select('name')
+      .eq('id', conv.customer_id)
+      .maybeSingle();
+    const who = ((cust as { name: string | null } | null)?.name) || 'ลูกค้า';
+
+    const assigned = conv.assigned_admin_id;
+    const text = (ev.text ?? '').replace(/\s+/g, ' ').trim();
+    const body = text
+      ? (text.length > 80 ? `${text.slice(0, 80)}…` : text)
+      : (ev.attachments.length > 0 ? '📎 ส่งไฟล์แนบมา' : '(ไม่มีข้อความ)');
+
+    const result = await dispatchNotification({
+      event: assigned ? 'reply' : 'new_chat',
+      page_id: page.id,
+      /**
+       * 🔴 ต้องมี message_id อยู่ในกุญแจกันซ้ำ
+       *    ห้องแชทหนึ่งห้องอยู่กับลูกค้าคนนั้นตลอดชีวิต (unique บน customer_id)
+       *    ถ้าใช้แค่ห้อง ลูกค้าเก่าที่กลับมาทักอีกจะไม่มีใครได้รับแจ้งเตือนเลย
+       */
+      subject_id: `${row.conversation_id}:${row.message_id}`,
+      conversation_id: row.conversation_id,
+      assigned_admin_id: assigned,
+      title: assigned ? `💬 ${who} ตอบกลับ` : `🆕 ${who} ทักเข้ามา`,
+      body,
+      link: `/inbox?c=${row.conversation_id}`,
+    });
+    summary.notifications_queued += result.queued;
+  } catch (err) {
+    console.error('[ingest] แจ้งเตือนข้อความใหม่ไม่สำเร็จ (ข้ามไป ข้อความลูกค้ายังอยู่ครบ):', err);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* คอมเมนต์ (รอบ 9)                                                           */
+/* ------------------------------------------------------------------------ */
+
+/** คำกรองอ่านครั้งเดียวต่อการประมวลผลหนึ่งรอบ ไม่ใช่ต่อคอมเมนต์ */
+let filterWordsCache: string[] | null = null;
+
+/**
+ * บันทึกคอมเมนต์ที่เข้ามา
+ *
+ * ⚠️ ต้องไม่โยน error ออกไป — คอมเมนต์พังต้องไม่ทำให้ข้อความของลูกค้าในคิวเดียวกันพัง
+ * 🔴 และต้องไม่ตอบอะไรกลับไปทั้งสิ้น
+ */
+async function handleComment(
+  page: PageRow,
+  ev: Extract<IngestEvent, { kind: 'comment' }>,
+  summary: ProcessSummary,
+): Promise<void> {
+  try {
+    if (filterWordsCache === null) filterWordsCache = await getFilterWords();
+
+    const saved = await saveIncomingComment(
+      {
+        page_id: page.id,
+        comment_id: ev.comment_id,
+        post_id: ev.post_id,
+        parent_comment_id: ev.parent_comment_id,
+        from_id: ev.from_id,
+        from_name: ev.from_name,
+        message: ev.message,
+        permalink: ev.permalink,
+        attachment_url: ev.attachment_url,
+        is_from_page: ev.is_from_page,
+        commented_at: ev.commented_at,
+        raw: ev.raw,
+      },
+      filterWordsCache,
+    );
+
+    if (saved.duplicate) {
+      summary.duplicates += 1;
+      return;
+    }
+
+    summary.comments_saved += 1;
+    if (!saved.matched) return;
+
+    summary.comments_flagged += 1;
+
+    /**
+     * ⭐ แจ้งเตือนเฉพาะคอมเมนต์ที่ "เข้าคำกรอง" เท่านั้น
+     *    โพสต์ที่ยิงแอดอยู่มีคอมเมนต์ได้เป็นพัน ถ้าแจ้งทุกอันแอดมินปิดแจ้งเตือนทิ้งแน่
+     *    และ 🔴 แจ้งเตือนอย่างเดียว ห้ามตอบอัตโนมัติ (สเปก 5.5)
+     */
+    if (saved.id) {
+      const result = await dispatchNotification({
+        event: 'new_comment',
+        page_id: page.id,
+        // comment_id ของ Meta ไม่ซ้ำอยู่แล้ว ใช้เป็นกุญแจกันซ้ำได้ตรง ๆ
+        subject_id: saved.id,
+        conversation_id: null,
+        title: `💭 คอมเมนต์เข้าคำว่า "${saved.matched}"`,
+        body: `${ev.from_name || 'ผู้ใช้'}: ${(ev.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '(ไม่มีข้อความ)'}`,
+        link: '/comments',
+      });
+      summary.notifications_queued += result.queued;
+    }
+  } catch (err) {
+    summary.ignored += 1;
+    console.error('[ingest] บันทึกคอมเมนต์ไม่สำเร็จ (ข้ามไป ข้อความอื่นยังทำงานต่อ):', err);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
 /* ทำงานหนึ่งชิ้น                                                              */
 /* ------------------------------------------------------------------------ */
 
@@ -289,6 +438,16 @@ async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary):
       continue;
     }
 
+    /**
+     * ⭐ คอมเมนต์เดินคนละสายกับข้อความโดยสิ้นเชิง
+     *    🔴 บันทึกอย่างเดียว ไม่ตอบอัตโนมัติเด็ดขาด (สเปก 5.5)
+     *       แอดมินต้องกดเองทุกครั้ง ทั้งตอบใต้โพสต์และทักส่วนตัว
+     */
+    if (ev.kind === 'comment') {
+      await handleComment(page, ev, summary);
+      continue;
+    }
+
     const row = ev.kind === 'inbound_message' ? await saveInbound(page, ev) : await saveEcho(page, ev);
 
     if (row.duplicate) {
@@ -302,6 +461,12 @@ async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary):
       // ⭐ เก็บไฟล์ "ก่อน" ทำอย่างอื่น เพราะลิงก์ของ Meta เดินนาฬิกาหมดอายุอยู่
       await maybeCaptureMedia(page, row, ev, summary);
       await maybeAutoReply(page, row, ev, summary);
+      /**
+       * ⭐ แจ้งเตือน "หลัง" ตอบอัตโนมัติโดยตั้งใจ
+       *    ถ้าบอทตอบไปแล้ว แอดมินก็ยังควรรู้ว่ามีคนทักอยู่ดี
+       *    แต่ต้องไม่ให้แจ้งเตือนไปขวางการตอบอัตโนมัติที่ต้องเร็ว
+       */
+      await maybeNotifyInbound(page, row, ev, summary);
     } else {
       summary.echo_saved += 1;
     }
@@ -359,6 +524,15 @@ export async function drainWebhookQueue(maxRounds = 50, limit = 20): Promise<Pro
     total.auto_blocked += round.auto_blocked;
     total.media_stored += round.media_stored;
     total.media_failed += round.media_failed;
+    /**
+     * 🔴 บั๊กที่เคยหลุดมาจากรอบ 9 : เพิ่มฟิลด์ใน ProcessSummary แล้วลืมมาบวกตรงนี้
+     *    ผลคือ drainWebhookQueue รายงาน comments_saved = 0 ทั้งที่บันทึกได้จริง
+     *    TypeScript จับไม่ได้เพราะเป็นการ "ไม่เขียน" ไม่ใช่การเขียนผิดชนิด
+     *    เพิ่มฟิลด์ใหม่ใน ProcessSummary เมื่อไหร่ ต้องมาบวกที่นี่ด้วยเสมอ
+     */
+    total.comments_saved += round.comments_saved;
+    total.comments_flagged += round.comments_flagged;
+    total.notifications_queued += round.notifications_queued;
     if (round.jobs === 0) break;
   }
   return total;

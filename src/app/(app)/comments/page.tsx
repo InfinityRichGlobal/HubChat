@@ -1,13 +1,27 @@
-import PlaceholderPage from '@/components/placeholder-page';
+import { redirect } from 'next/navigation';
+import { getCurrentAdmin } from '@/lib/auth/current-admin';
+import { can } from '@/lib/auth/permissions';
+import { getFilterWords, listComments } from '@/server/comments/service';
+import CommentsClient from './comments-client';
 
 /** ฟีดคอมเมนต์ — สเปกหัวข้อ 5.5 */
-export default function CommentsPage() {
+export const dynamic = 'force-dynamic';
+
+export default async function CommentsPage() {
+  const result = await getCurrentAdmin();
+  if (!result.ok) redirect('/login');
+  if (!can(result.admin.role, 'chat.reply')) redirect('/inbox');
+
+  const [feed, words] = await Promise.all([
+    listComments(result.admin, {}),
+    getFilterWords(),
+  ]);
+
   return (
-    <PlaceholderPage
-      title="คอมเมนต์"
-      round="รอบ 6"
-      description="ไม่ตอบอัตโนมัติ แอดมินกดเองทั้งหมด"
-      items={['ฟีดสด', 'ตอบใต้โพสต์ / ทักส่วนตัว', 'ตัวกรองคำ', 'ตัวนับที่ยังไม่จัดการ']}
+    <CommentsClient
+      initial={feed}
+      initialWords={words}
+      canManageWords={can(result.admin.role, 'content.manage')}
     />
   );
 }

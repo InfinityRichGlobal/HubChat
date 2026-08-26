@@ -31,6 +31,9 @@ const eslintConfig = defineConfig([
       "src/server/ingest/**",
       // หน้าตั้งค่าเพจต้องยิงถาม Meta ว่า token ใช้ได้ไหม (อ่านอย่างเดียว)
       "src/server/pages/**",
+      // คอมเมนต์ใช้ endpoint คนละตัวกับ Send API (ตอบใต้โพสต์ / ทักส่วนตัว / ซ่อน)
+      // ซึ่งมีกฎของตัวเองต่างหาก — แต่ห้ามส่งข้อความแชท มีกฎเฉพาะในบล็อกถัดไป
+      "src/server/comments/**",
       "src/**/__tests__/**",
     ],
     rules: {
@@ -76,7 +79,11 @@ const eslintConfig = defineConfig([
    * ต้องเรียกผ่าน sendMessage() เท่านั้น (ตัวนั้นไม่ได้ห้ามไว้)
    * ------------------------------------------------------------------- */
   {
-    files: ["src/server/ingest/**/*.ts", "src/server/pages/**/*.ts"],
+    files: [
+      "src/server/ingest/**/*.ts",
+      "src/server/pages/**/*.ts",
+      "src/server/comments/**/*.ts",
+    ],
     ignores: ["src/**/__tests__/**"],
     rules: {
       "no-restricted-imports": [
@@ -85,9 +92,9 @@ const eslintConfig = defineConfig([
           patterns: [
             {
               group: ["@/server/meta/client"],
-              importNames: ["sendToMeta"],
+              importNames: ["sendToMeta", "metaPost"],
               message:
-                "ทางเข้าข้อมูลห้ามส่งข้อความ — ถ้าต้องตอบกลับ ต้องผ่าน sendMessage() เพื่อให้ Policy Engine ตัดสินก่อนเสมอ",
+                "โฟลเดอร์นี้ห้ามส่งข้อความแชท — ถ้าต้องตอบกลับ ต้องผ่าน sendMessage() เพื่อให้ Policy Engine ตัดสินก่อนเสมอ (คอมเมนต์ใช้ @/server/meta/comments ซึ่งเป็น endpoint คนละตัว)",
             },
             {
               group: [

@@ -126,6 +126,67 @@ export async function sendToMeta(page: MetaPage, payload: MetaSendPayload): Prom
 }
 
 /* ------------------------------------------------------------------------ */
+/* การเขียนอย่างอื่นที่ไม่ใช่ "ข้อความหาลูกค้า" (รอบ 9)                            */
+/* ------------------------------------------------------------------------ */
+
+export type MetaPostResult =
+  | { ok: true; data: Record<string, unknown>; http_status: number }
+  | { ok: false; error: MetaErrorInfo; http_status: number };
+
+/**
+ * ยิง POST ไป Graph API สำหรับงานที่ "ไม่ใช่การส่งข้อความหาลูกค้าผ่าน Send API"
+ * ===========================================================================
+ * 🔴 ห้ามใช้ตัวนี้ส่งข้อความแชทเด็ดขาด
+ *    การส่งข้อความทุกกรณีต้องผ่าน sendMessage() → Policy Engine → sendToMeta()
+ *    (ชุดทดสอบสถาปัตยกรรมไล่ตรวจว่าไม่มีใครใช้ตัวนี้ยิง /messages)
+ *
+ * ใช้กับ : ตอบใต้โพสต์ / ทักส่วนตัวจากคอมเมนต์ / ซ่อนคอมเมนต์ (สเปก 5.5 + 6.4)
+ *          ซึ่งเป็น endpoint คนละตัวและมีกฎของตัวเองต่างหาก
+ */
+export async function metaPost(
+  page: MetaPage,
+  pathSegment: string,
+  payload: Record<string, unknown>,
+): Promise<MetaPostResult> {
+  const env = serverEnv();
+  const token = pageToken(page);
+
+  // เข้ารหัสทีละท่อน — ดู D-62 (เข้ารหัสทั้งเส้นจะกินเครื่องหมาย / ของ path)
+  const safePath = pathSegment.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  const url = `${GRAPH_HOST}/${env.META_GRAPH_VERSION}/${safePath}`;
+
+  let res: Response;
+  try {
+    res = await fetcher()(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    // ยิงออกไปแล้วไม่รู้ผล — ผู้เรียกต้องตัดสินใจเองว่าจะทำอย่างไรต่อ
+    return {
+      ok: false,
+      http_status: 0,
+      error: classifyMetaError({ message: (err as Error).message }, 0, { networkFailure: true }),
+    };
+  }
+
+  const body = (await res.json().catch(() => null)) as
+    | (Record<string, unknown> & { error?: RawMetaError })
+    | null;
+
+  if (!res.ok || body?.error) {
+    return { ok: false, http_status: res.status, error: classifyMetaError(body?.error ?? null, res.status) };
+  }
+
+  return { ok: true, data: body ?? {}, http_status: res.status };
+}
+
+/* ------------------------------------------------------------------------ */
 /* การอ่านข้อมูลจาก Meta (ไม่ใช่การส่งข้อความ)                                  */
 /* ------------------------------------------------------------------------ */
 
