@@ -77,7 +77,7 @@ export async function resetDatabase(): Promise<void> {
    *    และต้องทนกรณีที่มีอยู่แล้ว (รันซ้ำได้)
    */
   await c.query(`
-    do $
+    do $$
     begin
       if not exists (select 1 from pg_roles where rolname = 'anon') then
         create role anon nologin noinherit;
@@ -88,7 +88,7 @@ export async function resetDatabase(): Promise<void> {
       if not exists (select 1 from pg_roles where rolname = 'service_role') then
         create role service_role nologin noinherit bypassrls;
       end if;
-    end $;
+    end $$;
   `);
 
   for (const f of files) {
