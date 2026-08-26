@@ -689,55 +689,45 @@ function ConversationItem({
             <span className={cn('min-w-0 flex-1 break-words text-sm leading-5', !c.is_read && 'font-semibold')}>
               {displayName(c)}
             </span>
-            <span className="flex shrink-0 flex-col items-end gap-0.5">
-              <span className="text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
+            <span className="flex shrink-0 items-center justify-end gap-1 whitespace-nowrap text-[11px] text-muted-foreground">
+              {dayTh(c.last_message_at)}
               {(c.order_count > 0 || c.is_important) && (
-                <Star className="size-4 fill-amber-500 text-amber-500" aria-label={c.order_count > 0 ? 'ติดตามผล' : 'สำคัญ'} />
+                <Star className="size-3.5 fill-amber-500 text-amber-500" aria-label={c.order_count > 0 ? 'ติดตามผล' : 'สำคัญ'} />
               )}
             </span>
           </div>
 
-          {c.username && <p className="truncate text-[11px] text-muted-foreground">@{c.username}</p>}
           <p className={cn('mt-0.5 truncate text-xs leading-5', c.is_read ? 'text-muted-foreground' : 'font-medium')}>
             {c.last_message_preview ?? '—'}
           </p>
 
-          <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
-              <span className="size-1.5 rounded-full" style={{ backgroundColor: c.page.tag_color }} /> {c.page.name}
-            </span>
-            {c.order_count > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                <ShoppingCart className="size-2.5" /> {c.order_count}
+          <div className="mt-1 flex items-start justify-between gap-2 text-[10px] text-muted-foreground">
+            <div className="min-w-0 flex flex-wrap items-center gap-1">
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
+                <span className="size-1.5 rounded-full" style={{ backgroundColor: c.page.tag_color }} /> {c.page.name}
               </span>
-            )}
-            {c.inbox_status === 'done' && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 className="size-2.5" /> เรียบร้อย</span>}
-            {c.inbox_status === 'spam' && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive"><ShieldAlert className="size-2.5" /> สแปม</span>}
-            {c.assigned_admin_name && <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5"><UserCheck className="size-2.5" /> {c.assigned_admin_name}</span>}
-            {c.has_ai_reply && <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-violet-800 dark:bg-violet-950 dark:text-violet-300"><Bot className="size-2.5" /> AI ตอบ</span>}
-            {c.has_ai_handoff && <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-1.5 py-0.5 text-orange-800 dark:bg-orange-950 dark:text-orange-300"><Handshake className="size-2.5" /> AI ส่งต่อ</span>}
-            {c.referral_source && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5">
-                <Megaphone className="size-3" />
-                {REFERRAL_LABEL[c.referral_source] ?? c.referral_source}
-              </span>
-            )}
-            {hint && (
-              <span
-                className={cn(
-                  'rounded-full bg-muted px-1.5 py-0.5',
-                  hint.tone === 'over' && 'text-[var(--destructive)]',
-                  hint.tone === 'warn' && 'text-[var(--warning,#b45309)]',
-                )}
-              >
-                {hint.text}
-              </span>
-            )}
-            {!c.is_read && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive"><span className="size-1.5 rounded-full bg-destructive" /> ใหม่</span>}
-          </div>
-
-          {c.tag_ids.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
+              {c.inbox_status === 'done' && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 className="size-2.5" /> เรียบร้อย</span>}
+              {c.inbox_status === 'spam' && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive"><ShieldAlert className="size-2.5" /> สแปม</span>}
+              {c.has_ai_reply && <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-violet-800 dark:bg-violet-950 dark:text-violet-300"><Bot className="size-2.5" /> AI ตอบ</span>}
+              {c.has_ai_handoff && <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-1.5 py-0.5 text-orange-800 dark:bg-orange-950 dark:text-orange-300"><Handshake className="size-2.5" /> AI ส่งต่อ</span>}
+              {c.referral_source && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5">
+                  <Megaphone className="size-3" />
+                  {REFERRAL_LABEL[c.referral_source] ?? c.referral_source}
+                </span>
+              )}
+              {hint && (
+                <span
+                  className={cn(
+                    'rounded-full bg-muted px-1.5 py-0.5',
+                    hint.tone === 'over' && 'text-[var(--destructive)]',
+                    hint.tone === 'warn' && 'text-[var(--warning,#b45309)]',
+                  )}
+                >
+                  {hint.text}
+                </span>
+              )}
+              {!c.is_read && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive"><span className="size-1.5 rounded-full bg-destructive" /> ใหม่</span>}
               {c.tag_ids.slice(0, 1).map((id) => {
                 const t = tagById.get(id);
                 if (!t) return null;
@@ -752,15 +742,31 @@ function ConversationItem({
                 );
               })}
               {c.tag_ids.length > 1 && <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">+{c.tag_ids.length - 1}</span>}
+              {lockedByOther && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[var(--warning,#b45309)] dark:bg-amber-950">
+                  <Lock className="size-2.5" /> {c.locked_by_name} กำลังดูอยู่
+                </span>
+              )}
             </div>
-          )}
-
-          {lockedByOther && (
-            <p className="mt-1 flex items-center gap-1 text-[11px] text-[var(--warning,#b45309)]">
-              <Lock className="size-3" />
-              {c.locked_by_name} กำลังดูอยู่
-            </p>
-          )}
+            {(c.assigned_admin_name || c.order_count > 0) && (
+              <div className="flex shrink-0 items-center justify-end gap-1">
+                {c.assigned_admin_name && (
+                  <span
+                    className="inline-flex max-w-16 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 font-medium"
+                    title={`ผู้ดูแล ${c.assigned_admin_name}`}
+                  >
+                    <UserCheck className="size-2.5 shrink-0" />
+                    <span className="truncate">{c.assigned_admin_name}</span>
+                  </span>
+                )}
+                {c.order_count > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                    <ShoppingCart className="size-2.5" /> {c.order_count}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </button>
     </li>
