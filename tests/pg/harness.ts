@@ -60,6 +60,37 @@ export async function resetDatabase(): Promise<void> {
 
   const c = new Client({ ...PG, database: TEST_DB });
   await c.connect();
+
+  /**
+   * 🔴 สร้าง role ของ Supabase ให้ก่อนรัน migration
+   *
+   *    Supabase มี role พวกนี้มาให้ตั้งแต่ต้น แต่ PostgreSQL เปล่า ๆ ไม่มี
+   *    migration 0017/0018 มีคำสั่ง `revoke ... from anon, authenticated`
+   *    และ `grant ... to service_role` ซึ่งถูกต้องแล้วสำหรับเครื่องจริง
+   *    (เป็นการล็อกสิทธิ์ที่ควรทำ ห้ามถอดออกเพื่อให้เทสต์ผ่าน)
+   *
+   *    แต่บนเครื่องที่ไม่มี role พวกนี้ คำสั่งจะพังทันที
+   *    ผลคือ **ชุดทดสอบ PostgreSQL ทั้งหมดรันไม่ได้เลย** — 286 ข้อถูกข้าม
+   *    ซึ่งเป็นการเสียตาข่ายนิรภัยทั้งชั้นแบบเงียบ ๆ (ขึ้นเป็น skip ไม่ใช่ fail)
+   *
+   * ⚠️ ต้องสร้างที่ระดับ cluster ไม่ใช่ระดับ database — role เป็นของทั้ง cluster
+   *    และต้องทนกรณีที่มีอยู่แล้ว (รันซ้ำได้)
+   */
+  await c.query(`
+    do $
+    begin
+      if not exists (select 1 from pg_roles where rolname = 'anon') then
+        create role anon nologin noinherit;
+      end if;
+      if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+        create role authenticated nologin noinherit;
+      end if;
+      if not exists (select 1 from pg_roles where rolname = 'service_role') then
+        create role service_role nologin noinherit bypassrls;
+      end if;
+    end $;
+  `);
+
   for (const f of files) {
     await c.query(readFileSync(path.join(dir, f), 'utf8'));
   }
