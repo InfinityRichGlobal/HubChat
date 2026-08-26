@@ -110,18 +110,19 @@ describe('ข้อมูลจัดส่ง', () => {
 });
 
 describe('แทรกสินค้า', () => {
-  it('ใส่ชื่อ ราคา และโปรที่ใช้ได้', () => {
+  it('ใส่ชื่อ จำนวน ราคา และโปรที่ผู้ใช้เลือก โดยแยกบรรทัด', () => {
     const r = productText([
-      { name: 'เสื้อยืด', variant: 'ดำ', price: 590, promotion_th: 'ซื้อ 2 แถม 1' },
-    ]);
+      { name: 'เสื้อยืด', variant: 'ดำ', price: 590, qty: 2 },
+    ], { show_price: true, promotions: ['ซื้อ 2 แถม 1'] });
     expect(r.text).toContain('เสื้อยืด (ดำ)');
     expect(r.text).toContain('590 บาท');
+    expect(r.text).toContain('*2ชิ้น');
     expect(r.text).toContain('ซื้อ 2 แถม 1');
   });
 
-  it('ไม่มีสี → ไม่ต้องมีวงเล็บว่าง', () => {
-    const r = productText([{ name: 'กางเกง', variant: null, price: 890, promotion_th: null }]);
-    expect(r.text).toBe('กางเกง — 890 บาท');
+  it('ไม่ติ๊กแสดงราคา → มีชื่อและจำนวนเท่านั้น', () => {
+    const r = productText([{ name: 'กางเกง', variant: null, price: 890, qty: 1 }]);
+    expect(r.text).toBe('กางเกง*1ชิ้น');
   });
 
   it('ไม่เลือกสินค้าเลย → บอกว่าขาด', () => {

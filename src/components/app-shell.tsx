@@ -5,7 +5,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   MessagesSquare, ShoppingBag, BarChart3, MessageCircle,
   Settings, LogOut, KeyRound, UserCircle2,
+  Moon, Sun,
+  ContactRound,
+  Images as ImagesIcon,
 } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { can } from '@/lib/auth/permissions';
 import { ROLE_LABEL_TH } from '@/lib/auth/permissions';
@@ -36,12 +40,20 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: '/inbox',     label: 'อินบ็อกซ์', icon: MessagesSquare, visible: (a) => can(a.role, 'chat.reply') || a.role === 'viewer' },
   { href: '/orders',    label: 'ออเดอร์',   icon: ShoppingBag,    visible: (a) => can(a.role, 'order.create') || a.role === 'viewer' },
+  { href: '/customers', label: 'ลูกค้า',     icon: ContactRound,   visible: () => true },
+  { href: '/media',     label: 'คลังสื่อ',   icon: ImagesIcon,     visible: (a) => can(a.role, 'content.view') },
   { href: '/dashboard', label: 'สรุปยอด',   icon: BarChart3,      visible: (a) => can(a.role, 'dashboard.view.all') || can(a.role, 'dashboard.view.self') },
   { href: '/comments',  label: 'คอมเมนต์',  icon: MessageCircle,  visible: (a) => can(a.role, 'chat.reply') },
   { href: '/settings',  label: 'ตั้งค่า',    icon: Settings,       visible: () => true },
 ];
 
-export default function AppShell({ admin, children }: { admin: PublicAdmin; children: React.ReactNode }) {
+export default function AppShell({
+  admin, children, brand,
+}: {
+  admin: PublicAdmin;
+  children: React.ReactNode;
+  brand: { name: string; logoUrl: string | null };
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const items = NAV.filter((item) => item.visible(admin));
@@ -57,7 +69,10 @@ export default function AppShell({ admin, children }: { admin: PublicAdmin; chil
     <div className="flex min-h-svh flex-col md:flex-row">
       {/* ---------- เมนูซ้าย (เดสก์ท็อป) ---------- */}
       <aside className="hidden w-56 shrink-0 flex-col border-r bg-card md:flex">
-        <div className="flex h-14 items-center px-4 font-semibold">HubChat</div>
+        <div className="flex h-14 items-center gap-2 px-4 font-semibold">
+          {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
+          <span className="truncate">{brand.name}</span>
+        </div>
         <nav className="flex flex-1 flex-col gap-1 p-2">
           {items.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -82,7 +97,10 @@ export default function AppShell({ admin, children }: { admin: PublicAdmin; chil
       {/* ---------- เนื้อหา ---------- */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4 md:hidden">
-          <span className="font-semibold">HubChat</span>
+          <span className="flex min-w-0 items-center gap-2 font-semibold">
+            {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
+            <span className="truncate">{brand.name}</span>
+          </span>
           <AccountMenu admin={admin} onLogout={handleLogout} />
         </header>
 
@@ -122,6 +140,7 @@ function AccountMenu({
   onLogout: () => void;
   className?: string;
 }) {
+  const { resolvedTheme, setTheme } = useTheme();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -140,6 +159,10 @@ function AccountMenu({
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>
+          {resolvedTheme === 'dark' ? <Sun /> : <Moon />}
+          {resolvedTheme === 'dark' ? 'ใช้ธีมสว่าง' : 'ใช้ธีมมืด'}
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/change-password">
             <KeyRound />

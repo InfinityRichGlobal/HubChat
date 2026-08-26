@@ -193,10 +193,13 @@ export async function composeOrderSummary(
 export async function composeProducts(
   admin: PublicAdmin,
   conversationId: string,
-  productIds: string[],
+  items: Array<{ product_id: string; qty: number }>,
+  options: { promotion_ids?: string[]; show_price?: boolean } = {},
 ): Promise<ComposeResult> {
   await requireConversationAccess(admin, conversationId);
-  if (productIds.length === 0) return productText([]);
+  if (items.length === 0) return productText([]);
+
+  const productIds = [...new Set(items.map((item) => item.product_id))];
 
   const { data, error } = await db()
     .from('products')
@@ -210,27 +213,34 @@ export async function composeProducts(
     id: string; name: string; variant: string | null; price: number | string;
   }>;
 
-  /**
-   * ⭐ โปรที่ "ใช้ได้อยู่ตอนนี้" เท่านั้น
-   *    โปรที่หมดอายุแล้วห้ามหลุดไปถึงลูกค้า ไม่งั้นร้านต้องยอมขายตามที่บอกไป
-   */
-  const { data: promos } = await db()
-    .from('promotions')
-    .select(PROMOTION_FIELDS)
-    .eq('is_active', true)
-    .order('sort_order')
-    .limit(1);
-  const activePromo = ((promos ?? []) as Array<{ name: string }>)[0]?.name ?? null;
+  const promotionIds = [...new Set(options.promotion_ids ?? [])].slice(0, 10);
+  const { data: promos } = promotionIds.length > 0
+    ? await db()
+        .from('promotions')
+        .select(PROMOTION_FIELDS)
+        .in('id', promotionIds)
+        .eq('is_active', true)
+        .order('sort_order')
+    : { data: [] };
 
-  const facts: ProductFacts[] = rows.map((p) => ({
-    name: p.name,
-    variant: p.variant,
-    // 🔴 ราคามาจากฐานข้อมูลเสมอ เบราว์เซอร์ส่งราคามาเองไม่ได้
-    price: Number(p.price ?? 0),
-    promotion_th: activePromo,
-  }));
+  const byId = new Map(rows.map((row) => [row.id, row]));
 
-  return productText(facts);
+  const facts: ProductFacts[] = items.flatMap((item) => {
+    const p = byId.get(item.product_id);
+    if (!p) return [];
+    return [{
+      name: p.name,
+      variant: p.variant,
+      qty: Math.max(1, Math.min(99, Math.trunc(item.qty))),
+      // 🔴 ราคามาจากฐานข้อมูลเสมอ เบราว์เซอร์ส่งราคามาเองไม่ได้
+      price: Number(p.price ?? 0),
+    }];
+  });
+
+  return productText(facts, {
+    show_price: options.show_price,
+    promotions: ((promos ?? []) as Array<{ name: string }>).map((promo) => promo.name),
+  });
 }
 
 /* ------------------------------------------------------------------------ */

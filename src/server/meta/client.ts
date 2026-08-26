@@ -284,6 +284,7 @@ export type MetaUploadResult =
 export async function uploadAttachmentToMeta(
   page: MetaPage,
   file: { bytes: ArrayBuffer; mime: string; filename: string },
+  attachmentType: 'image' | 'video' | 'file' = 'image',
 ): Promise<MetaUploadResult> {
   const token = pageToken(page);
   const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(page.page_id)}/message_attachments`;
@@ -291,7 +292,7 @@ export async function uploadAttachmentToMeta(
   const form = new FormData();
   form.append(
     'message',
-    JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }),
+    JSON.stringify({ attachment: { type: attachmentType, payload: { is_reusable: true } } }),
   );
   form.append('filedata', new Blob([file.bytes], { type: file.mime }), file.filename);
 

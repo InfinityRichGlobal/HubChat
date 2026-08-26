@@ -62,6 +62,8 @@ export type ConversationRow = {
   locked_by_admin_id: string | null;
   /** แท็กที่ติดอยู่กับห้องนี้ (เก็บเป็น id ให้หน้าเว็บไปจับคู่กับสีเอง) */
   tag_ids: string[];
+  /** จำนวนออเดอร์ทั้งหมดของลูกค้ารายนี้ (รวมร่าง/ยกเลิก เพื่อใช้ระบุตัวตนและค้นประวัติ) */
+  order_count: number;
 };
 
 export type MessageRow = {
@@ -187,7 +189,6 @@ export async function listConversations(
     }
     customerIdFilter = [...new Set([
       ...((byName.data ?? []) as Array<{ id: string }>).map((row) => row.id),
-      ...((byPhone.data ?? []) as Array<{ id: string }>).map((row) => row.id),
       ...((byOrder.data ?? []) as Array<{ customer_id: string | null }>).flatMap((row) => row.customer_id ? [row.customer_id] : []),
       ...((byTracking.data ?? []) as Array<{ customer_id: string | null }>).flatMap((row) => row.customer_id ? [row.customer_id] : []),
     ])];
@@ -244,7 +245,8 @@ export async function listConversations(
 
   if (rows.length === 0) return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
 
-  const [customers, names, tagMap] = await Promise.all([
+  const customerIds = [...new Set(rows.map((r) => r.customer_id))];
+  const [customers, names, tagMap, orders] = await Promise.all([
     db()
       .from('customers')
       /**
@@ -253,9 +255,10 @@ export async function listConversations(
        * ⚠️ ข้อความนี้ถูกรับประกันแล้วว่าไม่มี token ปน (ดู explainProfileError)
        */
       .select(INBOX_SELECTS.customers)
-      .in('id', [...new Set(rows.map((r) => r.customer_id))]),
+      .in('id', customerIds),
     adminNames(rows.map((r) => r.locked_by_admin_id).filter((v): v is string => Boolean(v))),
     tagsForConversations(rows.map((r) => r.id)),
+    db().from('orders').select('customer_id').in('customer_id', customerIds),
   ]);
 
   const customerMap = new Map(
@@ -269,6 +272,12 @@ export async function listConversations(
     }>).map((c) => [c.id, c]),
   );
   if (customers.error) throw new Error(`อ่านข้อมูลลูกค้าไม่สำเร็จ: ${customers.error.message}`);
+  if (orders.error) throw new Error(`อ่านจำนวนออเดอร์ไม่สำเร็จ: ${orders.error.message}`);
+  const orderCounts = new Map<string, number>();
+  for (const order of (orders.data ?? []) as Array<{ customer_id: string | null }>) {
+    if (!order.customer_id) continue;
+    orderCounts.set(order.customer_id, (orderCounts.get(order.customer_id) ?? 0) + 1);
+  }
 
   const staleBefore = Date.now() - LOCK_STALE_SECONDS * 1000;
 
@@ -302,6 +311,7 @@ export async function listConversations(
         locked_by_admin_id: lockAlive ? r.locked_by_admin_id : null,
         locked_by_name: lockAlive ? (names.get(r.locked_by_admin_id!) ?? 'แอดมินคนอื่น') : null,
         tag_ids: tagMap.get(r.id) ?? [],
+        order_count: orderCounts.get(r.customer_id) ?? 0,
       },
     ];
   });

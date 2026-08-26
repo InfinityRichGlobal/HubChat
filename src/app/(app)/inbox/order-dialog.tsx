@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, ShoppingCart, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -78,6 +79,7 @@ export default function OrderDialog({
   const [shippingMethodId, setShippingMethodId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
   const [manualTotal, setManualTotal] = useState('');
+  const [isPaid, setIsPaid] = useState(false);
   const [form, setForm] = useState<Contact>({
     recipient_name: '', phone: '', address: '', postcode: '',
   });
@@ -209,6 +211,7 @@ export default function OrderDialog({
           shipping_method_id: shippingMethodId,
           payment_method: paymentMethod,
           manual_total: manualTotal.trim() === '' ? null : Number(manualTotal),
+          is_paid: isPaid,
         }),
       });
       const json = await res.json();
@@ -416,6 +419,11 @@ export default function OrderDialog({
                 id="manual" inputMode="decimal" value={manualTotal} placeholder="อัตโนมัติ"
                 onChange={(e) => setManualTotal(e.target.value)}
               />
+            </div>
+
+            <div className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+              <Checkbox id="order-paid" checked={isPaid} onCheckedChange={(value) => setIsPaid(value === true)} />
+              <label htmlFor="order-paid" className="text-sm font-medium">ลูกค้าจ่ายเงินแล้ว</label>
             </div>
 
             {/* ---- ยอดที่เซิร์ฟเวอร์คิดมา ---- */}

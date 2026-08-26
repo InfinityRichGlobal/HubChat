@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
+import { ImageIcon, Loader2, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,6 +34,7 @@ export default function ContentClient({
   const [tagName, setTagName] = useState('');
   const [tagColor, setTagColor] = useState('#64748b');
   const [busy, setBusy] = useState(false);
+  const [imageUrls, setImageUrls] = useState('');
 
   async function call(url: string, init: RequestInit, successMsg?: string) {
     try {
@@ -64,7 +65,17 @@ export default function ContentClient({
       shortcut: String(form.get('shortcut') ?? '').trim() || null,
       category: String(form.get('category') ?? '').trim() || null,
       text: String(form.get('text') ?? ''),
+      images: imageUrls
+        .split('\n')
+        .map((url) => url.trim())
+        .filter(Boolean)
+        .map((url, index) => ({ url, name: `รูป ${index + 1}`, mime: 'image/*' })),
     };
+
+    if (payload.images.length === 0) {
+      toast.error('ชุดคำตอบต้องมีรูปอย่างน้อย 1 รูป');
+      return;
+    }
 
     setBusy(true);
     try {
@@ -113,6 +124,7 @@ export default function ContentClient({
                 size="sm"
                 onClick={() => {
                   setEditing(null);
+                  setImageUrls('');
                   setCannedOpen(true);
                 }}
               >
@@ -145,6 +157,12 @@ export default function ContentClient({
                 <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
                   {c.text}
                 </p>
+                <div className="mt-2 flex gap-1.5 overflow-x-auto">
+                  {c.images.map((image, index) => image.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={`${image.url}-${index}`} src={image.url} alt={`ตัวอย่าง ${c.title}`} className="size-14 shrink-0 rounded-md border object-cover" />
+                  ) : null)}
+                </div>
               </div>
 
               {canManage && (
@@ -154,6 +172,7 @@ export default function ContentClient({
                     size="sm"
                     onClick={() => {
                       setEditing(c);
+                      setImageUrls(c.images.map((image) => image.url).filter(Boolean).join('\n'));
                       setCannedOpen(true);
                     }}
                   >
@@ -265,6 +284,26 @@ export default function ContentClient({
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="title">ชื่อ</Label>
                 <Input id="title" name="title" required defaultValue={editing?.title ?? ''} placeholder="เช่น แจ้งเลขบัญชี" />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="image_urls" className="flex items-center gap-1.5"><ImageIcon className="size-4" /> รูปประกอบ (อย่างน้อย 1 รูป)</Label>
+                <textarea
+                  id="image_urls"
+                  rows={3}
+                  required
+                  value={imageUrls}
+                  onChange={(event) => setImageUrls(event.target.value)}
+                  className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  placeholder={'วางลิงก์รูปสาธารณะ รูปละ 1 บรรทัด\nhttps://.../product.jpg'}
+                />
+                <p className="text-xs text-muted-foreground">หลังตั้งค่า R2 แล้ว หน้าคลังสื่อจะช่วยอัปโหลดและเลือกซ้ำได้ง่ายขึ้น</p>
+                <div className="flex gap-2 overflow-x-auto">
+                  {imageUrls.split('\n').map((url) => url.trim()).filter(Boolean).slice(0, 10).map((url) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={url} src={url} alt="ภาพพรีวิว" className="size-20 shrink-0 rounded-md border object-cover" />
+                  ))}
+                </div>
               </div>
 
               <div className="flex gap-2">
