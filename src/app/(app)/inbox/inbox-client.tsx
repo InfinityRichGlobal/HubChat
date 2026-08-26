@@ -1299,6 +1299,10 @@ function ChatRoom({
             type="button"
             aria-label={policy.detail_th ?? policy.label_th}
             title={`${policy.detail_th ?? policy.label_th}${policy.alternatives_th.length ? `\nทำได้: ${policy.alternatives_th.join(' · ')}` : ''}`}
+            onClick={() => toast.error(policy.detail_th ?? policy.label_th, {
+              description: policy.alternatives_th.length ? `ทำได้: ${policy.alternatives_th.join(' · ')}` : undefined,
+              duration: 10_000,
+            })}
             className="shrink-0 rounded-full p-1.5 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <AlertCircle className="size-5" />
