@@ -25,7 +25,7 @@ export const LOCK_STALE_SECONDS = 180;
 export const INBOX_SELECTS = {
   pages: 'id,platform,page_name,display_name,tag_color',
   conversations: 'id,customer_id,page_id,last_message_at,last_message_preview,last_customer_message_at,is_read,locked_by_admin_id,locked_at,referral_source,referral_ad_id,referral_ref',
-  customers: 'id,name,profile_pic_url,psid,phone,profile_error_th',
+  customers: 'id,name,username,profile_pic_url,psid,phone,profile_error_th',
   messages: 'id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at,reply_to_message_id,reply_native',
 } as const;
 
@@ -45,6 +45,7 @@ export type ConversationRow = {
   customer_id: string;
   page: InboxPage;
   customer_name: string | null;
+  username: string | null;
   profile_pic_url: string | null;
   /** ยังไม่มีชื่อเพราะอะไร — null = ไม่มีปัญหา (D-33) */
   profile_error_th: string | null;
@@ -178,17 +179,20 @@ export async function listConversations(
   let customerIdFilter: string[] | null = null;
   if (search) {
     const pattern = `%${search.replace(/[%,_()]/g, '')}%`;
-    const [byName, byPhone, byOrder, byTracking] = await Promise.all([
+    const [byName, byUsername, byPhone, byOrder, byTracking] = await Promise.all([
       db().from('customers').select('id').in('page_id', pageIds).ilike('name', pattern).limit(500),
+      db().from('customers').select('id').in('page_id', pageIds).ilike('username', pattern).limit(500),
       db().from('customers').select('id').in('page_id', pageIds).ilike('phone', pattern).limit(500),
       db().from('orders').select('customer_id').in('page_id', pageIds).ilike('order_no', pattern).limit(500),
       db().from('orders').select('customer_id').in('page_id', pageIds).ilike('tracking_no', pattern).limit(500),
     ]);
-    for (const result of [byName, byPhone, byOrder, byTracking]) {
+    for (const result of [byName, byUsername, byPhone, byOrder, byTracking]) {
       if (result.error) throw new Error(`ค้นหาอินบ็อกซ์ไม่สำเร็จ: ${result.error.message}`);
     }
     customerIdFilter = [...new Set([
       ...((byName.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+      ...((byUsername.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+      ...((byPhone.data ?? []) as Array<{ id: string }>).map((row) => row.id),
       ...((byOrder.data ?? []) as Array<{ customer_id: string | null }>).flatMap((row) => row.customer_id ? [row.customer_id] : []),
       ...((byTracking.data ?? []) as Array<{ customer_id: string | null }>).flatMap((row) => row.customer_id ? [row.customer_id] : []),
     ])];
@@ -265,6 +269,7 @@ export async function listConversations(
     ((customers.data ?? []) as Array<{
       id: string;
       name: string | null;
+      username: string | null;
       profile_pic_url: string | null;
       psid: string;
       profile_error_th: string | null;
@@ -297,6 +302,7 @@ export async function listConversations(
         customer_id: r.customer_id,
         page,
         customer_name: customer.name,
+        username: customer.username,
         profile_pic_url: customer.profile_pic_url,
         profile_error_th: customer.profile_error_th,
         psid: customer.psid,

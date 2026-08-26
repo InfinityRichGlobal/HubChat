@@ -44,6 +44,8 @@ describe('การตั้งชื่อไฟล์', () => {
     expect(extensionFor('image/jpeg')).toBe('jpg');
     expect(extensionFor('IMAGE/PNG')).toBe('png');
     expect(extensionFor('application/pdf')).toBe('pdf');
+    expect(extensionFor('video/quicktime')).toBe('mov');
+    expect(extensionFor('video/webm')).toBe('webm');
     // ชนิดที่ไม่รู้จัก → .bin ปลอดภัยกว่าเดา
     expect(extensionFor('application/x-weird')).toBe('bin');
   });

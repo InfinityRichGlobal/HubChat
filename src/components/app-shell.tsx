@@ -8,6 +8,7 @@ import {
   Moon, Sun,
   ContactRound,
   Images as ImagesIcon,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,8 @@ export default function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const items = NAV.filter((item) => item.visible(admin));
+  const mobilePrimary = items.slice(0, 4);
+  const mobileMore = items.slice(4);
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -110,7 +113,7 @@ export default function AppShell({
 
       {/* ---------- แถบเมนูล่าง (มือถือ) ---------- */}
       <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden">
-        {items.map((item) => {
+        {mobilePrimary.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
@@ -126,6 +129,23 @@ export default function AppShell({
             </Link>
           );
         })}
+        {mobileMore.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className={cn('flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]', mobileMore.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)) ? 'font-medium text-primary' : 'text-muted-foreground')}>
+                <MoreHorizontal className="size-5" />
+                เพิ่มเติม
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="mb-2 w-52">
+              {mobileMore.map((item) => (
+                <DropdownMenuItem key={item.href} asChild>
+                  <Link href={item.href} className="flex items-center gap-2"><item.icon className="size-4" />{item.label}</Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </nav>
     </div>
   );
