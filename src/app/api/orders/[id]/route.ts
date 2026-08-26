@@ -40,7 +40,11 @@ const patchSchema = z.object({
   payment_status: z.enum(['unpaid', 'deposit', 'paid']).optional(),
   slip_url: z.string().trim().max(500).optional().nullable(),
   shipping_carrier: z.string().trim().max(60).optional().nullable(),
-  tracking_no: z.string().trim().max(60).optional().nullable(),
+  /**
+   * 🔴 tracking_no ถูกถอดออกจากที่นี่ในรอบ 8 โดยตั้งใจ
+   *    ใช้ PUT /api/orders/[id]/tracking แทน เพื่อให้ทุกการเปลี่ยนเลขพัสดุ
+   *    มีร่องรอยครบ (ใครใส่ / เมื่อไหร่ / มาจากไฟล์ไหน / ค่าเดิมคืออะไร)
+   */
   status: z
     .enum(['draft', 'confirmed', 'paid', 'packed', 'shipped', 'completed', 'cancelled', 'returned'])
     .optional(),

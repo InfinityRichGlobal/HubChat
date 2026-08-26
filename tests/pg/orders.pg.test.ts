@@ -27,7 +27,9 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'b'.repeat(40);
 process.env.SESSION_SECRET = 'c'.repeat(40);
 process.env.ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
 
-const { createOrder, updateOrder, listOrders, getOrder, listOrderLogs, OrderAccessError } = await import(
+const {
+  createOrder, updateOrder, listOrders, getOrder, listOrderLogs, setOrderTracking, OrderAccessError,
+} = await import(
   '@/server/orders/service'
 );
 
@@ -190,7 +192,7 @@ describe.skipIf(!available)('PostgreSQL จริง — ออเดอร์',
   /* -------------------------------------------------------------- */
   it('⭐ แก้ออเดอร์ทุกครั้งต้องมีประวัติ พร้อมค่าก่อน/หลัง', async () => {
     const order = await createOrder(OWNER, draft());
-    await updateOrder(OWNER, order.id, { tracking_no: 'TH123', shipping_carrier: 'Flash' });
+    await updateOrder(OWNER, order.id, { shipping_carrier: 'Flash', internal_note: 'ลูกค้าขอด่วน' });
 
     const logs = await listOrderLogs(OWNER, order.id);
     expect(logs).toHaveLength(2);
@@ -200,8 +202,32 @@ describe.skipIf(!available)('PostgreSQL จริง — ออเดอร์',
       `select before, after from order_logs where order_id = $1 and action = 'updated'`,
       [order.id],
     );
+    expect(raw.rows[0].before.internal_note).toBeNull();
+    expect(raw.rows[0].after.internal_note).toBe('ลูกค้าขอด่วน');
+  });
+
+  /* -------------------------------------------------------------- */
+  it('🔴 เลขพัสดุแก้ผ่าน patch ทั่วไปไม่ได้ ต้องผ่าน setOrderTracking เท่านั้น (รอบ 8)', async () => {
+    const order = await createOrder(OWNER, draft());
+
+    // ⚠️ TypeScript กันไว้ตั้งแต่ตอนคอมไพล์แล้ว ตรงนี้จำลอง "ถ้ามีคนยัดมาจากเบราว์เซอร์"
+    await updateOrder(OWNER, order.id, { tracking_no: 'TH-ปลอม' } as never);
+
+    const after = await getOrder(OWNER, order.id);
+    expect(after.tracking_no).toBeNull();
+
+    // เส้นทางที่ถูกต้องต้องได้ร่องรอยครบ
+    const updated = await setOrderTracking(OWNER, order.id, { tracking_no: 'TH1234567890', carrier: 'flash' });
+    expect(updated.tracking_no).toBe('TH1234567890');
+    expect(updated.tracking_source).toBe('manual');
+
+    const raw = await pool.query(
+      `select before, after from order_logs where order_id = $1 and action = 'tracking_manual'`,
+      [order.id],
+    );
+    expect(raw.rows).toHaveLength(1);
     expect(raw.rows[0].before.tracking_no).toBeNull();
-    expect(raw.rows[0].after.tracking_no).toBe('TH123');
+    expect(raw.rows[0].after.tracking_no).toBe('TH1234567890');
   });
 
   /* -------------------------------------------------------------- */
@@ -290,7 +316,7 @@ describe.skipIf(!available)('PostgreSQL จริง — ออเดอร์',
   /* -------------------------------------------------------------- */
   it('ค้นหาด้วยเลขออเดอร์ / ชื่อ / เลขพัสดุ ได้', async () => {
     const order = await createOrder(OWNER, draft());
-    await updateOrder(OWNER, order.id, { tracking_no: 'TH999888' });
+    await setOrderTracking(OWNER, order.id, { tracking_no: 'TH999888', carrier: 'flash' });
 
     expect((await listOrders(OWNER, { search: order.order_no })).map((o) => o.id)).toEqual([order.id]);
     expect((await listOrders(OWNER, { search: 'คุณเอ' })).map((o) => o.id)).toEqual([order.id]);

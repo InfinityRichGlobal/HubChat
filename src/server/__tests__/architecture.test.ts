@@ -362,6 +362,71 @@ describe('🔴 ทางเข้าข้อมูลห้ามกลาย�
 });
 
 /* ================================================================== */
+describe('🔴 การนำเข้าเลขพัสดุห้ามกลายเป็นทางลัดในการส่งข้อความ (รอบ 8)', () => {
+  const trackingFiles = CODE_FILES.filter((f) => rel(f).startsWith('server/tracking/'));
+
+  it('มีไฟล์ในโฟลเดอร์ tracking ให้ตรวจจริง', () => {
+    expect(trackingFiles.length).toBeGreaterThan(0);
+  });
+
+  it('tracking ห้ามแตะ Meta client / adapter — ต้องผ่าน sendMessage() เท่านั้น', () => {
+    const offenders = trackingFiles
+      .filter((f) => /@\/server\/(meta|transports)\//.test(read(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('🔴 งานเป็นชุดห้ามใช้ตราประทับของคน (humanAdminReply) เด็ดขาด', () => {
+    // ถ้าใครเผลอใช้ HUMAN_AGENT จะเปิดทางให้ยิงนอกกรอบ 24 ชม. ซึ่งผิดนโยบาย Meta
+    const offenders = trackingFiles.filter((f) => read(f).includes('humanAdminReply')).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ตัวส่งของ tracking ต้องใช้ bulkJobProvenance ซึ่ง human_authored = false เสมอ', () => {
+    const notify = CODE_FILES.find((f) => rel(f) === 'server/tracking/notify.ts');
+    expect(notify).toBeTruthy();
+    const src = read(notify!);
+    expect(src).toContain('bulkJobProvenance');
+    expect(src).toContain("message_type: 'shipping_update'");
+  });
+
+  it('🔴 หน้าเว็บ/API ห้ามประกอบเนื้อข้อความแจ้งลูกค้าเอง', () => {
+    // เนื้อข้อความต้องมาจากเทมเพลตฝั่งเซิร์ฟเวอร์ที่เดียว
+    // ไม่งั้นวันหนึ่งจะมีคนแทรกคำขายเข้าไป แล้วหลุดจากหมวด utility
+    const outside = CODE_FILES.filter(
+      (f) =>
+        rel(f) !== 'server/tracking/notify.ts' &&
+        rel(f) !== 'server/tracking/message.ts' &&
+        read(f).includes('buildTrackingMessage'),
+    ).map(rel);
+    expect(outside).toEqual([]);
+  });
+
+  it('🔴 เลขพัสดุห้ามแก้ผ่าน patch ทั่วไปของออเดอร์ (ต้องมีร่องรอยเสมอ)', () => {
+    const service = CODE_FILES.find((f) => rel(f) === 'server/orders/service.ts');
+    // ⚠️ ต้องอ่านแบบตัดคอมเมนต์ทิ้ง — ในนั้นมีคอมเมนต์อธิบายว่า "ทำไมถึงไม่มี tracking_no"
+    const src = read(service!);
+    const patchType = src.slice(src.indexOf('export type OrderPatch'));
+    const body = patchType.slice(0, patchType.indexOf('}>;'));
+    // มีได้เฉพาะในคอมเมนต์ที่อธิบายว่าทำไมถึงไม่มี
+    expect(/^\s*tracking_no\s*:/m.test(body)).toBe(false);
+  });
+
+  it('🔴 ตัวจับคู่ต้องไม่ตัดสินใจเองตอนไม่แน่ใจ — ต้องมีสถานะ ambiguous ให้คนเลือก', () => {
+    const match = CODE_FILES.find((f) => rel(f) === 'server/tracking/match.ts');
+    const src = read(match!);
+    expect(src).toContain("'ambiguous'");
+    // ห้ามมีทางลัดที่หยิบผู้สมัครตัวแรกมาใช้เมื่อเจอหลายใบ
+    expect(src).not.toMatch(/candidates\[0\]\s*;/);
+  });
+
+  it('ชั้นที่คุยกับฐานข้อมูลของ tracking ต้องไม่ประกาศ "use client"', () => {
+    const offenders = trackingFiles.filter((f) => read(f).includes("'use client'")).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/* ================================================================== */
 describe('🔴 access token ของเพจห้ามหลุดออกไปฝั่งหน้าเว็บ', () => {
   it('API เกี่ยวกับเพจ ห้ามแตะตาราง pages เอง ต้องผ่านชั้นบริการที่ตัด token ออกแล้ว', () => {
     const pageApis = CODE_FILES.filter((f) => rel(f).startsWith('app/api/pages/'));

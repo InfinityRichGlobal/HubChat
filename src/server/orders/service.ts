@@ -212,6 +212,15 @@ export type OrderRow = {
   /** สำเนาวิธีจัดส่ง ณ ตอนสร้าง — ออเดอร์เก่าต้องไม่เปลี่ยนตามค่าส่งที่แก้ทีหลัง */
   shipping_snapshot: { id?: string; name?: string; fee?: number; cod_supported?: boolean } | null;
   tracking_no: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  /** manual = แอดมินใส่เอง / import = มาจากไฟล์ขนส่ง */
+  tracking_source: string | null;
+  tracking_updated_at: string | null;
+  tracking_import_id: string | null;
+  tracking_notified_at: string | null;
+  tracking_notify_status: string | null;
+  tracking_notify_reason_th: string | null;
   status: OrderStatus;
   referral_ad_id: string | null;
   internal_note: string | null;
@@ -223,7 +232,9 @@ export type OrderRow = {
 const ORDER_COLUMNS =
   'id,order_no,conversation_id,customer_id,page_id,recipient_name,phone,address,postcode,' +
   'items,subtotal,shipping_fee,discount,total,payment_method,payment_status,slip_url,slip_media_id,' +
-  'shipping_carrier,shipping_method_id,shipping_snapshot,tracking_no,status,referral_ad_id,' +
+  'shipping_carrier,shipping_method_id,shipping_snapshot,tracking_no,shipped_at,delivered_at,' +
+  'tracking_source,tracking_updated_at,tracking_import_id,tracking_notified_at,' +
+  'tracking_notify_status,tracking_notify_reason_th,status,referral_ad_id,' +
   'internal_note,created_by_admin_id,created_at,updated_at';
 
 /** เพจที่แอดมินคนนี้เห็นได้ — ใช้กรองออเดอร์ */
@@ -376,7 +387,21 @@ export type OrderPatch = Partial<{
    *    ถ้ารับจากผู้เรียกได้ จะปลอมค่าส่ง/สิทธิ์เก็บเงินปลายทางของออเดอร์เก่าได้ทันที
    */
   shipping_method_id: string | null;
-  tracking_no: string | null;
+  /**
+   * 🔴 ทุกฟิลด์ที่เกี่ยวกับเลขพัสดุถูกถอดออกจากที่นี่โดยตั้งใจ (รอบ 8)
+   *
+   *    tracking_no / shipped_at / delivered_at / tracking_source /
+   *    tracking_updated_at / tracking_import_id / tracking_notified_at /
+   *    tracking_notify_status / tracking_notify_reason_th
+   *
+   *    เหตุผล : ถ้าเบราว์เซอร์แก้ค่าพวกนี้ได้ จะเกิดสองเรื่องที่ยอมไม่ได้
+   *      1. ทับเลขพัสดุเดิมได้โดยไม่มีร่องรอย → ลูกค้าได้เลขผิดแล้วสืบย้อนไม่ได้
+   *      2. ปลอม tracking_notified_at เพื่อ "ข้ามด่านกันส่งซ้ำ" ได้
+   *
+   *    ทางเดียวที่แก้ได้คือ setOrderTracking() (แอดมินใส่เอง)
+   *    หรือ apply_tracking_row() (มาจากไฟล์ขนส่ง) ซึ่งทั้งคู่จดประวัติเสมอ
+   *    ⚠️ มีชุดทดสอบสถาปัตยกรรมไล่ตรวจข้อนี้อยู่ ถ้าเผลอใส่กลับมา CI จะแดงทันที
+   */
   status: OrderStatus;
   internal_note: string | null;
 }>;
@@ -391,6 +416,44 @@ export async function updateOrder(admin: PublicAdmin, id: string, patch: OrderPa
     p_patch: patch,
   });
   if (error) throw new Error(`แก้ไขออเดอร์ไม่สำเร็จ: ${error.message}`);
+
+  const row = (Array.isArray(data) ? data[0] : data) as OrderRow;
+  return normalise([row])[0];
+}
+
+/* ------------------------------------------------------------------------ */
+/* เลขพัสดุ (รอบ 8)                                                            */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * ใส่/แก้เลขพัสดุทีละใบด้วยมือ
+ *
+ * ⭐ เดินผ่านฟังก์ชันของฐานข้อมูลเส้นเดียวกับการนำเข้าไฟล์
+ *    เพื่อให้ร่องรอยหน้าตาเหมือนกัน และไม่มีเส้นทางที่ทับค่าเดิมแบบเงียบ ๆ
+ */
+export async function setOrderTracking(
+  admin: PublicAdmin,
+  id: string,
+  input: { tracking_no: string | null; carrier?: string | null },
+): Promise<OrderRow> {
+  const before = await getOrder(admin, id); // ตรวจสิทธิ์เพจไปในตัว
+
+  if (before.status === 'cancelled' || before.status === 'returned') {
+    throw new CatalogError('ออเดอร์ที่ยกเลิก/ตีกลับแล้ว ใส่เลขพัสดุไม่ได้');
+  }
+
+  const tracking = input.tracking_no?.trim() ?? null;
+  if (tracking !== null && tracking !== '' && (tracking.length < 6 || tracking.length > 40)) {
+    throw new CatalogError('เลขพัสดุยาวผิดปกติ — ตรวจอีกครั้งก่อนบันทึก');
+  }
+
+  const { data, error } = await db().rpc('set_order_tracking_manual', {
+    p_order_id: id,
+    p_admin_id: admin.id,
+    p_tracking_no: tracking === '' ? null : tracking,
+    p_carrier: input.carrier?.trim() || null,
+  });
+  if (error) throw new Error(`บันทึกเลขพัสดุไม่สำเร็จ: ${error.message}`);
 
   const row = (Array.isArray(data) ? data[0] : data) as OrderRow;
   return normalise([row])[0];

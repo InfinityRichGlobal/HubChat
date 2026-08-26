@@ -47,6 +47,8 @@ export async function postgresAvailable(): Promise<boolean> {
 
 /** สร้างฐานข้อมูลใหม่แล้วรัน migration ทุกไฟล์ตามลำดับ */
 export async function resetDatabase(): Promise<void> {
+  // ฐานข้อมูลใหม่ = ชนิดคอลัมน์ที่จำไว้ใช้ไม่ได้แล้ว
+  COLUMN_TYPES.clear();
   const admin = new Client({ ...PG, database: 'postgres' });
   await admin.connect();
   await admin.query(`drop database if exists ${TEST_DB} with (force)`);
@@ -100,6 +102,45 @@ function splitTop(input: string): string[] {
 
 function q(id: string): string {
   return `"${id.replace(/"/g, '')}"`;
+}
+
+/**
+ * ⭐ ตัวจำลองต้องรู้ "ชนิดของคอลัมน์" ไม่งั้นแยก jsonb กับ array ของ Postgres ไม่ออก
+ *
+ * 🔴 บทเรียนรอบ 8 : ตอนแรกแปลง array ของ JavaScript เป็นข้อความ JSON ทุกตัว
+ *    ผลคือคอลัมน์ jsonb (เช่น headers, problems) ใช้ได้
+ *    แต่คอลัมน์ที่เป็น array จริง ๆ (candidate_order_ids uuid[]) พัง
+ *    ถ้าไม่แปลงเลย ก็สลับกันพังอีกด้าน
+ *
+ *    PostgREST ตัวจริงรู้ชนิดคอลัมน์จาก catalog อยู่แล้ว ตัวจำลองจึงต้องรู้ด้วย
+ *    (บทเรียนซ้ำรอย D-50 และ D-61 : ตัวจำลองที่ "เดา" ทำให้เทสต์ผ่านทั้งที่ของจริงพัง)
+ */
+const COLUMN_TYPES = new Map<string, Map<string, string>>();
+
+async function columnTypes(pool: Pool, table: string): Promise<Map<string, string>> {
+  const cached = COLUMN_TYPES.get(table);
+  if (cached) return cached;
+
+  const r = await pool.query(
+    `select column_name, data_type from information_schema.columns
+      where table_schema = 'public' and table_name = $1`,
+    [table],
+  );
+  const m = new Map<string, string>(
+    (r.rows as Array<{ column_name: string; data_type: string }>).map((x) => [x.column_name, x.data_type]),
+  );
+  COLUMN_TYPES.set(table, m);
+  return m;
+}
+
+/** แปลงค่าให้ตรงกับชนิดของคอลัมน์ก่อนส่งให้ node-postgres */
+function coerceValue(types: Map<string, string>, column: string, value: unknown): unknown {
+  const t = types.get(column);
+  if ((t === 'json' || t === 'jsonb') && value !== null && typeof value === 'object') {
+    // jsonb ต้องได้ "ข้อความ JSON" ไม่ใช่ array ของ Postgres
+    return JSON.stringify(value);
+  }
+  return value;
 }
 
 export type RestServer = { close: () => Promise<void>; url: string };
@@ -258,7 +299,8 @@ async function handle(
       const values = payload.map(
         (_row, i) => `(${keys.map((_k, j) => `$${i * keys.length + j + 1}`).join(',')})`,
       );
-      const flat = payload.flatMap((row) => keys.map((k) => row[k]));
+      const types = await columnTypes(pool, table);
+      const flat = payload.flatMap((row) => keys.map((k) => coerceValue(types, k, row[k])));
       const ret = prefer.includes('return=representation')
         ? ` returning ${cols.includes('*') ? '*' : cols.map(q).join(', ')}`
         : '';
@@ -272,7 +314,8 @@ async function handle(
       const payload = body as Record<string, unknown>;
       const keys = Object.keys(payload);
       const sets = keys.map((k, i) => `${q(k)} = $${params.length + i + 1}`);
-      const all = [...params, ...keys.map((k) => payload[k])];
+      const types = await columnTypes(pool, table);
+      const all = [...params, ...keys.map((k) => coerceValue(types, k, payload[k]))];
       const ret = prefer.includes('return=representation')
         ? ` returning ${cols.includes('*') ? '*' : cols.map(q).join(', ')}`
         : '';

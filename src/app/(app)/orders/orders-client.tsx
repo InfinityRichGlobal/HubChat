@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ClipboardCopy, Loader2, MessageSquare, PackageSearch, Receipt, Search, Truck } from 'lucide-react';
+import {
+  AlertTriangle, ClipboardCopy, FileSpreadsheet, Loader2, MessageSquare, PackageSearch,
+  Receipt, Search, Send, Truck,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -140,6 +143,14 @@ export default function OrdersClient({
             {orders.length} รายการ · รวม {baht(totalSales)} (ไม่นับที่ยกเลิก/ตีกลับ)
           </p>
         </div>
+        {canEdit && (
+          <Button variant="outline" asChild>
+            <Link href="/orders/tracking">
+              <FileSpreadsheet />
+              นำเข้าเลขพัสดุ
+            </Link>
+          </Button>
+        )}
       </div>
 
       {/* ---------- ตัวกรอง ---------- */}
@@ -283,33 +294,42 @@ function OrderDetailDialog({
   const [uploadingSlip, setUploadingSlip] = useState(false);
   const slipRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * โหลดออเดอร์ + ประวัติ
+   * ⭐ แยกออกมาเป็นฟังก์ชันเพื่อให้ส่วนเลขพัสดุเรียกซ้ำได้หลังทำอะไรเสร็จ
+   *    (ต้องเห็นสถานะการแจ้งลูกค้าที่เปลี่ยนไปทันที ไม่ใช่ต้องปิดแล้วเปิดใหม่)
+   */
+  const loadOrder = useCallback(async (): Promise<void> => {
+    if (!orderId) return;
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.ok) {
+        setOrder(json.data.order as OrderRow);
+        setLogs(json.data.logs as OrderLog[]);
+      } else {
+        toast.error(json?.error?.message_th ?? 'เปิดออเดอร์ไม่สำเร็จ');
+      }
+    } catch (err) {
+      console.error('[orders] เปิดออเดอร์ไม่สำเร็จ:', err);
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    }
+  }, [orderId]);
+
   useEffect(() => {
     if (!orderId) return;
     let alive = true;
-
-    void fetch(`/api/orders/${orderId}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((json) => {
-        if (!alive) return;
-        if (json.ok) {
-          setOrder(json.data.order as OrderRow);
-          setLogs(json.data.logs as OrderLog[]);
-        } else {
-          toast.error(json?.error?.message_th ?? 'เปิดออเดอร์ไม่สำเร็จ');
-        }
-      })
-      .catch((err) => {
-        console.error('[orders] เปิดออเดอร์ไม่สำเร็จ:', err);
-        toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
-      })
-      .finally(() => {
+    // ⚠️ หน่วงหนึ่งจังหวะ กัน setState ซ้อนกันเป็นทอด ๆ ในตัว effect
+    const t = setTimeout(() => {
+      void loadOrder().finally(() => {
         if (alive) setLoading(false);
       });
-
+    }, 0);
     return () => {
       alive = false;
+      clearTimeout(t);
     };
-  }, [orderId]);
+  }, [orderId, loadOrder]);
 
   async function patch(body: Record<string, unknown>, msg: string) {
     if (!orderId) return;
@@ -523,6 +543,7 @@ function OrderDetailDialog({
                     <Label className="text-xs">การจ่ายเงิน</Label>
                     <Select
                       value={order.payment_status}
+                      disabled={saving}
                       onValueChange={(v) => void patch({ payment_status: v }, 'อัปเดตการจ่ายเงินแล้ว')}
                     >
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -536,41 +557,15 @@ function OrderDetailDialog({
                 </div>
               )}
 
-              {/* ---- เลขพัสดุ ---- */}
-              {canEdit && (
-                <form
-                  className="flex items-end gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const f = new FormData(e.currentTarget);
-                    void patch(
-                      {
-                        shipping_carrier: String(f.get('carrier') ?? '').trim() || null,
-                        tracking_no: String(f.get('tracking') ?? '').trim() || null,
-                      },
-                      'บันทึกเลขพัสดุแล้ว',
-                    );
-                  }}
-                >
-                  <div className="flex w-28 flex-col gap-1.5">
-                    <Label htmlFor="carrier" className="text-xs">ขนส่ง</Label>
-                    <Input id="carrier" name="carrier" defaultValue={order.shipping_carrier ?? ''} placeholder="Flash" />
-                  </div>
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <Label htmlFor="tracking" className="text-xs">เลขพัสดุ</Label>
-                    <Input id="tracking" name="tracking" defaultValue={order.tracking_no ?? ''} />
-                  </div>
-                  <Button type="submit" variant="outline" disabled={saving}>
-                    {saving && <Loader2 className="animate-spin" />}
-                    บันทึก
-                  </Button>
-                </form>
-              )}
-
-              <p className="text-[11px] text-muted-foreground">
-                ⚠️ การแจ้งเลขพัสดุให้ลูกค้าอัตโนมัติยังไม่เปิดใช้ — เป็นงานของรอบถัดไป
-                และจะส่งผ่าน Message Policy Engine เท่านั้น
-              </p>
+              {/* ---- เลขพัสดุ + แจ้งลูกค้า (รอบ 8) ---- */}
+              <TrackingPanel
+                order={order}
+                canEdit={canEdit}
+                onChanged={async () => {
+                  await loadOrder();
+                  onSaved();
+                }}
+              />
 
               {/* ---- ประวัติแก้ไข ---- */}
               {logs.length > 0 && (
@@ -605,5 +600,298 @@ function OrderDetailDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ================================================================== */
+/* เลขพัสดุ + แจ้งลูกค้า (รอบ 8)                                        */
+/* ================================================================== */
+
+type NotifyRow = {
+  id: string;
+  event: string;
+  status: string;
+  message_text: string | null;
+  policy_reason_th: string | null;
+  outcome_unknown: boolean;
+  created_at: string;
+};
+
+const NOTIFY_TEXT: Record<string, string> = {
+  queued: 'รอส่ง',
+  claimed: 'กำลังส่ง',
+  sent: 'แจ้งลูกค้าแล้ว',
+  blocked: 'ส่งไม่ได้',
+  failed: 'ส่งล้มเหลว',
+  unknown: '⚠️ ยิงไปแล้วแต่ไม่ทราบผล',
+  skipped: 'ข้าม',
+};
+
+/**
+ * ส่วนเลขพัสดุของออเดอร์หนึ่งใบ
+ *
+ * 🔴 กฎที่ส่วนนี้ต้องรักษา :
+ *   • เลขพัสดุบันทึกผ่าน PUT /api/orders/[id]/tracking เท่านั้น
+ *     (ไม่ใช่ PATCH ทั่วไป) เพื่อให้มีร่องรอยครบทุกครั้ง
+ *   • ปุ่มแจ้งลูกค้าไม่ใช่ปุ่ม "ส่งซ้ำได้เรื่อย ๆ"
+ *     ถ้าเคยแจ้งไปแล้ว หรือครั้งก่อนไม่ทราบผล จะต้องติ๊กยอมรับความเสี่ยงก่อน
+ *     และเป็นสิทธิ์ของเจ้าของร้านเท่านั้น (เซิร์ฟเวอร์บังคับอีกชั้น)
+ */
+function TrackingPanel({
+  order,
+  canEdit,
+  onChanged,
+}: {
+  order: OrderRow;
+  canEdit: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [notifying, setNotifying] = useState(false);
+  const [notifications, setNotifications] = useState<NotifyRow[]>([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/orders/${order.id}/notify`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.ok) setNotifications(json.data.notifications as NotifyRow[]);
+    } catch {
+      /* เงียบไว้ — ส่วนนี้เป็นข้อมูลเสริม ไม่ควรทำให้หน้าออเดอร์พัง */
+    }
+  }, [order.id]);
+
+  useEffect(() => {
+    const t = setTimeout(() => void loadNotifications(), 0);
+    return () => clearTimeout(t);
+  }, [loadNotifications]);
+
+  const latest = notifications[0];
+  const everNotified = notifications.some((n) => n.status === 'sent' || n.status === 'unknown');
+  const risky = notifications.some((n) => n.status === 'unknown');
+  const canNotify = Boolean(order.tracking_no) && Boolean(order.conversation_id);
+
+  async function saveTracking(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/orders/${order.id}/tracking`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tracking_no: String(f.get('tracking') ?? '').trim() || null,
+          carrier: String(f.get('carrier') ?? '').trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        toast.error(json?.error?.message_th ?? 'บันทึกเลขพัสดุไม่สำเร็จ');
+        return;
+      }
+      toast.success('บันทึกเลขพัสดุแล้ว — ประวัติถูกจดไว้เรียบร้อย');
+      await onChanged();
+    } catch (err) {
+      console.error('[orders] บันทึกเลขพัสดุไม่สำเร็จ:', err);
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function notify() {
+    setNotifying(true);
+    try {
+      const res = await fetch(`/api/orders/${order.id}/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          confirm: true,
+          acknowledged_duplicate_risk: acknowledged,
+          ignore_quiet_hours: true, // แอดมินกดเองทีละใบ = ตั้งใจส่งเดี๋ยวนี้
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        toast.error(json?.error?.message_th ?? 'แจ้งลูกค้าไม่สำเร็จ', { duration: 10_000 });
+        return;
+      }
+      const s = json.data.summary as { sent: number; blocked: number; unknown: number };
+      if (s.sent > 0) toast.success('แจ้งลูกค้าเรียบร้อยแล้ว');
+      else if (s.unknown > 0) {
+        toast.warning('ยิงออกไปแล้วแต่ไม่ทราบผล', {
+          description: 'ข้อความอาจถึงลูกค้าแล้ว — เปิดดูใน Messenger ก่อนตัดสินใจส่งใหม่',
+          duration: 12_000,
+        });
+      } else toast.error('ส่งไม่ได้ — ดูเหตุผลด้านล่าง', { duration: 8_000 });
+
+      setAcknowledged(false);
+      await loadNotifications();
+      await onChanged();
+    } catch (err) {
+      console.error('[orders] แจ้งลูกค้าไม่สำเร็จ:', err);
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setNotifying(false);
+      setConfirmOpen(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-2.5">
+      <div className="flex items-center gap-1.5 text-sm font-medium">
+        <Truck className="size-4" />
+        การจัดส่ง
+      </div>
+
+      {/* ---- สถานะปัจจุบัน ---- */}
+      <div className="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
+        {order.tracking_no ? (
+          <span className="font-mono text-foreground">{order.tracking_no}</span>
+        ) : (
+          <span>ยังไม่มีเลขพัสดุ</span>
+        )}
+        {order.shipping_carrier && <span>{order.shipping_carrier}</span>}
+        {order.tracking_source && (
+          <span>{order.tracking_source === 'import' ? 'มาจากไฟล์ขนส่ง' : 'แอดมินใส่เอง'}</span>
+        )}
+        {order.shipped_at && (
+          <span>ส่งเมื่อ {new Date(order.shipped_at).toLocaleString('th-TH', { hour12: false })}</span>
+        )}
+      </div>
+
+      {/* ---- ฟอร์มแก้ ---- */}
+      {canEdit && (
+        <form className="flex items-end gap-2" onSubmit={saveTracking}>
+          <div className="flex w-28 flex-col gap-1.5">
+            <Label htmlFor="carrier" className="text-xs">ขนส่ง</Label>
+            <Input id="carrier" name="carrier" defaultValue={order.shipping_carrier ?? ''} placeholder="flash" />
+          </div>
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Label htmlFor="tracking" className="text-xs">เลขพัสดุ</Label>
+            <Input id="tracking" name="tracking" defaultValue={order.tracking_no ?? ''} />
+          </div>
+          <Button type="submit" variant="outline" disabled={saving}>
+            {saving && <Loader2 className="animate-spin" />}
+            บันทึก
+          </Button>
+        </form>
+      )}
+
+      {/* ---- สถานะการแจ้งลูกค้า ---- */}
+      <div className="flex flex-col gap-1 border-t pt-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium">แจ้งลูกค้า</span>
+          {latest ? (
+            <Badge
+              variant={
+                latest.status === 'sent' ? 'default'
+                : latest.status === 'unknown' || latest.status === 'failed' ? 'destructive'
+                : 'secondary'
+              }
+              className="text-[10px]"
+            >
+              {NOTIFY_TEXT[latest.status] ?? latest.status}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-[10px]">ยังไม่ได้แจ้ง</Badge>
+          )}
+        </div>
+
+        {latest?.policy_reason_th && latest.status !== 'sent' && (
+          <p className="text-[11px] text-amber-600">{latest.policy_reason_th}</p>
+        )}
+
+        {risky && (
+          <p className="flex items-start gap-1 text-[11px] text-destructive">
+            <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+            เคยยิงออกไปแล้วแต่ไม่ทราบผล — ข้อความอาจถึงลูกค้าไปแล้ว
+            ระบบจึงไม่ส่งซ้ำให้เอง ต้องเปิด Messenger ดูก่อน
+          </p>
+        )}
+
+        {canEdit && canNotify && (
+          <div className="mt-1 flex flex-col gap-1.5">
+            {everNotified && (
+              <label className="flex items-start gap-2 text-[11px]">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                />
+                <span>
+                  ฉันตรวจใน Messenger แล้ว และยอมรับความเสี่ยงที่ลูกค้าอาจได้ข้อความซ้ำ
+                  <span className="block text-muted-foreground">
+                    (เฉพาะเจ้าของร้านเท่านั้นที่ส่งซ้ำได้ — เซิร์ฟเวอร์ตรวจอีกชั้น)
+                  </span>
+                </span>
+              </label>
+            )}
+            <Button
+              size="sm"
+              variant={everNotified ? 'outline' : 'default'}
+              className="self-start"
+              disabled={notifying || (everNotified && !acknowledged)}
+              onClick={() => setConfirmOpen(true)}
+            >
+              {notifying ? <Loader2 className="animate-spin" /> : <Send />}
+              {everNotified ? 'ส่งซ้ำอีกครั้ง' : 'แจ้งลูกค้าว่าจัดส่งแล้ว'}
+            </Button>
+          </div>
+        )}
+
+        {canEdit && !canNotify && (
+          <p className="text-[11px] text-muted-foreground">
+            {!order.tracking_no
+              ? 'ใส่เลขพัสดุก่อนถึงจะแจ้งลูกค้าได้'
+              : 'ออเดอร์นี้ไม่ได้ผูกกับห้องแชท จึงส่งข้อความหาลูกค้าไม่ได้'}
+          </p>
+        )}
+
+        {latest?.message_text && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">
+              ดูข้อความที่ส่งออกไป
+            </summary>
+            <pre className="mt-1 whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">
+              {latest.message_text}
+            </pre>
+          </details>
+        )}
+      </div>
+
+      {/* ---- ยืนยันก่อนส่ง ---- */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ยืนยันแจ้งลูกค้า</DialogTitle>
+            <DialogDescription>
+              ข้อความจะออกไปหาลูกค้าจริง ๆ ผ่าน Message Policy Engine
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm">
+            <p>ออเดอร์ <strong className="font-mono">{order.order_no}</strong></p>
+            <p className="text-[11px] text-muted-foreground">
+              เลขพัสดุ {order.tracking_no} · {order.shipping_carrier ?? 'ไม่ระบุขนส่ง'}
+            </p>
+            {everNotified && (
+              <p className="mt-2 text-[11px] text-destructive">
+                ⚠️ ออเดอร์นี้เคยแจ้งไปแล้ว การส่งซ้ำจะถูกจดเป็นเหตุการณ์ใหม่
+                ประวัติเดิมยังอยู่ครบ
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>ยังไม่ส่ง</Button>
+            <Button onClick={() => void notify()} disabled={notifying}>
+              {notifying && <Loader2 className="animate-spin" />}
+              ยืนยัน ส่งเลย
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

@@ -216,7 +216,7 @@ describe.skipIf(!available)('PostgreSQL จริง — วิธีจัด�
   it('การแก้ออเดอร์ยังจดประวัติครบเหมือนเดิม (ไม่ทำของเก่าพัง)', async () => {
     const m = await createShippingMethod({ name: 'Flash', fee: 40 });
     const order = await createOrder(OWNER, draft({ shipping_method_id: m.id }));
-    await updateOrder(OWNER, order.id, { tracking_no: 'TH123' });
+    await updateOrder(OWNER, order.id, { internal_note: 'แก้หมายเหตุ' });
 
     const logs = await pool.query('select action from order_logs where order_id = $1 order by created_at', [order.id]);
     expect(logs.rows.map((r) => r.action)).toEqual(['created', 'updated']);
