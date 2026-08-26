@@ -80,6 +80,15 @@ export async function syncCustomerProfile(
         p_error_code: null,
         p_error_th: null,
       });
+      // username ไม่ใช่ส่วนตัดสินว่า sync สำเร็จหรือไม่ จึงเก็บแยกจาก RPC เดิม
+      // เพื่อให้ migration นี้ย้อนหลังเข้ากับ worker รุ่นก่อนหน้าได้โดยไม่เปลี่ยน signature ของ RPC
+      if (result.profile.username) {
+        const { error: usernameError } = await db()
+          .from('customers')
+          .update({ username: result.profile.username })
+          .eq('id', customerId);
+        if (usernameError) console.warn(`[profile] บันทึก username ไม่สำเร็จ: ${usernameError.message}`);
+      }
       return {
         kind: 'synced',
         name: result.profile.name,

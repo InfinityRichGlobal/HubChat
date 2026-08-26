@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import CustomerAvatar from '@/components/customer-avatar';
 import { cn } from '@/lib/utils';
+import { customerProfileUrl } from '@/lib/customer-profile';
 
 type WorkspaceOrder = {
   id: string;
@@ -45,7 +46,7 @@ type WorkspaceNote = {
 
 type Workspace = {
   customer: {
-    id: string; name: string | null; profile_pic_url: string | null; psid: string;
+    id: string; name: string | null; username: string | null; profile_pic_url: string | null; psid: string;
     recipient_name: string | null; phone: string | null; address: string | null; postcode: string | null;
     total_orders: number; total_spent: number;
     first_contact_at: string | null; contact_updated_at: string | null;
@@ -198,6 +199,7 @@ export default function CustomerDrawer({
 
   const c = data?.customer;
   const displayName = (c?.name ?? '').trim() || (c ? `ลูกค้า ${c.psid.slice(-6)}` : 'ลูกค้า');
+  const profileUrl = data && c ? customerProfileUrl(data.page.platform as 'facebook' | 'instagram', c.username) : null;
 
   const TABS = [
     { key: 'customer' as const, label: 'ข้อมูลลูกค้า', icon: User },
@@ -219,8 +221,8 @@ export default function CustomerDrawer({
         <div className="flex items-center gap-2 border-b px-3 py-2.5">
           <CustomerAvatar name={displayName} src={c?.profile_pic_url} size="md" />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{displayName}</div>
-            <div className="truncate text-[11px] text-muted-foreground">{data?.page.name}</div>
+            <div className="text-sm font-medium">{displayName}</div>
+            <div className="text-[11px] text-muted-foreground">{c?.username ? `@${c.username} · ` : ''}{data?.page.name}</div>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>ปิด</Button>
         </div>
@@ -252,6 +254,12 @@ export default function CustomerDrawer({
           {tab === 'customer' && c && (
             <div className="flex flex-col gap-3">
               <dl className="flex flex-col gap-2 text-sm">
+                {profileUrl && (
+                  <div className="flex items-center gap-3">
+                    <dt className="w-24 shrink-0 text-muted-foreground">โปรไฟล์</dt>
+                    <dd><Button asChild variant="outline" size="sm" className="h-8"><a href={profileUrl} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" /> เปิด Instagram</a></Button></dd>
+                  </div>
+                )}
                 <Row label="ชื่อผู้รับ" value={c.recipient_name} />
                 <Row label="เบอร์" value={c.phone} copyable />
                 <Row

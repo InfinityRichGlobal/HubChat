@@ -19,6 +19,7 @@ import type { MetaErrorInfo } from './errors';
 
 export type MetaProfile = {
   name: string | null;
+  username: string | null;
   profile_pic_url: string | null;
 };
 
@@ -137,6 +138,10 @@ export async function fetchCustomerProfileDetailed(
             : null);
 
   const pic = typeof d.profile_pic === 'string' && d.profile_pic.length > 0 ? d.profile_pic : null;
+  const username =
+    page.platform === 'instagram' && typeof d.username === 'string' && d.username.trim().length > 0
+      ? d.username.trim().replace(/^@/, '')
+      : null;
 
   /**
    * ⚠️ Meta ตอบ 200 แต่ไม่มีทั้งชื่อและรูป = ยังถือว่า "ยังไม่ได้ข้อมูล"
@@ -151,7 +156,7 @@ export async function fetchCustomerProfileDetailed(
     };
   }
 
-  return { ok: true, profile: { name, profile_pic_url: pic } };
+  return { ok: true, profile: { name, username, profile_pic_url: pic } };
 }
 
 /**

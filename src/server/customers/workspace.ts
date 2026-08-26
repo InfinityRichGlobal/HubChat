@@ -21,6 +21,7 @@ import { requireConversationAccess } from '@/server/inbox/service';
 export type WorkspaceCustomer = {
   id: string;
   name: string | null;
+  username: string | null;
   profile_pic_url: string | null;
   psid: string;
   platform: string;
@@ -79,7 +80,7 @@ export async function loadWorkspace(
     db()
       .from('customers')
       .select(
-        'id,name,profile_pic_url,psid,platform,recipient_name,phone,address,postcode,' +
+        'id,name,username,profile_pic_url,psid,platform,recipient_name,phone,address,postcode,' +
           'total_orders,total_spent,first_contact_at,contact_updated_at,contact_source_message_id',
       )
       .eq('id', conv.customer_id)

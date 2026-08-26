@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, Images, Loader2, Lock, MapPin,
-  MessageSquareOff, Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShoppingCart, User,
-  Tag as TagIcon, Video, X,
+  AlertCircle, ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
+  Loader2, Lock, MapPin, MessageSquareOff, Megaphone, Package, Paperclip, Phone, Reply, RefreshCw,
+  Search, Send, ShoppingCart, SlidersHorizontal, User, Tag as TagIcon, Video, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
 import CustomerDrawer from './customer-drawer';
@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import CustomerAvatar from '@/components/customer-avatar';
 import { displayName, hasRealName } from '@/lib/customer-name';
 import { mergeByTime } from '@/lib/inbox/merge';
+import { customerProfileUrl } from '@/lib/customer-profile';
 import { toast } from 'sonner';
 import type { ConversationRow, InboxPage, MessageRow } from '@/server/inbox/service';
 import type { CannedResponse, Tag } from '@/server/content/service';
@@ -187,6 +188,14 @@ type PolicyStatus = {
   alternatives_th: string[];
 };
 
+type LibraryItem = {
+  id: string;
+  mime: string;
+  bytes: number;
+  preview_url: string;
+  created_at: string;
+};
+
 /** ตัวช่วยเรียก API ที่ "ไม่ปล่อยให้ error หายเงียบ" */
 async function apiCall<T>(url: string, init?: RequestInit): Promise<T | null> {
   try {
@@ -240,6 +249,7 @@ export default function InboxClient({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
   // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
   const [activeId, setActiveId] = useState<string | null>(
@@ -401,32 +411,32 @@ export default function InboxClient({
             />
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            <Button
+              variant={selectedPages.length > 0 || selectedTags.length > 0 ? 'secondary' : 'outline'}
+              size="sm"
+              className="h-8 rounded-full px-3 text-xs"
+              onClick={() => setFiltersOpen(true)}
+            >
+              <SlidersHorizontal className="size-3.5" />
+              ตัวกรอง
+              {selectedPages.length + selectedTags.length > 0 && (
+                <span className="rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
+                  {selectedPages.length + selectedTags.length}
+                </span>
+              )}
+            </Button>
             <FilterChip active={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
-              ยังไม่ตอบ{unreadCount > 0 ? ` (${unreadCount})` : ''}
+              ยังไม่ได้อ่าน{unreadCount > 0 ? ` (${unreadCount})` : ''}
             </FilterChip>
-
-            {pages.map((p) => (
-              <FilterChip
-                key={p.id}
-                active={selectedPages.includes(p.id)}
-                onClick={() => toggle(setSelectedPages)(p.id)}
-                dotColor={p.tag_color}
-              >
-                {p.name}
-              </FilterChip>
-            ))}
-
-            {tags.map((t) => (
-              <FilterChip
-                key={t.id}
-                active={selectedTags.includes(t.id)}
-                onClick={() => toggle(setSelectedTags)(t.id)}
-                dotColor={t.color}
-              >
-                {t.name}
-              </FilterChip>
-            ))}
+            {selectedPages.map((id) => {
+              const page = pages.find((p) => p.id === id);
+              return page ? <FilterChip key={id} active onClick={() => toggle(setSelectedPages)(id)} dotColor={page.tag_color}>{page.name}</FilterChip> : null;
+            })}
+            {selectedTags.map((id) => {
+              const tag = tags.find((t) => t.id === id);
+              return tag ? <FilterChip key={id} active onClick={() => toggle(setSelectedTags)(id)} dotColor={tag.color}>{tag.name}</FilterChip> : null;
+            })}
           </div>
         </div>
 
@@ -478,6 +488,20 @@ export default function InboxClient({
           </div>
         )}
       </div>
+
+      <InboxFilterDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        pages={pages}
+        tags={tags}
+        selectedPages={selectedPages}
+        selectedTags={selectedTags}
+        unreadOnly={unreadOnly}
+        onTogglePage={toggle(setSelectedPages)}
+        onToggleTag={toggle(setSelectedTags)}
+        onToggleUnread={() => setUnreadOnly((value) => !value)}
+        onClear={() => { setSelectedPages([]); setSelectedTags([]); setUnreadOnly(false); }}
+      />
     </div>
   );
 }
@@ -506,6 +530,69 @@ function FilterChip({
     >
       {dotColor && <span className="size-2 rounded-full" style={{ backgroundColor: dotColor }} />}
       {children}
+    </button>
+  );
+}
+
+function InboxFilterDialog({
+  open, onOpenChange, pages, tags, selectedPages, selectedTags, unreadOnly,
+  onTogglePage, onToggleTag, onToggleUnread, onClear,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  pages: InboxPage[];
+  tags: Tag[];
+  selectedPages: string[];
+  selectedTags: string[];
+  unreadOnly: boolean;
+  onTogglePage: (id: string) => void;
+  onToggleTag: (id: string) => void;
+  onToggleUnread: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bottom-0 left-0 top-auto w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-3xl p-5 sm:left-1/2 sm:top-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg">
+        <DialogHeader className="text-center sm:text-left">
+          <DialogTitle>กรองและจัดกลุ่มแชท</DialogTitle>
+          <DialogDescription>เลือกได้หลายรายการพร้อมกัน แล้วแตะใช้ตัวกรอง</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5">
+          <FilterGroup title="สถานะ">
+            <FilterChoice active={unreadOnly} onClick={onToggleUnread} icon={<AlertCircle className="size-4" />}>ยังไม่ได้อ่าน</FilterChoice>
+          </FilterGroup>
+          <FilterGroup title="ช่องทาง / เพจ">
+            {pages.map((page) => (
+              <FilterChoice key={page.id} active={selectedPages.includes(page.id)} onClick={() => onTogglePage(page.id)} dotColor={page.tag_color}>
+                {page.platform === 'instagram' ? 'Instagram · ' : 'Messenger · '}{page.name}
+              </FilterChoice>
+            ))}
+          </FilterGroup>
+          <FilterGroup title="ป้าย / กลุ่มแชท">
+            {tags.length === 0 ? <p className="text-xs text-muted-foreground">ยังไม่มีป้าย — เพิ่มได้ที่ ตั้งค่า → เนื้อหา</p> : tags.map((tag) => (
+              <FilterChoice key={tag.id} active={selectedTags.includes(tag.id)} onClick={() => onToggleTag(tag.id)} dotColor={tag.color}>{tag.name}</FilterChoice>
+            ))}
+          </FilterGroup>
+        </div>
+        <DialogFooter className="grid grid-cols-2">
+          <Button variant="outline" onClick={onClear}>ล้างทั้งหมด</Button>
+          <Button onClick={() => onOpenChange(false)}>ใช้ตัวกรอง</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FilterGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section><h3 className="mb-2 text-sm font-semibold">{title}</h3><div className="grid gap-2">{children}</div></section>;
+}
+
+function FilterChoice({ active, onClick, dotColor, icon, children }: { active: boolean; onClick: () => void; dotColor?: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} className={cn('flex min-h-11 items-center gap-3 rounded-xl border px-3 text-left text-sm', active ? 'border-primary bg-primary/10 font-medium' : 'hover:bg-accent')}>
+      {icon ?? <span className="size-3 rounded-full" style={{ backgroundColor: dotColor ?? 'var(--muted-foreground)' }} />}
+      <span className="min-w-0 flex-1">{children}</span>
+      <span className={cn('size-5 rounded-full border-2', active && 'border-[6px] border-primary')} />
     </button>
   );
 }
@@ -541,62 +628,66 @@ function ConversationItem({
   const lockedByOther = c.locked_by_admin_id !== null && c.locked_by_admin_id !== meId;
 
   return (
-    <li>
+    <li className="p-1.5">
       <button
         type="button"
         onClick={onSelect}
         className={cn(
-          'flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-accent/50',
-          isActive && 'bg-accent',
+          'relative flex w-full items-start gap-3 rounded-xl px-2.5 py-3 text-left hover:bg-accent/60',
+          isActive && 'bg-accent ring-1 ring-border',
         )}
       >
-        {/* จุดแดง = ยังไม่ตอบ */}
-        <span
-          className={cn('mt-2 size-2 shrink-0 rounded-full', c.is_read ? 'bg-transparent' : 'bg-[var(--destructive)]')}
-          aria-label={c.is_read ? undefined : 'ยังไม่ตอบ'}
-        />
-
-        {/* ⭐ รูปลูกค้า — ขนาดคงที่เสมอ ไม่ว่าจะมีรูปจริงหรือไม่ ไม่งั้นลิสต์จะกระตุกตอนรูปโหลดเสร็จ */}
-        <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" className="mt-0.5" />
+        <div className="relative shrink-0">
+          <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
+          <span
+            className="absolute -bottom-1 -right-1 rounded-full border-2 border-background bg-background px-1 text-[9px] font-bold uppercase text-muted-foreground"
+            aria-label={c.page.platform}
+          >
+            {c.page.platform === 'instagram' ? 'IG' : 'FB'}
+          </span>
+        </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className={cn('truncate text-sm', !c.is_read && 'font-semibold')}>
+          <div className="flex items-start gap-2">
+            <span className={cn('min-w-0 flex-1 text-sm leading-5', !c.is_read && 'font-semibold')}>
               {displayName(c)}
-              {c.order_count > 0 && (
-                <span className="ml-1 inline-flex size-4 items-center justify-center rounded-full bg-red-600 align-middle text-[9px] font-bold text-white" title={`${c.order_count} ออเดอร์`}>
-                  {c.order_count > 99 ? '99+' : c.order_count}
-                </span>
-              )}
             </span>
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
+            <span className="shrink-0 text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
           </div>
 
-          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full" style={{ backgroundColor: c.page.tag_color }} />
-              {c.page.name}
+          {c.username && <p className="truncate text-[11px] text-muted-foreground">@{c.username}</p>}
+          <p className={cn('mt-1 line-clamp-2 text-xs leading-5', c.is_read ? 'text-muted-foreground' : 'font-medium')}>
+            {c.last_message_preview ?? '—'}
+          </p>
+
+          <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5">
+              <span className="size-1.5 rounded-full" style={{ backgroundColor: c.page.tag_color }} /> {c.page.name}
             </span>
+            {c.order_count > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">
+                <ShoppingCart className="size-2.5" /> {c.order_count} ออเดอร์
+              </span>
+            )}
             {c.referral_source && (
-              <span className="flex items-center gap-0.5">
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5">
                 <Megaphone className="size-3" />
                 {REFERRAL_LABEL[c.referral_source] ?? c.referral_source}
-                {c.referral_ref ? ` "${c.referral_ref}"` : ''}
               </span>
             )}
             {hint && (
               <span
                 className={cn(
+                  'rounded-full bg-muted px-2 py-0.5',
                   hint.tone === 'over' && 'text-[var(--destructive)]',
                   hint.tone === 'warn' && 'text-[var(--warning,#b45309)]',
                 )}
               >
-                🕐 {hint.text}
+                {hint.text}
               </span>
             )}
+            {!c.is_read && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive"><span className="size-1.5 rounded-full bg-destructive" /> ใหม่</span>}
           </div>
-
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">{c.last_message_preview ?? '—'}</p>
 
           {c.tag_ids.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
@@ -673,9 +764,11 @@ function ChatRoom({
   /** รูปที่เลือกไว้แต่ยังไม่ได้ส่ง — ต้องกดส่งเองเสมอ */
   const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
   const [pendingVideo, setPendingVideo] = useState<{ file: File; preview: string } | null>(null);
+  /** สื่อจากคลังเป็นคนละงานกับ Paperclip ซึ่งแนบไฟล์ใหม่จากเครื่อง */
+  const [libraryKind, setLibraryKind] = useState<'image' | 'video' | null>(null);
+  const [pendingLibrary, setPendingLibrary] = useState<LibraryItem | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLInputElement>(null);
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   const [browseCanned, setBrowseCanned] = useState(false);
   /** รูปของชุดคำตอบ — กดส่งแล้วระบบส่งรูปให้ครบก่อน จึงค่อยส่งข้อความ */
@@ -1033,7 +1126,40 @@ function ChatRoom({
       if (prev) URL.revokeObjectURL(prev.preview);
       return null;
     });
-    if (videoRef.current) videoRef.current.value = '';
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  function pickAttachment(file: File | null) {
+    if (!file) return;
+    if (file.type.startsWith('video/')) pickVideo(file);
+    else pickImage(file);
+  }
+
+  async function sendLibraryMedia() {
+    const pending = pendingLibrary;
+    if (!pending || uploading) return;
+    setUploading(true);
+    try {
+      const res = await fetch(`/api/conversations/${c.id}/reply-library-media`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ media_id: pending.id, idempotency_key: idempotencyKey.current }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok || !json.data?.sent) {
+        toast.error(json?.error?.message_th ?? json?.data?.reason_th ?? 'ส่งไฟล์จากคลังไม่สำเร็จ');
+        return;
+      }
+      setPendingLibrary(null);
+      idempotencyKey.current = newIdempotencyKey();
+      stickBottomRef.current = true;
+      await loadMessages();
+      onChanged();
+    } catch (err) {
+      toast.error('ส่งไฟล์จากคลังไม่สำเร็จ', { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function sendVideo() {
@@ -1205,90 +1331,31 @@ function ChatRoom({
     }
   }
 
+  const profileUrl = customerProfileUrl(c.page.platform, c.username);
+
   return (
     <div className="flex h-full flex-col rounded-lg border">
       {/* ---------- หัวห้อง ---------- */}
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack} aria-label="กลับ">
-          <ArrowLeft />
-        </Button>
-        <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span
-              className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: c.page.tag_color }}
-              aria-hidden="true"
-            />
-            <span className="truncate text-sm font-medium">{displayName(c)}</span>
-            {c.order_count > 0 && (
-              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white" title={`ลูกค้ารายนี้มี ${c.order_count} ออเดอร์`}>
-                {c.order_count > 99 ? '99+' : c.order_count}
-              </span>
-            )}
-            {/**
-              * ⭐ ยังไม่รู้ชื่อจริง → บอกเหตุผล + ให้กดลองใหม่ได้ตรงนี้เลย (D-33)
-              *    เดิมแอดมินเห็นแค่ "ลูกค้า xxxxxx" แล้วไม่มีทางรู้ว่าทำไม
-              *    และไม่มีอะไรให้กดเพื่อแก้ ต้องรอให้ระบบทำเอง ซึ่งไม่เคยทำ
-              */}
-            {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
-          </div>
-          {/* ⭐ ข้อมูลลูกค้าย่อ ๆ ตรงหัวห้อง — จะได้ไม่ต้องเปิดฟอร์มที่อยู่เพื่อดูเบอร์ */}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
-            <span className="truncate">{c.page.name}</span>
-            {c.phone && (
-              <>
-                <span>·</span>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-0.5 underline decoration-dotted"
-                  onClick={() => {
-                    void copyText(c.phone!).then((done) =>
-                      done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'),
-                    );
-                  }}
-                >
-                  <Phone className="size-3" />
-                  {c.phone}
-                </button>
-              </>
-            )}
-            {(() => {
-              const hint = windowHint(c.last_customer_message_at);
-              if (!hint) return null;
-              return (
-                <>
-                  <span>·</span>
-                  <span
-                    className={cn(
-                      hint.tone === 'over' && 'text-destructive',
-                      hint.tone === 'warn' && 'text-amber-600 dark:text-amber-500',
-                    )}
-                  >
-                    กรอบ 24 ชม. {hint.text}
-                  </span>
-                </>
-              );
-            })()}
-          </div>
-        </div>
+      <header className="border-b bg-card/60 px-3 py-2.5">
+        <div className="flex items-start gap-2.5">
+          <Button variant="ghost" size="icon" className="-ml-2 size-9 md:hidden" onClick={onBack} aria-label="กลับ">
+            <ArrowLeft />
+          </Button>
+          {profileUrl ? (
+            <a href={profileUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="เปิดโปรไฟล์ลูกค้า">
+              <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
+            </a>
+          ) : <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />}
 
-        {canReply && (
-          <>
-            {/* ⭐ แผงข้อมูลลูกค้า / ออเดอร์ / บันทึก (ข้อ 1.6) */}
-            <Button variant="ghost" size="icon" aria-label="ข้อมูลลูกค้า" onClick={() => setDrawerOpen(true)}>
-              <User />
-            </Button>
-            {/* ⭐ สร้างออเดอร์จากในห้องแชท (สเปก 5.3) — ไม่ส่งข้อความหาลูกค้าเอง */}
-            <Button variant="ghost" size="icon" aria-label="สร้างออเดอร์" onClick={() => { setOrderSource(null); setOrderOpen(true); }}>
-              <ShoppingCart />
-            </Button>
-            <Button variant="ghost" size="icon" aria-label="แท็ก" onClick={() => setTagsOpen(true)}>
-              <TagIcon />
-            </Button>
-          </>
-        )}
-        {policy && !policy.can_send && (
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-2">
+              {profileUrl ? (
+                <a href={profileUrl} target="_blank" rel="noreferrer" className="min-w-0 text-base font-semibold leading-5 hover:underline">
+                  {displayName(c)} <ExternalLink className="mb-0.5 inline size-3.5" />
+                </a>
+              ) : <h2 className="min-w-0 text-base font-semibold leading-5">{displayName(c)}</h2>}
+              {c.order_count > 0 && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white"><ShoppingCart className="size-3" />{c.order_count}</span>}
+              {policy && !policy.can_send && (
           /**
            * 🔴 ป้ายนี้ต้อง "สั้นเสมอ" และ shrink-0 + whitespace-nowrap
            *    เดิมใช้ label_th ซึ่งตอนส่งไม่ได้เป็นประโยคเต็ม
@@ -1307,8 +1374,49 @@ function ChatRoom({
           >
             <AlertCircle className="size-5" />
           </button>
-        )}
-      </div>
+              )}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full" style={{ backgroundColor: c.page.tag_color }} />{c.page.platform === 'instagram' ? 'Instagram' : 'Messenger'} · {c.page.name}</span>
+              {c.username && <span>@{c.username}</span>}
+              {c.phone && <button type="button" className="inline-flex items-center gap-1 underline decoration-dotted" onClick={() => void copyText(c.phone!).then((done) => done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'))}><Phone className="size-3" />{c.phone}</button>}
+              {(() => { const hint = windowHint(c.last_customer_message_at); return hint ? <span className={cn(hint.tone === 'over' && 'text-destructive', hint.tone === 'warn' && 'text-amber-600 dark:text-amber-500')}>กรอบตอบ {hint.text}</span> : null; })()}
+              {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5 pl-0 md:pl-12">
+          {profileUrl ? (
+            <Button asChild variant="outline" size="sm" className="h-8 text-xs"><a href={profileUrl} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />โปรไฟล์</a></Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => {
+                if (c.page.platform === 'facebook') {
+                  toast.info('Facebook ไม่คืน public profile link จาก PSID — ระบบจึงไม่เดาลิงก์ผิดคน');
+                  return;
+                }
+                void fetch(`/api/conversations/${c.id}/refresh-profile`, { method: 'POST' })
+                  .then((res) => res.json())
+                  .then((json) => {
+                    if (!json.ok) throw new Error(json?.error?.message_th ?? 'ดึงโปรไฟล์ไม่สำเร็จ');
+                    toast.success('ดึง username จาก Instagram แล้ว');
+                    onChanged();
+                  })
+                  .catch((err) => toast.error(err instanceof Error ? err.message : 'ดึงโปรไฟล์ไม่สำเร็จ'));
+              }}
+            >
+              <RefreshCw className="size-3.5" />ดึงโปรไฟล์
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setDrawerOpen(true)}><User className="size-3.5" />ข้อมูลลูกค้า</Button>
+          {canReply && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setOrderSource(null); setOrderOpen(true); }}><ShoppingCart className="size-3.5" />สร้างออเดอร์</Button>}
+          {canReply && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setTagsOpen(true)}><TagIcon className="size-3.5" />ป้าย / กลุ่ม</Button>}
+        </div>
+      </header>
 
       {/* แท็กที่ติดอยู่ */}
       {c.tag_ids.length > 0 && (
@@ -1408,6 +1516,23 @@ function ChatRoom({
 
       {/* ---------- ช่องพิมพ์ ---------- */}
       <div className="relative border-t p-2">
+        {canReply && (
+          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5" aria-label="เครื่องมือแชท">
+            <Button variant={browseCanned ? 'secondary' : 'ghost'} size="sm" className="h-8 text-xs" onClick={() => { setBrowseCanned((open) => !open); setDismissedCanned(false); }} disabled={sending || uploading}>
+              <Images className="size-3.5" /> ชุดคำตอบ
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setProductOpen(true)} disabled={sending || uploading}>
+              <Package className="size-3.5" /> สินค้า / โปร
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setLibraryKind('image')} disabled={sending || uploading}>
+              <ImageIcon className="size-3.5" /> คลังรูป
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setLibraryKind('video')} disabled={sending || uploading}>
+              <Video className="size-3.5" /> คลังวิดีโอ
+            </Button>
+          </div>
+        )}
+
         {/* รายการชุดคำตอบที่ลอยขึ้นมาเมื่อพิมพ์ / */}
         {cannedVisible.length > 0 && (
           <div className="absolute bottom-full left-2 right-2 z-10 mb-1 max-h-64 overflow-y-auto rounded-lg border bg-popover shadow-lg">
@@ -1518,55 +1643,45 @@ function ChatRoom({
           </div>
         )}
 
+        {canReply && pendingLibrary && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2">
+            {pendingLibrary.mime.startsWith('video/')
+              ? <video src={pendingLibrary.preview_url} className="h-20 w-28 shrink-0 rounded bg-black object-contain" />
+              // eslint-disable-next-line @next/next/no-img-element
+              : <img src={pendingLibrary.preview_url} alt="สื่อจากคลัง" className="size-16 shrink-0 rounded object-cover" />}
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium">{pendingLibrary.mime.startsWith('video/') ? 'วิดีโอจากคลัง' : 'รูปจากคลัง'}</p>
+              <p className="text-[11px] text-muted-foreground">{(pendingLibrary.bytes / 1024 / 1024).toFixed(1)} MB · ตรวจตัวอย่างก่อนส่ง</p>
+            </div>
+            <Button size="sm" onClick={() => void sendLibraryMedia()} disabled={uploading}>{uploading ? <Loader2 className="animate-spin" /> : <Send />} ส่ง</Button>
+            <Button size="icon" variant="ghost" className="size-9" aria-label="เอาไฟล์จากคลังออก" onClick={() => setPendingLibrary(null)} disabled={uploading}><X /></Button>
+          </div>
+        )}
+
         {!canReply ? (
           <p className="py-2 text-center text-xs text-muted-foreground">
             บัญชีของคุณดูได้อย่างเดียว ตอบแชทไม่ได้
           </p>
         ) : (
-          <div className="flex items-end gap-2">
-            {/* ⭐ แนบรูป — เลือกแล้วยังไม่ส่ง ต้องกดส่งเองเสมอ */}
+          <div className="flex items-end gap-1.5">
+            {/* Paperclip = แนบไฟล์ใหม่จากเครื่อง ส่วนคลังรูป/วิดีโออยู่แถบบน */}
             <input
               ref={fileRef}
               type="file"
-              accept={ALLOWED_IMAGE_MIMES.join(',')}
+              accept={[...ALLOWED_IMAGE_MIMES, ...ALLOWED_VIDEO_MIMES].join(',')}
               className="hidden"
-              onChange={(e) => pickImage(e.target.files?.[0] ?? null)}
-            />
-            <input
-              ref={videoRef}
-              type="file"
-              accept={ALLOWED_VIDEO_MIMES.join(',')}
-              className="hidden"
-              onChange={(event) => pickVideo(event.target.files?.[0] ?? null)}
+              onChange={(event) => pickAttachment(event.target.files?.[0] ?? null)}
             />
             <Button
               variant="ghost"
               size="icon"
-              aria-label="แนบรูป"
+              className="size-10"
+              aria-label="แนบรูปหรือวิดีโอใหม่จากเครื่อง"
+              title="แนบไฟล์ใหม่จากเครื่อง"
               disabled={sending || uploading}
               onClick={() => fileRef.current?.click()}
             >
               <Paperclip />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="แนบวิดีโอ"
-              title="แนบวิดีโอ"
-              disabled={sending || uploading}
-              onClick={() => videoRef.current?.click()}
-            >
-              <Video />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="ดูชุดคำตอบทั้งหมด"
-              title="ดูชุดคำตอบทั้งหมด"
-              disabled={sending || uploading}
-              onClick={() => { setBrowseCanned((open) => !open); setDismissedCanned(false); }}
-            >
-              <Images />
             </Button>
             <textarea
               ref={inputRef}
@@ -1587,25 +1702,14 @@ function ChatRoom({
                 }
                 if (e.key === 'Escape') setDismissedCanned(true);
               }}
-              rows={2}
+              rows={1}
               placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ · / ค้นชุดคำตอบ)"
               disabled={sending}
-              className="min-h-11 max-h-36 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border bg-transparent px-3 py-2 text-base leading-6 outline-none shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+              className="min-h-11 max-h-40 min-w-0 flex-1 resize-y overflow-y-auto rounded-xl border bg-background px-3 py-2 text-base leading-6 outline-none shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
             />
-            {/* ⭐ ปุ่มส่งปุ่มเดียว — ไม่มีตัวเลือกช่องทางให้แอดมินกดเลย */}
-            {/* ⭐ ใส่สินค้า (ข้อ 1.10) — วางลงช่องพิมพ์ ไม่ส่งเอง */}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label="ใส่สินค้า"
-              onClick={() => setProductOpen(true)}
-            >
-              <Package />
-            </Button>
-            <Button onClick={() => void send()} disabled={sending || (text.trim().length === 0 && cannedImages.length === 0)}>
+            <Button className="h-11 px-3" onClick={() => void send()} disabled={sending || (text.trim().length === 0 && cannedImages.length === 0)}>
               {sending ? <Loader2 className="animate-spin" /> : <Send />}
-              ส่ง
+              <span className="hidden sm:inline">ส่ง</span>
             </Button>
           </div>
         )}
@@ -1640,6 +1744,12 @@ function ChatRoom({
           setText((prev) => (prev.trim() ? `${prev}\n${t}` : t));
           inputRef.current?.focus();
         }}
+      />
+
+      <MediaLibraryPicker
+        kind={libraryKind}
+        onClose={() => setLibraryKind(null)}
+        onSelect={(item) => { setPendingLibrary(item); setLibraryKind(null); }}
       />
 
       {/* ---------- เมนูแตะข้อความ ---------- */}
@@ -1700,6 +1810,67 @@ function ChatRoom({
 }
 
 /* ================================================================== */
+
+function MediaLibraryPicker({
+  kind,
+  onClose,
+  onSelect,
+}: {
+  kind: 'image' | 'video' | null;
+  onClose: () => void;
+  onSelect: (item: LibraryItem) => void;
+}) {
+  const [loaded, setLoaded] = useState<{ kind: 'image' | 'video'; items: LibraryItem[] } | null>(null);
+
+  useEffect(() => {
+    if (!kind) return;
+    let alive = true;
+    void fetch('/api/media-library', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (!alive) return;
+        if (!json.ok) throw new Error(json?.error?.message_th ?? 'อ่านคลังสื่อไม่สำเร็จ');
+        const all = json.data.items as LibraryItem[];
+        setLoaded({ kind, items: all.filter((item) => kind === 'video' ? item.mime.startsWith('video/') : item.mime.startsWith('image/')) });
+      })
+      .catch((err) => {
+        if (alive) { setLoaded({ kind, items: [] }); toast.error(err instanceof Error ? err.message : 'อ่านคลังสื่อไม่สำเร็จ'); }
+      });
+    return () => { alive = false; };
+  }, [kind]);
+
+  const items = kind && loaded?.kind === kind ? loaded.items : null;
+
+  return (
+    <Dialog open={kind !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="bottom-0 left-0 top-auto w-full max-w-none translate-x-0 translate-y-0 rounded-b-none rounded-t-3xl p-4 sm:left-1/2 sm:top-1/2 sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg">
+        <DialogHeader>
+          <DialogTitle>{kind === 'video' ? 'เลือกจากคลังวิดีโอ' : 'เลือกจากคลังรูป'}</DialogTitle>
+          <DialogDescription>เลือกไฟล์แล้วระบบจะนำมาพรีวิวในห้องแชทก่อน คุณต้องกดส่งอีกครั้ง</DialogDescription>
+        </DialogHeader>
+        {items === null ? (
+          <div className="flex justify-center py-12"><Loader2 className="animate-spin" /></div>
+        ) : items.length === 0 ? (
+          <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
+            ยังไม่มี{kind === 'video' ? 'วิดีโอ' : 'รูป'}ในคลัง<br />เพิ่มไฟล์ได้ที่เมนู “คลังสื่อ”
+          </div>
+        ) : (
+          <div className="grid max-h-[60vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
+            {items.map((item) => (
+              <button key={item.id} type="button" onClick={() => onSelect(item)} className="overflow-hidden rounded-xl border text-left transition hover:border-primary hover:ring-2 hover:ring-primary/20">
+                {item.mime.startsWith('video/')
+                  ? <video src={item.preview_url} muted preload="metadata" className="aspect-video w-full bg-black object-contain" />
+                  // eslint-disable-next-line @next/next/no-img-element
+                  : <img src={item.preview_url} alt="รูปในคลัง" className="aspect-video w-full object-cover" />}
+                <span className="block px-2 py-1.5 text-[11px] text-muted-foreground">{(item.bytes / 1024 / 1024).toFixed(1)} MB · เลือก</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /* ------------------------------------------------------------------------ */
 /* ปุ่ม "ลองดึงชื่ออีกครั้ง" (D-33)                                              */
