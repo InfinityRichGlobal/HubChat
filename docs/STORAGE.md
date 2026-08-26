@@ -57,20 +57,13 @@
    - Secret Access Key
    - Account ID (อยู่ในหน้า R2 มุมขวา)
 
-### 3. ใส่ใน `.env.local`
+### 3. ใส่ผ่านหน้าเว็บ
 
-```
-R2_ACCOUNT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-R2_ACCESS_KEY_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-R2_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-R2_BUCKET=hubchat-media
-```
+ล็อกอินด้วยบัญชีเจ้าของ → **ตั้งค่า → ระบบ + ความลับ** แล้วบันทึก
+`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` และ `R2_BUCKET`
+ค่าลับจะถูกเข้ารหัสก่อนลงฐานข้อมูลและจะไม่ถูกแสดงกลับมาอีก
 
-### 4. รีสตาร์ตแล้วทดสอบ
-
-```bash
-npm run dev
-```
+### 4. ทดสอบ (ไม่ต้องรีสตาร์ต)
 
 ให้ลูกค้า (หรือตัวเอง) ส่งรูปเข้ามาทาง Messenger แล้วดูล็อก
 ถ้าสำเร็จ รูปในหน้าแชทจะเปิดได้ และเปิดได้ตลอดไปแม้ผ่านไปเป็นเดือน
