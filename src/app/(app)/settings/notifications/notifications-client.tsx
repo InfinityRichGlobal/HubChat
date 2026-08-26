@@ -38,6 +38,13 @@ type PrefsView = {
   events: Array<{ key: string; label_th: string }>;
 };
 
+type WorkerStatus = {
+  last_flush_at: string | null;
+  last_heartbeat_at: string | null;
+  warning: boolean;
+  missing_without_worker: string[];
+};
+
 export default function NotificationsClient({
   initial, pushConfigured, telegramConfigured, isOwner, canReply,
 }: {
@@ -50,6 +57,7 @@ export default function NotificationsClient({
   const [prefs, setPrefs] = useState<PrefsView>(initial);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null);
 
   /**
    * ⭐ รวมทุกอย่างที่ "รู้ได้เฉพาะบนเบราว์เซอร์" ไว้ในสถานะก้อนเดียว
@@ -85,6 +93,13 @@ export default function NotificationsClient({
       });
     })();
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    void fetch('/api/notify/status', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((result: { ok: boolean; data?: WorkerStatus }) => { if (result.ok && result.data) setWorkerStatus(result.data); })
+      .catch(() => undefined);
   }, []);
 
   const save = useCallback(async (next: PrefsView) => {
@@ -166,6 +181,27 @@ export default function NotificationsClient({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-8">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">สถานะตัวส่งแจ้งเตือน</CardTitle>
+          <CardDescription>
+            {workerStatus?.last_flush_at
+              ? `ส่งคิวสำเร็จล่าสุด ${new Date(workerStatus.last_flush_at).toLocaleString('th-TH')}`
+              : 'ยังไม่เคยพบการส่งคิวสำเร็จ'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {workerStatus?.warning ? (
+            <Alert variant="destructive">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>ตัวส่งแจ้งเตือนเงียบเกิน 30 นาที</AlertTitle>
+              <AlertDescription>
+                เหตุการณ์ “ลูกค้าเงียบ 15 นาที” และ “ใกล้หมดกรอบตอบ” จะไม่ถูกสร้างจนกว่า worker/cron จะกลับมาทำงาน
+              </AlertDescription>
+            </Alert>
+          ) : <Badge className="gap-1"><CheckCircle2 className="size-3" /> worker ทำงานปกติ</Badge>}
+        </CardContent>
+      </Card>
       {/* ------------------------------------------------------------------ */}
       {/* สถานะเครื่องนี้ — ส่วนสำคัญที่สุดของหน้า                                 */}
       {/* ------------------------------------------------------------------ */}
@@ -184,8 +220,8 @@ export default function NotificationsClient({
               <AlertTriangle className="size-4" />
               <AlertTitle>เซิร์ฟเวอร์ยังไม่ได้ตั้งกุญแจแจ้งเตือน</AlertTitle>
               <AlertDescription>
-                เจ้าของร้านต้องรัน <code className="rounded bg-muted px-1">npm run vapid</code> แล้วเอาค่าที่ได้ใส่ใน
-                .env.local จากนั้นรีสตาร์ตเซิร์ฟเวอร์ — วิธีละเอียดอยู่ที่ docs/NOTIFICATIONS.md
+                เจ้าของร้านต้องรัน <code className="rounded bg-muted px-1">npm run vapid</code> แล้วบันทึกค่าที่
+                ตั้งค่า → ระบบ + ความลับ โดยไม่ต้องรีสตาร์ต — วิธีละเอียดอยู่ที่ docs/NOTIFICATIONS.md
               </AlertDescription>
             </Alert>
           )}
@@ -417,7 +453,7 @@ function TelegramCard({ configured }: { configured: boolean }) {
               <span>1. ทักหา @BotFather ใน Telegram → /newbot → ได้ token มา</span>
               <span>2. ใส่ TELEGRAM_BOT_TOKEN ใน .env.local แล้วรีสตาร์ตเซิร์ฟเวอร์</span>
               <span>3. สร้างกลุ่ม เชิญบอทเข้ากลุ่ม แล้วพิมพ์อะไรสักคำในกลุ่ม</span>
-              <span>4. กดปุ่ม &quot;ค้นหากลุ่ม&quot; ข้างล่าง แล้วเอาเลขที่ได้ใส่ TELEGRAM_CHAT_ID</span>
+              <span>4. กดปุ่ม &quot;ค้นหากลุ่ม&quot; ข้างล่าง แล้วบันทึกเลขที่ได้ใน ตั้งค่า → ระบบ + ความลับ</span>
               <span className="text-muted-foreground">⚠️ chat id ของกลุ่มเป็นเลขติดลบเสมอ เช่น -1001234567890</span>
             </AlertDescription>
           </Alert>
@@ -441,7 +477,7 @@ function TelegramCard({ configured }: { configured: boolean }) {
                 </div>
               ))}
               <p className="text-xs text-muted-foreground">
-                เอาเลขนี้ไปใส่ TELEGRAM_CHAT_ID ใน .env.local แล้วรีสตาร์ตเซิร์ฟเวอร์
+                เอาเลขนี้ไปบันทึกเป็น TELEGRAM_CHAT_ID ใน ตั้งค่า → ระบบ + ความลับ
               </p>
             </div>
           </>

@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       shipping_method_id: p.get('shipping_method_id') ?? undefined,
       admin_id: p.get('admin_id') ?? undefined,
       search: p.get('search') ?? undefined,
+      conversation_id: p.get('conversation_id') ?? undefined,
     });
     return ok({ orders });
   } catch (err) {

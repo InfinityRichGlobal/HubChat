@@ -18,6 +18,8 @@ import 'server-only';
 import { uploadImageForConversation, AttachmentError } from '@/server/meta/attachments';
 import { sendMessage, type SendResult } from './send-message';
 import type { Provenance } from './provenance';
+import { storeUploadedFile } from '@/server/storage/media';
+import { StorageNotConfiguredError } from '@/server/storage/r2';
 
 /** ชนิดไฟล์ที่ยอมรับ — จำกัดตามที่ Meta รองรับจริง ไม่เปิดกว้างเกินจำเป็น */
 export const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
@@ -64,6 +66,18 @@ export async function sendImage(input: SendImageInput): Promise<SendResult> {
   const problem = validateImage({ size: input.file.size, type: input.file.mime });
   if (problem) throw new ImageSendError(problem);
 
+  // เก็บสำเนาขาออกใน R2 ก่อนถ้าตั้งค่าแล้ว (D-56) แต่ R2 พังต้องไม่ทำให้การตอบลูกค้าพัง
+  let mediaId: string | null = null;
+  try {
+    mediaId = await storeUploadedFile(input.file.bytes, input.file.mime, 'outbound', {
+      conversation_id: input.conversation_id,
+    });
+  } catch (err) {
+    if (!(err instanceof StorageNotConfiguredError)) {
+      console.warn('[send-image] เก็บสำเนารูปขาออกไม่สำเร็จ — ยังส่งผ่าน Meta ต่อ:', err);
+    }
+  }
+
   // ---- 1) อัปโหลดไปเก็บที่ Meta ก่อน (ชั้น server/meta เป็นคนคุยกับ Meta) ----
   let attachmentId: string;
   try {
@@ -82,7 +96,7 @@ export async function sendImage(input: SendImageInput): Promise<SendResult> {
     conversation_id: input.conversation_id,
     message_type: 'inquiry_response',
     provenance: input.provenance,
-    content: { images: [{ meta_attachment_id: attachmentId }] },
+    content: { images: [{ meta_attachment_id: attachmentId, media_id: mediaId ?? undefined }] },
     idempotency_key: input.idempotency_key ?? null,
   });
 }

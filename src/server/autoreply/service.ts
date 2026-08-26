@@ -38,9 +38,9 @@ function normaliseRow(row: KeywordRule): KeywordRule {
 export async function listRules(includeArchived = false): Promise<KeywordRule[]> {
   let q = db().from('keyword_rules').select(RULE_COLUMNS).order('priority').limit(300);
   if (!includeArchived) q = q.is('archived_at', null);
-  const { data, error } = await q;
+  const { data, error } = await q.overrideTypes<KeywordRule[], { merge: false }>();
   if (error) throw new Error(`อ่านรายการกฎไม่สำเร็จ: ${error.message}`);
-  return ((data ?? []) as unknown as KeywordRule[]).map(normaliseRow);
+  return (data ?? []).map(normaliseRow);
 }
 
 /**
@@ -57,14 +57,16 @@ export async function listLiveRules(): Promise<KeywordRule[]> {
     .eq('is_active', true)
     .is('archived_at', null)
     .order('priority')
-    .limit(300);
+    .limit(300)
+    .overrideTypes<KeywordRule[], { merge: false }>();
   if (error) throw new Error(`อ่านกฎที่เปิดใช้งานไม่สำเร็จ: ${error.message}`);
-  return ((data ?? []) as unknown as KeywordRule[]).map(normaliseRow);
+  return (data ?? []).map(normaliseRow);
 }
 
 export async function getRule(id: string): Promise<KeywordRule | null> {
-  const { data } = await db().from('keyword_rules').select(RULE_COLUMNS).eq('id', id).maybeSingle();
-  return data ? normaliseRow(data as unknown as KeywordRule) : null;
+  const { data } = await db().from('keyword_rules').select(RULE_COLUMNS).eq('id', id).maybeSingle()
+    .overrideTypes<KeywordRule | null, { merge: false }>();
+  return data ? normaliseRow(data) : null;
 }
 
 export type RuleInput = {
@@ -183,7 +185,7 @@ export async function listAutoReplyLogs(limit = 100, ruleId?: string): Promise<A
     .limit(Math.min(Math.max(limit, 1), 300));
   if (ruleId) q = q.eq('rule_id', ruleId);
 
-  const { data, error } = await q;
+  const { data, error } = await q.overrideTypes<AutoReplyLog[], { merge: false }>();
   if (error) throw new Error(`อ่านประวัติการตอบอัตโนมัติไม่สำเร็จ: ${error.message}`);
-  return (data ?? []) as unknown as AutoReplyLog[];
+  return data ?? [];
 }

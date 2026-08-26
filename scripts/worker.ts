@@ -15,15 +15,14 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv({ path: ['.env.local', '.env'], quiet: true });
 
-const INTERVAL_MS = Number(process.env.WORKER_INTERVAL_MS ?? 2000);
-
 let stopping = false;
 
 async function main() {
   // import ทีหลังเพื่อให้ค่าจาก .env.local ถูกอ่านก่อนเสมอ
   const { processWebhookBatch } = await import('../src/server/ingest/processor');
+  const { getRuntimeSetting } = await import('../src/server/settings/service');
 
-  console.log(`[worker] เริ่มทำงาน ตรวจคิวทุก ${INTERVAL_MS} มิลลิวินาที (กด Ctrl+C เพื่อหยุด)`);
+  console.log('[worker] เริ่มทำงาน (ช่วงเวลาตรวจอ่านใหม่จากค่าตั้งทุกครั้ง)');
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
@@ -46,7 +45,9 @@ async function main() {
       // ห้ามตาย — ฐานข้อมูลสะดุดชั่วคราวต้องกลับมาทำงานต่อได้เอง
       console.error('[worker] รอบนี้ผิดพลาด (จะลองใหม่):', err);
     }
-    await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    const configured = Number(await getRuntimeSetting('WORKER_INTERVAL_MS'));
+    const intervalMs = Number.isFinite(configured) ? Math.max(configured, 250) : 2_000;
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 
   console.log('[worker] หยุดเรียบร้อย');

@@ -37,7 +37,7 @@ export async function logActivity(params: {
   ip?: string | null;
 }): Promise<void> {
   try {
-    await db().from('activity_logs').insert({
+    const { error } = await db().from('activity_logs').insert({
       admin_id: params.adminId,
       action: params.action,
       target_type: params.targetType ?? null,
@@ -45,6 +45,7 @@ export async function logActivity(params: {
       detail: params.detail ?? {},
       ip_address: params.ip ?? null,
     });
+    if (error) throw new Error(error.message);
   } catch (err) {
     // ตั้งใจไม่โยนต่อ — ดูรายละเอียดได้จาก log ของเซิร์ฟเวอร์
     console.error('[activity-log] บันทึกไม่สำเร็จ:', err);

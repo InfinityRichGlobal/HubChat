@@ -65,6 +65,13 @@ const EMPTY_SUMMARY: ProcessSummary = {
   notifications_queued: 0,
 };
 
+/** ฟิลด์ตัวเลขทุกตัวต้องอยู่ในรายการนี้ — เพิ่มฟิลด์แล้ว TypeScript จะบังคับให้อัปเดตรายการ */
+const SUMMARY_COUNTERS = Object.keys(EMPTY_SUMMARY) as Array<keyof ProcessSummary>;
+
+export function mergeProcessSummary(target: ProcessSummary, source: ProcessSummary): void {
+  for (const key of SUMMARY_COUNTERS) target[key] += source[key];
+}
+
 /** ความผิดที่ลองใหม่ไปก็ไม่มีวันหาย */
 class PermanentJobError extends Error {}
 
@@ -498,26 +505,7 @@ export async function drainWebhookQueue(maxRounds = 50, limit = 20): Promise<Pro
   const total: ProcessSummary = { ...EMPTY_SUMMARY };
   for (let i = 0; i < maxRounds; i += 1) {
     const round = await processWebhookBatch(limit);
-    total.jobs += round.jobs;
-    total.inbound_saved += round.inbound_saved;
-    total.echo_saved += round.echo_saved;
-    total.duplicates += round.duplicates;
-    total.ignored += round.ignored;
-    total.unknown_page += round.unknown_page;
-    total.failed_jobs += round.failed_jobs;
-    total.auto_replied += round.auto_replied;
-    total.auto_blocked += round.auto_blocked;
-    total.media_stored += round.media_stored;
-    total.media_failed += round.media_failed;
-    /**
-     * 🔴 บั๊กที่เคยหลุดมาจากรอบ 9 : เพิ่มฟิลด์ใน ProcessSummary แล้วลืมมาบวกตรงนี้
-     *    ผลคือ drainWebhookQueue รายงาน comments_saved = 0 ทั้งที่บันทึกได้จริง
-     *    TypeScript จับไม่ได้เพราะเป็นการ "ไม่เขียน" ไม่ใช่การเขียนผิดชนิด
-     *    เพิ่มฟิลด์ใหม่ใน ProcessSummary เมื่อไหร่ ต้องมาบวกที่นี่ด้วยเสมอ
-     */
-    total.comments_saved += round.comments_saved;
-    total.comments_flagged += round.comments_flagged;
-    total.notifications_queued += round.notifications_queued;
+    mergeProcessSummary(total, round);
     if (round.jobs === 0) break;
   }
   return total;

@@ -678,11 +678,13 @@ describe('🔴 ป้ายสถานะบนหัวห้อง ต้อ�
       {
         allowed: true,
         transport: 'STANDARD',
+        reason_code: 'OK_STANDARD_WINDOW',
         reason_th: '',
         alternatives_th: [],
         expires_at: new Date('2026-08-27T04:00:00Z').toISOString(),
         estimated_cost: null,
-      } as unknown as Parameters<typeof summariseForAdmin>[0],
+        evaluated: [],
+      },
       new Date('2026-08-26T10:00:00Z'),
     );
 

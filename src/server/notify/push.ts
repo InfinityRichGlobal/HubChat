@@ -12,7 +12,7 @@ import 'server-only';
  */
 import webpush from 'web-push';
 import { db } from '@/lib/supabase/admin';
-import { serverEnv } from '@/config/env';
+import { getRuntimeSetting } from '@/server/settings/service';
 
 export type PushPayload = {
   title: string;
@@ -23,30 +23,32 @@ export type PushPayload = {
   tag?: string;
 };
 
-let configured = false;
+let configuredSignature: string | null = null;
 
 /** ตั้งค่า VAPID ครั้งเดียวต่อโปรเซส */
-function ensureConfigured(): boolean {
-  const env = serverEnv();
-  const publicKey = env.VAPID_PUBLIC_KEY;
-  const privateKey = env.VAPID_PRIVATE_KEY;
-  const subject = env.VAPID_SUBJECT;
+async function ensureConfigured(): Promise<boolean> {
+  const [publicKey, privateKey, subject] = await Promise.all([
+    getRuntimeSetting('VAPID_PUBLIC_KEY'), getRuntimeSetting('VAPID_PRIVATE_KEY'), getRuntimeSetting('VAPID_SUBJECT'),
+  ]);
 
   if (!publicKey || !privateKey) return false;
-  if (configured) return true;
+  const signature = `${publicKey}:${privateKey}:${subject ?? ''}`;
+  if (configuredSignature === signature) return true;
 
   webpush.setVapidDetails(subject || 'mailto:admin@hubchat.local', publicKey, privateKey);
-  configured = true;
+  configuredSignature = signature;
   return true;
 }
 
-export function isPushConfigured(): boolean {
-  const env = serverEnv();
-  return Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
+export async function isPushConfigured(): Promise<boolean> {
+  const [publicKey, privateKey] = await Promise.all([
+    getRuntimeSetting('VAPID_PUBLIC_KEY'), getRuntimeSetting('VAPID_PRIVATE_KEY'),
+  ]);
+  return Boolean(publicKey && privateKey);
 }
 
-export function publicVapidKey(): string | null {
-  return serverEnv().VAPID_PUBLIC_KEY ?? null;
+export async function publicVapidKey(): Promise<string | null> {
+  return getRuntimeSetting('VAPID_PUBLIC_KEY');
 }
 
 export type PushSubscriptionRow = {
@@ -58,12 +60,13 @@ export type PushSubscriptionRow = {
 
 /** เครื่องทั้งหมดของแอดมินคนหนึ่งที่ยังใช้งานอยู่ */
 export async function liveSubscriptions(adminId: string): Promise<PushSubscriptionRow[]> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('push_subscriptions')
     .select('id,endpoint,p256dh,auth')
     .eq('admin_id', adminId)
     .is('disabled_at', null);
-  return (data ?? []) as unknown as PushSubscriptionRow[];
+  if (error) throw new Error(`อ่านอุปกรณ์รับแจ้งเตือนไม่สำเร็จ: ${error.message}`);
+  return (data ?? []) as PushSubscriptionRow[];
 }
 
 export type PushResult = {
@@ -79,7 +82,7 @@ export type PushResult = {
  */
 export async function sendPushToAdmin(adminId: string, payload: PushPayload): Promise<PushResult> {
   const result: PushResult = { sent: 0, disabled: 0, failed: 0 };
-  if (!ensureConfigured()) return result;
+  if (!(await ensureConfigured())) return result;
 
   const subs = await liveSubscriptions(adminId);
   if (subs.length === 0) return result;

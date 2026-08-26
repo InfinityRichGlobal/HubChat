@@ -19,15 +19,15 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv({ path: ['.env.local', '.env'], quiet: true });
 
-const INTERVAL_MS = Number(process.env.NOTIFY_INTERVAL_MS ?? 60_000);
-
 let stopping = false;
 
 async function main() {
   const { flushNotifications } = await import('../src/server/notify/dispatch');
   const { scanIdleAndClosing } = await import('../src/server/notify/scan');
+  const { getRuntimeSetting } = await import('../src/server/settings/service');
+  const { heartbeatStarted, heartbeatFinished, heartbeatFailed } = await import('../src/server/workers/heartbeat');
 
-  console.log(`[notify] เริ่มทำงาน ตรวจทุก ${Math.round(INTERVAL_MS / 1000)} วินาที (กด Ctrl+C เพื่อหยุด)`);
+  console.log('[notify] เริ่มทำงาน (ช่วงเวลาตรวจอ่านใหม่จากค่าตั้งทุกครั้ง)');
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
@@ -38,9 +38,11 @@ async function main() {
 
   while (!stopping) {
     try {
+      await heartbeatStarted('notifications');
       // เดินตรวจก่อน แล้วค่อยส่ง — ของที่เพิ่งเข้าคิวจะได้ออกในรอบเดียวกัน
       const scan = await scanIdleAndClosing();
       const sent = await flushNotifications();
+      await heartbeatFinished('notifications', { scan, sent });
 
       const moved =
         scan.idle_queued + scan.window_queued + sent.push_sent + sent.telegram_items;
@@ -54,8 +56,11 @@ async function main() {
     } catch (err) {
       // ห้ามตาย — แจ้งเตือนพลาดหนึ่งรอบยังพอทน แต่ตัวเดินตรวจตายคือไม่มีใครเตือนอีกเลย
       console.error('[notify] รอบนี้ผิดพลาด (จะลองใหม่):', err);
+      await heartbeatFailed('notifications', err);
     }
-    await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    const configured = Number(await getRuntimeSetting('NOTIFY_INTERVAL_MS'));
+    const intervalMs = Number.isFinite(configured) ? Math.max(configured, 60_000) : 60_000;
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 
   console.log('[notify] หยุดเรียบร้อย');

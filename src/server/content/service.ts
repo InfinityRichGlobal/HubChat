@@ -48,7 +48,7 @@ export async function listCanned(search?: string): Promise<CannedResponse[]> {
 
   const { data, error } = await query;
   if (error) throw new Error(`อ่านชุดคำตอบไม่สำเร็จ: ${error.message}`);
-  return (data ?? []) as unknown as CannedResponse[];
+  return (data ?? []) as CannedResponse[];
 }
 
 export type CannedInput = {
@@ -76,7 +76,7 @@ export async function createCanned(input: CannedInput): Promise<CannedResponse> 
     if (error.code === '23505') throw new ContentConflictError('ตัวย่อนี้ถูกใช้ไปแล้ว เลือกคำอื่น');
     throw new Error(`บันทึกชุดคำตอบไม่สำเร็จ: ${error.message}`);
   }
-  return data as unknown as CannedResponse;
+  return data as CannedResponse;
 }
 
 export async function updateCanned(id: string, input: Partial<CannedInput>): Promise<CannedResponse | null> {
@@ -99,7 +99,7 @@ export async function updateCanned(id: string, input: Partial<CannedInput>): Pro
     if (error.code === '23505') throw new ContentConflictError('ตัวย่อนี้ถูกใช้ไปแล้ว เลือกคำอื่น');
     throw new Error(`แก้ไขชุดคำตอบไม่สำเร็จ: ${error.message}`);
   }
-  return (data as unknown as CannedResponse) ?? null;
+  return (data as CannedResponse) ?? null;
 }
 
 export async function deleteCanned(id: string): Promise<void> {
@@ -141,7 +141,7 @@ export async function listTags(): Promise<Tag[]> {
     .order('sort_order', { ascending: true })
     .limit(200);
   if (error) throw new Error(`อ่านรายชื่อแท็กไม่สำเร็จ: ${error.message}`);
-  return (data ?? []) as unknown as Tag[];
+  return (data ?? []) as Tag[];
 }
 
 export async function createTag(input: { name: string; color?: string; sort_order?: number }): Promise<Tag> {
@@ -161,7 +161,7 @@ export async function createTag(input: { name: string; color?: string; sort_orde
     if (error.code === '23505') throw new ContentConflictError('มีแท็กชื่อนี้อยู่แล้ว');
     throw new Error(`สร้างแท็กไม่สำเร็จ: ${error.message}`);
   }
-  return data as unknown as Tag;
+  return data as Tag;
 }
 
 export async function updateTag(
@@ -179,7 +179,7 @@ export async function updateTag(
     if (error.code === '23505') throw new ContentConflictError('มีแท็กชื่อนี้อยู่แล้ว');
     throw new Error(`แก้ไขแท็กไม่สำเร็จ: ${error.message}`);
   }
-  return (data as unknown as Tag) ?? null;
+  return (data as Tag) ?? null;
 }
 
 export async function deleteTag(id: string): Promise<void> {

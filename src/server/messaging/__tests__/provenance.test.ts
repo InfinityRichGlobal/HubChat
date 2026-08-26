@@ -61,7 +61,7 @@ describe('ตราประทับ — ของจริงเท่าน�
   it('ของจริงแก้ค่าไม่ได้ (ถูก freeze ไว้)', () => {
     const p = keywordBotProvenance();
     expect(() => {
-      (p as unknown as { human_authored: boolean }).human_authored = true;
+      Object.defineProperty(p, 'human_authored', { value: true });
     }).toThrow();
     expect(p.human_authored).toBe(false);
   });

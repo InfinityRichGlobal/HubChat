@@ -454,9 +454,10 @@ function assertImportAccess(admin: PublicAdmin, row: { uploaded_by: string | nul
 }
 
 export async function getImport(admin: PublicAdmin, id: string): Promise<ImportView> {
-  const { data } = await db().from('tracking_imports').select(IMPORT_COLUMNS).eq('id', id).maybeSingle();
+  const { data } = await db().from('tracking_imports').select(IMPORT_COLUMNS).eq('id', id).maybeSingle()
+    .overrideTypes<ImportView | null, { merge: false }>();
   if (!data) throw new TrackingError('ไม่พบรอบนำเข้านี้');
-  const view = data as unknown as ImportView;
+  const view = data;
   assertImportAccess(admin, view);
   return view;
 }
@@ -471,8 +472,8 @@ export async function listImports(admin: PublicAdmin, limit = 30): Promise<Impor
   // แอดมินทั่วไปเห็นเฉพาะรอบของตัวเอง
   if (admin.role !== 'owner') query = query.eq('uploaded_by', admin.id);
 
-  const { data } = await query;
-  return (data ?? []) as unknown as ImportView[];
+  const { data } = await query.overrideTypes<ImportView[], { merge: false }>();
+  return data ?? [];
 }
 
 const ROW_COLUMNS =
@@ -487,8 +488,9 @@ export async function listImportRows(importId: string, limit = 1000): Promise<Im
     .select(ROW_COLUMNS)
     .eq('import_id', importId)
     .order('row_index', { ascending: true })
-    .limit(Math.min(Math.max(limit, 1), 5000));
-  return ((data ?? []) as unknown as ImportRowView[]).map((r) => ({
+    .limit(Math.min(Math.max(limit, 1), 5000))
+    .overrideTypes<ImportRowView[], { merge: false }>();
+  return (data ?? []).map((r) => ({
     ...r,
     candidate_order_ids: Array.isArray(r.candidate_order_ids) ? r.candidate_order_ids : [],
     problems: Array.isArray(r.problems) ? r.problems : [],

@@ -15,7 +15,7 @@ import { cookies, headers } from 'next/headers';
 import { db } from '@/lib/supabase/admin';
 import { serverEnv } from '@/config/env';
 import { SESSION_COOKIE, verifySession } from '@/lib/auth/session';
-import { can, type Permission } from '@/lib/auth/permissions';
+import { can, canManageRuntimeSettings, type Permission } from '@/lib/auth/permissions';
 import type { Admin, PublicAdmin } from '@/types/db';
 
 /** เหตุผลที่เข้าไม่ได้ — ใช้ตัดสินใจว่าจะพาไปหน้าไหน */
@@ -108,6 +108,15 @@ export async function requirePermission(permission: Permission): Promise<PublicA
   const admin = await requireAdmin();
   if (!can(admin.role, permission)) {
     throw new AuthError('forbidden', 'บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้', 403);
+  }
+  return admin;
+}
+
+/** งานตั้งค่าระบบ/ความลับต้องเป็นเจ้าของร้านเท่านั้น — ไม่ผูกกับสิทธิ์ที่อาจขยายในอนาคต */
+export async function requireOwner(): Promise<PublicAdmin> {
+  const admin = await requireAdmin();
+  if (!canManageRuntimeSettings(admin.role)) {
+    throw new AuthError('forbidden', 'เฉพาะเจ้าของร้านเท่านั้นที่ตั้งค่าระบบได้', 403);
   }
   return admin;
 }

@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     await requirePermission('page.manage');
     const input = testSchema.parse(await req.json().catch(() => ({})));
 
-    if (!isTelegramConfigured(input.chat_id ?? null)) {
+    if (!(await isTelegramConfigured(input.chat_id ?? null))) {
       return fail(
         'telegram_not_configured',
         'ยังไม่ได้ตั้ง TELEGRAM_BOT_TOKEN และ TELEGRAM_CHAT_ID — ดูวิธีที่ docs/NOTIFICATIONS.md',

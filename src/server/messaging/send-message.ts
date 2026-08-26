@@ -307,6 +307,7 @@ export async function sendMessage(req: SendRequest, options: SendOptions = {}): 
           type: 'image',
           url: img.url,
           meta_attachment_id: img.meta_attachment_id,
+          media_id: img.media_id,
         })),
         meta_message_id: result.message_id,
         human_agent_tag: decision.transport === 'HUMAN_AGENT',

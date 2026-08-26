@@ -22,6 +22,13 @@ import type { Platform, PublicAdmin, ReferralSource } from '@/types/db';
 /** ปลดล็อกอัตโนมัติเมื่อไม่มีความเคลื่อนไหวเกินเวลานี้ (สเปก 5.1 : 3 นาที) */
 export const LOCK_STALE_SECONDS = 180;
 
+export const INBOX_SELECTS = {
+  pages: 'id,platform,page_name,display_name,tag_color',
+  conversations: 'id,customer_id,page_id,last_message_at,last_message_preview,last_customer_message_at,is_read,locked_by_admin_id,locked_at,referral_source,referral_ad_id,referral_ref',
+  customers: 'id,name,profile_pic_url,psid,phone,profile_error_th',
+  messages: 'id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at,reply_to_message_id,reply_native',
+} as const;
+
 /* ------------------------------------------------------------------------ */
 /* ชนิดข้อมูลที่ส่งออกไปฝั่งหน้าเว็บ                                            */
 /* ------------------------------------------------------------------------ */
@@ -98,6 +105,8 @@ export type ListFilters = {
    *    หน้าเว็บกรองตัวซ้ำที่ขอบทิ้งด้วย id เอง
    */
   before?: string | null;
+  /** ขอเฉพาะห้องที่มีข้อความใหม่ตั้งแต่เวลานี้ ใช้ polling ไม่ให้โหลดรายการเดิมทั้งก้อน */
+  since?: string | null;
 };
 
 export class InboxAccessError extends Error {}
@@ -112,7 +121,7 @@ type PageMap = Map<string, InboxPage>;
 async function visiblePages(admin: PublicAdmin): Promise<PageMap> {
   const { data, error } = await db()
     .from('pages')
-    .select('id,platform,page_name,display_name,tag_color')
+    .select(INBOX_SELECTS.pages)
     .order('created_at');
   if (error) throw new Error(`อ่านรายชื่อเพจไม่สำเร็จ: ${error.message}`);
 
@@ -140,7 +149,8 @@ async function adminNames(ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (unique.length === 0) return new Map();
 
-  const { data } = await db().from('admins').select('id,name').in('id', unique);
+  const { data, error } = await db().from('admins').select('id,name').in('id', unique);
+  if (error) throw new Error(`อ่านชื่อแอดมินไม่สำเร็จ: ${error.message}`);
   return new Map(((data ?? []) as Array<{ id: string; name: string }>).map((a) => [a.id, a.name]));
 }
 
@@ -151,9 +161,9 @@ async function adminNames(ids: string[]): Promise<Map<string, string>> {
 export async function listConversations(
   admin: PublicAdmin,
   filters: ListFilters = {},
-): Promise<{ conversations: ConversationRow[]; pages: InboxPage[]; has_more: boolean }> {
+): Promise<{ conversations: ConversationRow[]; pages: InboxPage[]; has_more: boolean; truncated: boolean }> {
   const pages = await visiblePages(admin);
-  if (pages.size === 0) return { conversations: [], pages: [], has_more: false };
+  if (pages.size === 0) return { conversations: [], pages: [], has_more: false, truncated: false };
 
   // ตัวกรองเพจจากหน้าเว็บ ต้องตัดเพจที่ไม่มีสิทธิ์ทิ้งเสมอ
   const requested = filters.page_ids?.filter((id) => pages.has(id));
@@ -162,20 +172,27 @@ export async function listConversations(
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
   const search = filters.search?.trim();
 
-  /* --- ถ้ามีคำค้น ให้หาจากฝั่งลูกค้าก่อน แล้วค่อยกรองห้องแชท --------------
-     รอบนี้ค้นได้จาก "ชื่อ" กับ "เบอร์" — เลขออเดอร์/เลขพัสดุยังไม่มีตาราง
-     ที่มีข้อมูลจริง (มาในรอบ 5) จึงยังไม่รวมไว้ */
+  /* ค้นสี่ช่องแยก query เพื่อไม่ประกอบ PostgREST filter จากข้อความผู้ใช้ */
   let customerIdFilter: string[] | null = null;
   if (search) {
-    const { data } = await db()
-      .from('customers')
-      .select('id')
-      .in('page_id', pageIds)
-      .or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
-      .limit(500);
-    customerIdFilter = ((data ?? []) as Array<{ id: string }>).map((c) => c.id);
+    const pattern = `%${search.replace(/[%,_()]/g, '')}%`;
+    const [byName, byPhone, byOrder, byTracking] = await Promise.all([
+      db().from('customers').select('id').in('page_id', pageIds).ilike('name', pattern).limit(500),
+      db().from('customers').select('id').in('page_id', pageIds).ilike('phone', pattern).limit(500),
+      db().from('orders').select('customer_id').in('page_id', pageIds).ilike('order_no', pattern).limit(500),
+      db().from('orders').select('customer_id').in('page_id', pageIds).ilike('tracking_no', pattern).limit(500),
+    ]);
+    for (const result of [byName, byPhone, byOrder, byTracking]) {
+      if (result.error) throw new Error(`ค้นหาอินบ็อกซ์ไม่สำเร็จ: ${result.error.message}`);
+    }
+    customerIdFilter = [...new Set([
+      ...((byName.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+      ...((byPhone.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+      ...((byOrder.data ?? []) as Array<{ customer_id: string | null }>).flatMap((row) => row.customer_id ? [row.customer_id] : []),
+      ...((byTracking.data ?? []) as Array<{ customer_id: string | null }>).flatMap((row) => row.customer_id ? [row.customer_id] : []),
+    ])];
     if (customerIdFilter.length === 0) {
-      return { conversations: [], pages: [...pages.values()], has_more: false };
+      return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
     }
   }
 
@@ -184,31 +201,29 @@ export async function listConversations(
   if (filters.tag_ids && filters.tag_ids.length > 0) {
     conversationIdFilter = await conversationIdsWithTags(filters.tag_ids);
     if (conversationIdFilter.length === 0) {
-      return { conversations: [], pages: [...pages.values()], has_more: false };
+      return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
     }
   }
 
   let query = db()
     .from('conversations')
-    .select(
-      'id,customer_id,page_id,last_message_at,last_message_preview,last_customer_message_at,' +
-        'is_read,locked_by_admin_id,locked_at,referral_source,referral_ad_id,referral_ref',
-    )
+    .select(INBOX_SELECTS.conversations)
     .in('page_id', pageIds)
-    .order('last_message_at', { ascending: false })
+    .order('last_message_at', { ascending: Boolean(filters.since) })
     // ⭐ ตัวตัดสินตอนเวลาเท่ากัน — ดูเหตุผลเดียวกับใน listMessages
-    .order('id', { ascending: false })
-    .limit(limit);
+    .order('id', { ascending: Boolean(filters.since) })
+    .limit(limit + 1);
 
   if (filters.unread_only) query = query.eq('is_read', false);
   if (customerIdFilter) query = query.in('customer_id', customerIdFilter);
   if (conversationIdFilter) query = query.in('id', conversationIdFilter);
   if (filters.before) query = query.lte('last_message_at', filters.before);
+  if (filters.since) query = query.gte('last_message_at', filters.since);
 
   const { data: convRows, error } = await query;
   if (error) throw new Error(`อ่านลิสต์แชทไม่สำเร็จ: ${error.message}`);
 
-  const rows = (convRows ?? []) as unknown as Array<{
+  const allRows = (convRows ?? []) as Array<{
     id: string;
     customer_id: string;
     page_id: string;
@@ -223,10 +238,11 @@ export async function listConversations(
     referral_ref: string | null;
   }>;
 
-  // เช็คก่อนกรองอะไรทั้งสิ้น — ได้ครบเพดาน = ยังมีของเก่ากว่านั้นอีก
-  const hasMore = rows.length === limit;
+  const truncated = Boolean(filters.since) && allRows.length > limit;
+  const hasMore = !filters.since && allRows.length > limit;
+  const rows = allRows.slice(0, limit);
 
-  if (rows.length === 0) return { conversations: [], pages: [...pages.values()], has_more: false };
+  if (rows.length === 0) return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
 
   const [customers, names, tagMap] = await Promise.all([
     db()
@@ -236,7 +252,7 @@ export async function listConversations(
        *    "ทำไมยังไม่มีชื่อ" แทนที่จะปล่อยให้แอดมินเดา (D-33)
        * ⚠️ ข้อความนี้ถูกรับประกันแล้วว่าไม่มี token ปน (ดู explainProfileError)
        */
-      .select('id,name,profile_pic_url,psid,phone,profile_error_th')
+      .select(INBOX_SELECTS.customers)
       .in('id', [...new Set(rows.map((r) => r.customer_id))]),
     adminNames(rows.map((r) => r.locked_by_admin_id).filter((v): v is string => Boolean(v))),
     tagsForConversations(rows.map((r) => r.id)),
@@ -252,6 +268,7 @@ export async function listConversations(
       phone: string | null;
     }>).map((c) => [c.id, c]),
   );
+  if (customers.error) throw new Error(`อ่านข้อมูลลูกค้าไม่สำเร็จ: ${customers.error.message}`);
 
   const staleBefore = Date.now() - LOCK_STALE_SECONDS * 1000;
 
@@ -289,7 +306,7 @@ export async function listConversations(
     ];
   });
 
-  return { conversations, pages: [...pages.values()], has_more: hasMore };
+  return { conversations, pages: [...pages.values()], has_more: hasMore, truncated };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -307,12 +324,13 @@ export async function requireConversationAccess(
   admin: PublicAdmin,
   conversationId: string,
 ): Promise<{ id: string; customer_id: string; page_id: string }> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('conversations')
     .select('id,customer_id,page_id')
     .eq('id', conversationId)
     .maybeSingle();
 
+  if (error) throw new Error(`ตรวจสิทธิ์ห้องแชทไม่สำเร็จ: ${error.message}`);
   if (!data) throw new InboxAccessError('ไม่พบห้องแชทนี้');
   const row = data as { id: string; customer_id: string; page_id: string };
   if (!canSeePage(admin.role, admin.allowed_page_ids, row.page_id)) {
@@ -325,6 +343,8 @@ export type MessagePage = {
   messages: MessageRow[];
   /** true = ยังมีข้อความเก่ากว่านี้อีก — หน้าเว็บเอาไว้ตัดสินใจโชว์ปุ่ม "ดูข้อความเก่ากว่านี้" */
   has_more: boolean;
+  /** true = มีข้อความใหม่มากกว่าที่คืนในรอบนี้ ผู้เรียกต้องดึงต่อ ห้ามทำเป็นว่าครบ */
+  truncated: boolean;
 };
 
 /**
@@ -342,6 +362,7 @@ export async function listMessages(
   conversationId: string,
   limit = 100,
   before?: string | null,
+  after?: string | null,
 ): Promise<MessagePage> {
   await requireConversationAccess(admin, conversationId);
 
@@ -349,7 +370,7 @@ export async function listMessages(
 
   let query = db()
     .from('messages')
-    .select('id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at,reply_to_message_id,reply_native')
+    .select(INBOX_SELECTS.messages)
     .eq('conversation_id', conversationId)
     // ⭐ กรองข้อความที่ถูกลบ "ในฐานข้อมูล" ไม่ใช่กรองทีหลังใน JavaScript
     //    เคยกรองทีหลังแล้วเจอปัญหา : ถ้ามีข้อความถูกลบติดกันเกินขนาดชุดหนึ่งชุด
@@ -357,19 +378,22 @@ export async function listMessages(
     .eq('is_deleted', false);
 
   if (before) query = query.lte('created_at', before);
+  if (after) query = query.gte('created_at', after);
 
   const { data, error } = await query
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: Boolean(after) })
     // ⭐ ตัวตัดสินตอนเวลาเท่ากันเป๊ะ — จำเป็นมากกับแชทที่ดึงย้อนหลังมาจาก Meta
     //    เพราะ created_time ของ Meta ละเอียดแค่ระดับวินาที ข้อความรัว ๆ จะเวลาซ้ำกัน
     //    ถ้าไม่มีตัวนี้ ลำดับจะไม่คงที่ แล้วการไล่ย้อนหลังจะข้ามข้อความหายไปเงียบ ๆ
-    .order('id', { ascending: false })
-    .limit(capped);
+    .order('id', { ascending: Boolean(after) })
+    .limit(capped + 1);
 
   if (error) throw new Error(`อ่านข้อความไม่สำเร็จ: ${error.message}`);
 
-  const rows = (data ?? []) as MessageRow[];
-  const hasMore = rows.length === capped;
+  const allRows = (data ?? []) as MessageRow[];
+  const truncated = Boolean(after) && allRows.length > capped;
+  const hasMore = !after && allRows.length > capped;
+  const rows = allRows.slice(0, capped);
   const names = await adminNames(rows.map((m) => m.admin_id).filter((v): v is string => Boolean(v)));
 
   /**
@@ -384,11 +408,12 @@ export async function listMessages(
   )];
   const replyMap = new Map<string, { text: string | null; from_customer: boolean }>();
   if (replyIds.length > 0) {
-    const { data: originals } = await db()
+    const { data: originals, error: originalsError } = await db()
       .from('messages')
       .select('id,text,direction')
       .eq('conversation_id', conversationId)
       .in('id', replyIds);
+    if (originalsError) throw new Error(`อ่านข้อความต้นทางไม่สำเร็จ: ${originalsError.message}`);
     for (const o of (originals ?? []) as Array<{ id: string; text: string | null; direction: 'in' | 'out' }>) {
       replyMap.set(o.id, { text: o.text, from_customer: o.direction === 'in' });
     }
@@ -410,10 +435,10 @@ export async function listMessages(
       reply_native: m.reply_native ?? false,
       // ไม่เจอต้นทาง = ถูกลบไปแล้ว → แสดงว่า "ข้อความถูกลบ" ดีกว่าซ่อนเงียบ ๆ
       reply_preview: m.reply_to_message_id ? (replyMap.get(m.reply_to_message_id) ?? null) : null,
-    }))
-    .reverse();
+    }));
+  if (!after) messages.reverse();
 
-  return { messages, has_more: hasMore };
+  return { messages, has_more: hasMore, truncated };
 }
 
 /* ------------------------------------------------------------------------ */

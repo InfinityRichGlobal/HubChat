@@ -207,7 +207,7 @@ export async function runNotificationQueue(
   const { data, error } = await query;
   if (error) throw new Error(`อ่านคิวแจ้งเลขพัสดุไม่สำเร็จ: ${error.message}`);
 
-  await processJobs((data ?? []) as unknown as QueueRow[], approvedByAdminId, summary, gapMs, sleep, options.budgetMs);
+  await processJobs((data ?? []) as QueueRow[], approvedByAdminId, summary, gapMs, sleep, options.budgetMs);
 
   // อัปเดตตัวนับบนรอบนำเข้า ให้หน้าเว็บอ่านย้อนหลังได้โดยไม่ต้องนับเอง
   if (importId) await refreshImportCounters(importId);
@@ -245,7 +245,7 @@ export async function runNotificationQueueForIds(
     .in('id', ids.slice(0, MAX_PER_RUN))
     .eq('status', 'queued');
 
-  const jobs = (data ?? []) as unknown as QueueRow[];
+  const jobs = (data ?? []) as QueueRow[];
   await processJobs(jobs, approvedByAdminId, summary, gapMs, sleep, options.budgetMs);
   // ตัวนับของรอบนำเข้าให้ผู้เรียกเป็นคนสั่งอัปเดต (รู้ดีกว่าว่าเกี่ยวกับรอบไหน)
   return summary;
@@ -670,8 +670,9 @@ export async function getOrderNotifications(orderId: string): Promise<Notificati
     .from('fulfillment_notifications')
     .select(NOTIFY_COLUMNS)
     .eq('order_id', orderId)
-    .order('created_at', { ascending: false });
-  return (data ?? []) as unknown as NotificationView[];
+    .order('created_at', { ascending: false })
+    .overrideTypes<NotificationView[], { merge: false }>();
+  return data ?? [];
 }
 
 export async function listImportNotifications(importId: string): Promise<NotificationView[]> {
@@ -680,6 +681,7 @@ export async function listImportNotifications(importId: string): Promise<Notific
     .select(NOTIFY_COLUMNS)
     .eq('import_id', importId)
     .order('created_at', { ascending: true })
-    .limit(5000);
-  return (data ?? []) as unknown as NotificationView[];
+    .limit(5000)
+    .overrideTypes<NotificationView[], { merge: false }>();
+  return data ?? [];
 }

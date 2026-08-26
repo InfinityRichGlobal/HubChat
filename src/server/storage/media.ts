@@ -97,7 +97,7 @@ export async function captureInboundMedia(input: MediaCaptureInput): Promise<Cap
 
   if (targets.length === 0) return summary;
 
-  const configured = isStorageConfigured();
+  const configured = await isStorageConfigured();
   const now = new Date();
 
   for (const target of targets) {
@@ -177,7 +177,7 @@ export async function getMediaAsset(id: string): Promise<MediaAsset | null> {
     .select('id,storage_key,mime,bytes,status,conversation_id,page_id,kind,created_at')
     .eq('id', id)
     .maybeSingle();
-  return (data as unknown as MediaAsset) ?? null;
+  return (data as MediaAsset) ?? null;
 }
 
 /**
@@ -190,7 +190,7 @@ export async function storeUploadedFile(
   kind: 'slip' | 'outbound',
   context: { conversation_id?: string | null; page_id?: string | null } = {},
 ): Promise<string> {
-  if (!isStorageConfigured()) {
+  if (!(await isStorageConfigured())) {
     throw new StorageNotConfiguredError(
       'ยังไม่ได้ตั้งค่าที่เก็บไฟล์ (Cloudflare R2) — ดูขั้นตอนที่ docs/STORAGE.md',
     );

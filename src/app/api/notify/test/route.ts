@@ -19,7 +19,7 @@ export async function POST() {
   try {
     const admin = await requireAdmin();
 
-    if (!isPushConfigured()) {
+    if (!(await isPushConfigured())) {
       return fail(
         'push_not_configured',
         'ยังไม่ได้ตั้งค่ากุญแจแจ้งเตือนบนเซิร์ฟเวอร์ (VAPID) — ดูวิธีที่ docs/NOTIFICATIONS.md',

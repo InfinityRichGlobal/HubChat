@@ -37,7 +37,7 @@ export const TRANSPORT_PRIORITY: Transport[] = ['STANDARD', 'HUMAN_AGENT', 'UTIL
 export type SendContent = {
   text?: string;
   /** รูปที่แนบ — ใช้ attachment_id ที่อัปโหลดไว้แล้วเป็นหลัก (สเปก 6.2) */
-  images?: Array<{ meta_attachment_id?: string; url?: string }>;
+  images?: Array<{ meta_attachment_id?: string; url?: string; media_id?: string }>;
   /** ใช้กับ transport ที่ต้องใช้เทมเพลตที่ได้รับอนุมัติ */
   template_name?: string;
   template_params?: Record<string, string>;
