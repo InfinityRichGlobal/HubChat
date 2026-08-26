@@ -15,7 +15,7 @@ import 'server-only';
  *    การอัปโหลดไม่ได้ทำให้ลูกค้าเห็นอะไร จึงปลอดภัยที่จะทำก่อน
  *    (ถ้า Policy บล็อกทีหลัง รูปที่อัปไว้ก็แค่ค้างอยู่ที่ Meta เฉย ๆ ไม่มีใครเห็น)
  */
-import { uploadImageForConversation, AttachmentError } from '@/server/meta/attachments';
+import { uploadImageForConversation, uploadVideoForConversation, AttachmentError } from '@/server/meta/attachments';
 import { sendMessage, type SendResult } from './send-message';
 import type { Provenance } from './provenance';
 import { storeUploadedFile } from '@/server/storage/media';
@@ -32,6 +32,8 @@ export const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'ima
  *   • กันคนเผลอลากไฟล์ผิดอันเข้ามา
  */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/webm'] as const;
+export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 
 export class ImageSendError extends Error {
   constructor(public message_th: string) {
@@ -97,6 +99,45 @@ export async function sendImage(input: SendImageInput): Promise<SendResult> {
     message_type: 'inquiry_response',
     provenance: input.provenance,
     content: { images: [{ meta_attachment_id: attachmentId, media_id: mediaId ?? undefined }] },
+    idempotency_key: input.idempotency_key ?? null,
+  });
+}
+
+export function validateVideo(file: { size: number; type: string }): string | null {
+  if (!ALLOWED_VIDEO_MIMES.includes(file.type as (typeof ALLOWED_VIDEO_MIMES)[number])) {
+    return 'รองรับวิดีโอ MP4 / MOV / WEBM';
+  }
+  if (file.size <= 0) return 'ไฟล์ว่างเปล่า';
+  if (file.size > MAX_VIDEO_BYTES) return `ไฟล์ใหญ่เกินไป (สูงสุด ${MAX_VIDEO_BYTES / 1024 / 1024} MB)`;
+  return null;
+}
+
+export async function sendVideo(input: SendImageInput): Promise<SendResult> {
+  const problem = validateVideo({ size: input.file.size, type: input.file.mime });
+  if (problem) throw new ImageSendError(problem);
+
+  let mediaId: string | null = null;
+  try {
+    mediaId = await storeUploadedFile(input.file.bytes, input.file.mime, 'outbound', {
+      conversation_id: input.conversation_id,
+    });
+  } catch (err) {
+    if (!(err instanceof StorageNotConfiguredError)) console.warn('[send-video] เก็บสำเนาวิดีโอไม่สำเร็จ:', err);
+  }
+
+  let attachmentId: string;
+  try {
+    attachmentId = await uploadVideoForConversation(input.conversation_id, input.file);
+  } catch (err) {
+    if (err instanceof AttachmentError) throw new ImageSendError(err.message_th);
+    throw err;
+  }
+
+  return sendMessage({
+    conversation_id: input.conversation_id,
+    message_type: 'inquiry_response',
+    provenance: input.provenance,
+    content: { images: [{ type: 'video', meta_attachment_id: attachmentId, media_id: mediaId ?? undefined }] },
     idempotency_key: input.idempotency_key ?? null,
   });
 }

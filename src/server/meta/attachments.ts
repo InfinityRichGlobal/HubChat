@@ -58,3 +58,19 @@ export async function uploadImageForConversation(
   }
   return uploaded.attachment_id;
 }
+
+export async function uploadVideoForConversation(
+  conversationId: string,
+  file: { bytes: ArrayBuffer; mime: string; filename: string },
+): Promise<string> {
+  const page = await pageOfConversation(conversationId);
+  const uploaded = await uploadAttachmentToMeta(page, file, 'video');
+  if (!uploaded.ok) {
+    throw new AttachmentError(
+      `อัปโหลดวิดีโอไม่สำเร็จ: ${uploaded.error.message_th}${
+        uploaded.error.fbtrace_id ? ` (fbtrace ${uploaded.error.fbtrace_id})` : ''
+      }`,
+    );
+  }
+  return uploaded.attachment_id;
+}

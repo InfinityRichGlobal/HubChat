@@ -165,10 +165,9 @@ export function shippingInfoText(f: ShippingFacts): ComposeResult {
 export type ProductFacts = {
   name: string;
   variant: string | null;
+  qty: number;
   /** ⚠️ ราคาต้องมาจากเซิร์ฟเวอร์เท่านั้น เบราว์เซอร์ห้ามคำนวณเอง */
   price: number;
-  /** โปรที่ใช้ได้อยู่ตอนนี้ — ข้อความสั้น ๆ ที่เซิร์ฟเวอร์ประกอบมาแล้ว */
-  promotion_th: string | null;
 };
 
 /** จัดรูปเงินบาทแบบที่คนไทยอ่านแล้วคุ้น */
@@ -176,15 +175,19 @@ export function baht(n: number): string {
   return `${n.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} บาท`;
 }
 
-export function productText(items: ProductFacts[]): ComposeResult {
+export function productText(
+  items: ProductFacts[],
+  options: { show_price?: boolean; promotions?: string[] } = {},
+): ComposeResult {
   if (items.length === 0) return { text: '', missing_th: ['สินค้า'] };
 
   const lines: string[] = [];
   for (const p of items) {
     const title = p.variant?.trim() ? `${p.name} (${p.variant.trim()})` : p.name;
-    lines.push(`${title} — ${baht(p.price)}`);
-    if (p.promotion_th?.trim()) lines.push(`  🎁 ${p.promotion_th.trim()}`);
+    const price = options.show_price ? ` — ${baht(p.price)}` : '';
+    lines.push(`${title}${price}*${Math.max(1, p.qty)}ชิ้น`);
   }
+  for (const promotion of options.promotions ?? []) lines.push(`🎁 ${promotion}`);
   return { text: lines.join('\n'), missing_th: [] };
 }
 

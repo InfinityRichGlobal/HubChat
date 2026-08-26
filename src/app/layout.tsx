@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import PwaRegister from '@/components/pwa-register';
+import ThemeProvider from '@/components/theme-provider';
 
 export const metadata: Metadata = {
   title: 'HubChat — รวมแชท FB + IG',
@@ -40,11 +41,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="th" className="h-full">
+    <html lang="th" className="h-full" suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
-        {children}
-        <Toaster />
-        <PwaRegister />
+        <ThemeProvider>
+          {children}
+          <Toaster />
+          <PwaRegister />
+        </ThemeProvider>
       </body>
     </html>
   );

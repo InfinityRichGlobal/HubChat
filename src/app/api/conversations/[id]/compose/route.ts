@@ -24,7 +24,15 @@ export const dynamic = 'force-dynamic';
 const schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('shipping') }),
   z.object({ kind: z.literal('order'), order_id: z.string().uuid().nullish() }),
-  z.object({ kind: z.literal('products'), product_ids: z.array(z.string().uuid()).min(1).max(10) }),
+  z.object({
+    kind: z.literal('products'),
+    items: z.array(z.object({
+      product_id: z.string().uuid(),
+      qty: z.number().int().min(1).max(99),
+    })).min(1).max(10),
+    promotion_ids: z.array(z.string().uuid()).max(10).default([]),
+    include_amount: z.boolean().default(false),
+  }),
   z.object({ kind: z.literal('canned'), template: z.string().min(1).max(4000) }),
 ]);
 
@@ -49,7 +57,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         ? await composeShippingInfo(admin, id)
         : input.kind === 'order'
           ? await composeOrderSummary(admin, id, input.order_id ?? null)
-          : await composeProducts(admin, id, input.product_ids);
+          : await composeProducts(admin, id, input.items, {
+              promotion_ids: input.promotion_ids,
+              show_price: input.include_amount,
+            });
 
     return ok({
       text: result.text,

@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { requireAdmin, requirePermission } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import {
-  createOrder, listOrders, listProducts, listPromotions, OrderAccessError,
+  createOrder, listOrders, listProducts, listPromotions, OrderAccessError, updateOrder,
 } from '@/server/orders/service';
 import { getShippingMethod, codCombinationProblem } from '@/server/orders/shipping';
 import { calculateOrder, PricingError, type PickedProduct } from '@/server/orders/pricing';
@@ -60,6 +60,7 @@ const createSchema = z.object({
   manual_total: z.number().min(0).max(10000000).optional().nullable(),
   payment_method: z.enum(['cod', 'transfer']).optional().nullable(),
   internal_note: z.string().max(2000).optional().nullable(),
+  is_paid: z.boolean().default(false),
 });
 
 export async function POST(req: NextRequest) {
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
       manual_total: body.manual_total,
     });
 
-    const order = await createOrder(admin, {
+    let order = await createOrder(admin, {
       conversation_id: body.conversation_id,
       source_message_id: body.source_message_id,
       recipient_name: body.recipient_name,
@@ -121,6 +122,10 @@ export async function POST(req: NextRequest) {
       internal_note: body.internal_note,
       shipping_method_id: body.shipping_method_id ?? null,
     });
+
+    if (body.is_paid) {
+      order = await updateOrder(admin, order.id, { payment_status: 'paid', status: 'paid' });
+    }
 
     return ok({ order, explain_th: price.explain_th }, { status: 201 });
   } catch (err) {

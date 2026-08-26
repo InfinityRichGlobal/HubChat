@@ -23,11 +23,12 @@ export function buildMessageBody(content: SendContent): Record<string, unknown> 
     return { text: content.text };
   }
   const image = content.images?.[0];
+  const type = image?.type ?? 'image';
   if (image?.meta_attachment_id) {
-    return { attachment: { type: 'image', payload: { attachment_id: image.meta_attachment_id } } };
+    return { attachment: { type, payload: { attachment_id: image.meta_attachment_id } } };
   }
   if (image?.url) {
-    return { attachment: { type: 'image', payload: { url: image.url, is_reusable: true } } };
+    return { attachment: { type, payload: { url: image.url, is_reusable: true } } };
   }
   return null;
 }

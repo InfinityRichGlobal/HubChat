@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot, ShieldCheck, Send } from 'lucide-react';
+import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot, ShieldCheck, Send, Database } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can, ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +26,11 @@ export default async function SettingsPage() {
       icon: ShieldCheck,
       title: 'ระบบ + ความลับ',
       description: 'ตั้งค่า Meta, ที่เก็บไฟล์ และแจ้งเตือน โดยไม่ต้องแก้ไฟล์บนเซิร์ฟเวอร์',
+      show: admin.role === 'owner',
+    },
+    {
+      href: '/settings/demo', icon: Database, title: 'ข้อมูลทดลอง + รีเซ็ต',
+      description: 'สร้างข้อมูลจำลองทั้งระบบเพื่อทดลองก่อนเชื่อม Facebook จริง และลบออกได้อย่างปลอดภัย',
       show: admin.role === 'owner',
     },
     {

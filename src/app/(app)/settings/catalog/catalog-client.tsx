@@ -50,6 +50,7 @@ export default function CatalogClient({
   const [productOpen, setProductOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const [editingPromo, setEditingPromo] = useState<PromotionRow | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
   const [editingShip, setEditingShip] = useState<ShippingMethod | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,8 +118,10 @@ export default function CatalogClient({
 
     setBusy(true);
     try {
-      const result = await call('/api/promotions', { method: 'POST', body: JSON.stringify(payload) }, 'เพิ่มโปรแล้ว');
-      if (result) setPromoOpen(false);
+      const result = editingPromo
+        ? await call(`/api/promotions/${editingPromo.id}`, { method: 'PATCH', body: JSON.stringify(payload) }, 'บันทึกโปรแล้ว')
+        : await call('/api/promotions', { method: 'POST', body: JSON.stringify(payload) }, 'เพิ่มโปรแล้ว');
+      if (result) { setPromoOpen(false); setEditingPromo(null); }
     } finally {
       setBusy(false);
     }
@@ -259,7 +262,7 @@ export default function CatalogClient({
               <CardDescription>ตอนสร้างออเดอร์ ระบบจะรู้เองว่าโปรนี้ต้องเลือกกี่สี</CardDescription>
             </div>
             {canManage && (
-              <Button size="sm" onClick={() => setPromoOpen(true)}>
+              <Button size="sm" onClick={() => { setEditingPromo(null); setPromoOpen(true); }}>
                 <Plus />
                 เพิ่มโปร
               </Button>
@@ -299,6 +302,9 @@ export default function CatalogClient({
                     )
                   }
                 />
+                <Button variant="ghost" size="sm" onClick={() => { setEditingPromo(p); setPromoOpen(true); }}>
+                  แก้
+                </Button>
                 <Button variant="ghost" size="sm" aria-label="เก็บเข้ากรุ"
                   onClick={() => void archive('promotions', p.id, p.name)}>
                   <Archive />
@@ -436,11 +442,11 @@ export default function CatalogClient({
       </Dialog>
 
       {/* ------------------ กล่องโปร ------------------ */}
-      <Dialog open={promoOpen} onOpenChange={setPromoOpen}>
+      <Dialog open={promoOpen} onOpenChange={(open) => { setPromoOpen(open); if (!open) setEditingPromo(null); }}>
         <DialogContent>
-          <form onSubmit={submitPromo}>
+          <form key={editingPromo?.id ?? 'new'} onSubmit={submitPromo}>
             <DialogHeader>
-              <DialogTitle>เพิ่มโปรโมชัน</DialogTitle>
+              <DialogTitle>{editingPromo ? 'แก้โปรโมชัน' : 'เพิ่มโปรโมชัน'}</DialogTitle>
               <DialogDescription>
                 เว้นช่อง &quot;ราคาเหมา&quot; ไว้ = คิดตามราคารายชิ้น
               </DialogDescription>
@@ -449,12 +455,12 @@ export default function CatalogClient({
             <div className="flex flex-col gap-3 py-4">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="promo_name">ชื่อโปร</Label>
-                <Input id="promo_name" name="name" required placeholder="โปร 2 ชิ้น" />
+                <Input id="promo_name" name="name" required defaultValue={editingPromo?.name ?? ''} placeholder="โปร 2 ชิ้น" />
               </div>
 
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="promo_type">แบบ</Label>
-                <Select name="type" defaultValue="bundle">
+                <Select name="type" defaultValue={editingPromo?.type ?? 'bundle'}>
                   <SelectTrigger id="promo_type"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(Object.keys(PROMO_LABEL) as PromotionType[]).map((t) => (
@@ -467,16 +473,16 @@ export default function CatalogClient({
               <div className="flex gap-2">
                 <div className="flex flex-1 flex-col gap-1.5">
                   <Label htmlFor="pick">เลือกกี่ชิ้น</Label>
-                  <Input id="pick" name="pick" type="number" min={1} defaultValue={2} required />
+                  <Input id="pick" name="pick" type="number" min={1} defaultValue={editingPromo?.config.pick ?? 2} required />
                 </div>
                 <div className="flex flex-1 flex-col gap-1.5">
                   <Label htmlFor="pay">จ่ายกี่ชิ้น</Label>
-                  <Input id="pay" name="pay" type="number" min={1} defaultValue={2} />
+                  <Input id="pay" name="pay" type="number" min={1} defaultValue={editingPromo?.config.pay ?? 2} />
                   <p className="text-[10px] text-muted-foreground">ใช้เฉพาะแบบ &quot;ซื้อ X แถม Y&quot;</p>
                 </div>
                 <div className="flex flex-1 flex-col gap-1.5">
                   <Label htmlFor="promo_price">ราคาเหมา</Label>
-                  <Input id="promo_price" name="price" type="number" min={0} placeholder="เว้นว่างได้" />
+                  <Input id="promo_price" name="price" type="number" min={0} defaultValue={editingPromo?.price ?? ''} placeholder="เว้นว่างได้" />
                 </div>
               </div>
             </div>

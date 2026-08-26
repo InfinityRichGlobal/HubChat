@@ -304,7 +304,7 @@ export async function sendMessage(req: SendRequest, options: SendOptions = {}): 
         sender_type: prov.human_authored ? 'admin' : 'bot',
         text: ctx.content.text ?? null,
         attachments: (ctx.content.images ?? []).map((img) => ({
-          type: 'image',
+          type: img.type ?? 'image',
           url: img.url,
           meta_attachment_id: img.meta_attachment_id,
           media_id: img.media_id,

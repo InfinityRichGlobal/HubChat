@@ -187,7 +187,7 @@ export async function getMediaAsset(id: string): Promise<MediaAsset | null> {
 export async function storeUploadedFile(
   bytes: ArrayBuffer,
   mime: string,
-  kind: 'slip' | 'outbound',
+  kind: 'slip' | 'outbound' | 'library',
   context: { conversation_id?: string | null; page_id?: string | null } = {},
 ): Promise<string> {
   if (!(await isStorageConfigured())) {

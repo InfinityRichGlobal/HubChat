@@ -33,6 +33,8 @@ export const SETTING_DEFINITIONS = [
   { key: 'VAPID_PUBLIC_KEY', label_th: 'VAPID Public Key', group: 'Notifications', kind: 'general', schema: text },
   { key: 'VAPID_SUBJECT', label_th: 'VAPID Subject', group: 'Notifications', kind: 'general', schema: z.string().trim().refine((v) => v.startsWith('mailto:') || v.startsWith('https://')) },
   { key: 'APP_BASE_URL', label_th: 'App Base URL', group: 'Application', kind: 'general', schema: url },
+  { key: 'APP_DISPLAY_NAME', label_th: 'ชื่อที่แสดงบนเว็บไซต์', group: 'Application', kind: 'general', schema: z.string().trim().min(1).max(80) },
+  { key: 'APP_LOGO_URL', label_th: 'ลิงก์โลโก้เว็บไซต์', group: 'Application', kind: 'general', schema: url },
   { key: 'WORKER_INTERVAL_MS', label_th: 'Webhook worker interval (ms)', group: 'Application', kind: 'general', schema: positiveInt },
   { key: 'NOTIFY_INTERVAL_MS', label_th: 'Notification worker interval (ms)', group: 'Notifications', kind: 'general', schema: positiveInt },
 ] as const satisfies readonly SettingDefinition[];

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, Loader2, Lock, MapPin,
+  AlertCircle, ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, Images, Loader2, Lock, MapPin,
   MessageSquareOff, Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShoppingCart, User,
-  Tag as TagIcon, X,
+  Tag as TagIcon, Video, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
 import CustomerDrawer from './customer-drawer';
@@ -174,6 +174,8 @@ async function copyText(text: string): Promise<boolean> {
  */
 const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/webm'];
+const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 
 type PolicyStatus = {
   can_send: boolean;
@@ -561,6 +563,11 @@ function ConversationItem({
           <div className="flex items-baseline gap-2">
             <span className={cn('truncate text-sm', !c.is_read && 'font-semibold')}>
               {displayName(c)}
+              {c.order_count > 0 && (
+                <span className="ml-1 inline-flex size-4 items-center justify-center rounded-full bg-red-600 align-middle text-[9px] font-bold text-white" title={`${c.order_count} ออเดอร์`}>
+                  {c.order_count > 99 ? '99+' : c.order_count}
+                </span>
+              )}
             </span>
             <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
           </div>
@@ -665,14 +672,19 @@ function ChatRoom({
   const [mediaOrder, setMediaOrder] = useState<{ mediaId: string } | null>(null);
   /** รูปที่เลือกไว้แต่ยังไม่ได้ส่ง — ต้องกดส่งเองเสมอ */
   const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
+  const [pendingVideo, setPendingVideo] = useState<{ file: File; preview: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLInputElement>(null);
   const [canned, setCanned] = useState<CannedResponse[]>([]);
+  const [browseCanned, setBrowseCanned] = useState(false);
+  /** รูปของชุดคำตอบ — กดส่งแล้วระบบส่งรูปให้ครบก่อน จึงค่อยส่งข้อความ */
+  const [cannedImages, setCannedImages] = useState<Array<{ url: string; name?: string }>>([]);
   /** กด Escape เพื่อซ่อนรายการชุดคำตอบชั่วคราวโดยไม่ต้องลบข้อความที่พิมพ์ไว้ */
   const [dismissedCanned, setDismissedCanned] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   /** true = ให้จอเด้งลงล่างเมื่อมีข้อความใหม่ (ใช้ ref เพราะ effect ต้องอ่านค่าล่าสุด) */
   const stickBottomRef = useRef(true);
   /** ความสูงเดิมก่อนแทรกของเก่า — ใช้ดึงจอกลับที่เดิมหลังแทรก */
@@ -892,11 +904,11 @@ function ChatRoom({
   const slashQuery = text.startsWith('/') ? text.slice(1).trim() : null;
 
   useEffect(() => {
-    if (slashQuery === null) return;
+    if (slashQuery === null && !browseCanned) return;
     let alive = true;
     const timer = setTimeout(() => {
       void apiCall<{ items: CannedResponse[] }>(
-        `/api/canned?q=${encodeURIComponent(slashQuery)}`,
+        `/api/canned?q=${encodeURIComponent(slashQuery ?? '')}`,
       ).then((d) => {
         if (alive && d) setCanned(d.items.slice(0, 8));
       });
@@ -905,11 +917,11 @@ function ChatRoom({
       alive = false;
       clearTimeout(timer);
     };
-  }, [slashQuery]);
+  }, [slashQuery, browseCanned]);
 
   // ⚠️ คำนวณจาก state แทนการล้าง state ในตัว effect
   //    (ล้างใน effect จะทำให้ React เรนเดอร์ซ้อนกันเป็นทอด ๆ)
-  const cannedVisible = slashQuery === null || dismissedCanned ? [] : canned;
+  const cannedVisible = (slashQuery === null && !browseCanned) || dismissedCanned ? [] : canned;
 
   /** หยิบชุดคำตอบมาวางในช่องพิมพ์ — ⚠️ ไม่ได้ส่งออกไป แอดมินต้องกดส่งเอง */
   /**
@@ -925,6 +937,14 @@ function ChatRoom({
   async function applyCanned(item: CannedResponse) {
     const template = item.text ?? '';
     setDismissedCanned(false);
+    setBrowseCanned(false);
+    const images = item.images.flatMap((image, index) => image.url
+      ? [{ url: image.url, name: image.name ?? `รูป ${index + 1}` }]
+      : []);
+    setCannedImages(images);
+    if (images.length === 0) {
+      toast.error('ชุดคำตอบนี้ยังไม่มีรูป จึงยังส่งไม่ได้', { description: 'เพิ่มรูปอย่างน้อย 1 รูปที่หน้าชุดคำตอบก่อน' });
+    }
     void apiCall(`/api/canned/${item.id}`, { method: 'POST' });
 
     if (!template.includes('{{')) {
@@ -992,6 +1012,56 @@ function ChatRoom({
     if (fileRef.current) fileRef.current.value = '';
   }
 
+  function pickVideo(file: File | null) {
+    if (!file) return;
+    if (!ALLOWED_VIDEO_MIMES.includes(file.type)) {
+      toast.error('รองรับวิดีโอ MP4 / MOV / WEBM');
+      return;
+    }
+    if (file.size > MAX_VIDEO_BYTES) {
+      toast.error(`ไฟล์ใหญ่เกินไป (สูงสุด ${MAX_VIDEO_BYTES / 1024 / 1024} MB)`);
+      return;
+    }
+    setPendingVideo((prev) => {
+      if (prev) URL.revokeObjectURL(prev.preview);
+      return { file, preview: URL.createObjectURL(file) };
+    });
+  }
+
+  function clearVideo() {
+    setPendingVideo((prev) => {
+      if (prev) URL.revokeObjectURL(prev.preview);
+      return null;
+    });
+    if (videoRef.current) videoRef.current.value = '';
+  }
+
+  async function sendVideo() {
+    const pending = pendingVideo;
+    if (!pending || uploading) return;
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append('file', pending.file);
+      body.append('idempotency_key', idempotencyKey.current);
+      const res = await fetch(`/api/conversations/${c.id}/reply-video`, { method: 'POST', body });
+      const json = await res.json();
+      if (!res.ok || !json.ok || !json.data?.sent) {
+        toast.error(json?.error?.message_th ?? json?.data?.reason_th ?? 'ส่งวิดีโอไม่สำเร็จ');
+        return;
+      }
+      clearVideo();
+      idempotencyKey.current = newIdempotencyKey();
+      stickBottomRef.current = true;
+      await loadMessages();
+      onChanged();
+    } catch (err) {
+      toast.error('ส่งวิดีโอไม่สำเร็จ', { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setUploading(false);
+    }
+  }
+
   /**
    * ส่งรูป — เดินเส้นทางเดียวกับข้อความทุกประการ
    * 🔴 ไม่มีการยิง Meta ตรงจากหน้านี้ ทุกอย่างผ่าน API route → Policy Engine
@@ -1047,9 +1117,36 @@ function ChatRoom({
 
   async function send() {
     const body = text.trim();
-    if (!body || sending) return;
+    if ((!body && cannedImages.length === 0) || sending) return;
     setSending(true);
     try {
+      // ชุดคำตอบต้องมีรูปไปถึงลูกค้าก่อนข้อความเสมอ ถ้ารูปใดส่งไม่สำเร็จจะหยุดทันที
+      for (let index = 0; index < cannedImages.length; index += 1) {
+        const image = cannedImages[index];
+        const mediaRes = await fetch(`/api/conversations/${c.id}/reply-image-url`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: image.url,
+            idempotency_key: `${idempotencyKey.current}-image-${index + 1}`,
+          }),
+        });
+        const mediaJson = await mediaRes.json();
+        if (!mediaRes.ok || !mediaJson.ok || !mediaJson.data?.sent) {
+          toast.error(mediaJson?.error?.message_th ?? mediaJson?.data?.reason_th ?? 'ส่งรูปของชุดคำตอบไม่สำเร็จ');
+          return;
+        }
+      }
+
+      if (!body) {
+        setCannedImages([]);
+        idempotencyKey.current = newIdempotencyKey();
+        stickBottomRef.current = true;
+        await loadMessages();
+        onChanged();
+        return;
+      }
+
       const res = await fetch(`/api/conversations/${c.id}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1076,6 +1173,7 @@ function ChatRoom({
 
       if (d.sent) {
         setText('');
+        setCannedImages([]);
         setReplyTarget(null);
         idempotencyKey.current = newIdempotencyKey(); // กุญแจใหม่สำหรับข้อความถัดไป
         // ⭐ ส่งเองแล้วต้องเห็นของตัวเองทันที ถึงจะเลื่อนขึ้นไปอ่านของเก่าค้างอยู่ก็ตาม
@@ -1123,6 +1221,11 @@ function ChatRoom({
               aria-hidden="true"
             />
             <span className="truncate text-sm font-medium">{displayName(c)}</span>
+            {c.order_count > 0 && (
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white" title={`ลูกค้ารายนี้มี ${c.order_count} ออเดอร์`}>
+                {c.order_count > 99 ? '99+' : c.order_count}
+              </span>
+            )}
             {/**
               * ⭐ ยังไม่รู้ชื่อจริง → บอกเหตุผล + ให้กดลองใหม่ได้ตรงนี้เลย (D-33)
               *    เดิมแอดมินเห็นแค่ "ลูกค้า xxxxxx" แล้วไม่มีทางรู้ว่าทำไม
@@ -1185,20 +1288,21 @@ function ChatRoom({
             </Button>
           </>
         )}
-        {policy && (
+        {policy && !policy.can_send && (
           /**
            * 🔴 ป้ายนี้ต้อง "สั้นเสมอ" และ shrink-0 + whitespace-nowrap
            *    เดิมใช้ label_th ซึ่งตอนส่งไม่ได้เป็นประโยคเต็ม
            *    ทำให้แถวหัวห้องถูกดันจนรูป/ชื่อ/ปุ่มเบียดกันจนใช้ไม่ได้บนมือถือ
            *    เหตุผลเต็มย้ายไปอยู่ใต้ช่องพิมพ์ ซึ่งมีที่ให้อ่านจริง ๆ
            */
-          <Badge
-            variant={policy.can_send ? 'outline' : 'destructive'}
-            className="shrink-0 whitespace-nowrap"
-            title={policy.detail_th ?? policy.label_th}
+          <button
+            type="button"
+            aria-label={policy.detail_th ?? policy.label_th}
+            title={`${policy.detail_th ?? policy.label_th}${policy.alternatives_th.length ? `\nทำได้: ${policy.alternatives_th.join(' · ')}` : ''}`}
+            className="shrink-0 rounded-full p-1.5 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {policy.badge_th ?? policy.label_th}
-          </Badge>
+            <AlertCircle className="size-5" />
+          </button>
         )}
       </div>
 
@@ -1308,15 +1412,20 @@ function ChatRoom({
                 key={item.id}
                 type="button"
                 onClick={() => void applyCanned(item)}
-                className="flex w-full flex-col gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-accent"
+                className="flex w-full gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-accent"
               >
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  {item.title}
-                  {item.shortcut && (
-                    <Badge variant="secondary" className="font-mono text-[10px]">/{item.shortcut}</Badge>
-                  )}
+                {item.images[0]?.url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.images[0].url} alt="" className="size-12 shrink-0 rounded-md border object-cover" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    {item.title}
+                    {item.shortcut && <Badge variant="secondary" className="font-mono text-[10px]">/{item.shortcut}</Badge>}
+                  </span>
+                  <span className="line-clamp-2 text-xs text-muted-foreground">{item.text}</span>
+                  <span className="text-[10px] text-muted-foreground">{item.images.length} รูป</span>
                 </span>
-                <span className="line-clamp-2 text-xs text-muted-foreground">{item.text}</span>
               </button>
             ))}
           </div>
@@ -1375,6 +1484,36 @@ function ChatRoom({
           </div>
         )}
 
+        {canReply && cannedImages.length > 0 && (
+          <div className="mb-2 rounded-md border p-2">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <p className="text-xs font-medium">รูปจากชุดคำตอบ ({cannedImages.length})</p>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setCannedImages([])}>เอาออกทั้งหมด</Button>
+            </div>
+            <div className="flex gap-2 overflow-x-auto">
+              {cannedImages.map((image, index) => (
+                <div key={`${image.url}-${index}`} className="relative shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={image.url} alt={image.name ?? 'รูปชุดคำตอบ'} className="size-20 rounded-md border object-cover" />
+                  <button type="button" className="absolute -right-1 -top-1 rounded-full bg-background p-0.5 shadow" aria-label="เอารูปออก" onClick={() => setCannedImages((prev) => prev.filter((_, i) => i !== index))}><X className="size-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {canReply && pendingVideo && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border p-2">
+            <video src={pendingVideo.preview} controls className="h-24 w-36 shrink-0 rounded bg-black object-contain" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium">{pendingVideo.file.name}</p>
+              <p className="text-[11px] text-muted-foreground">{(pendingVideo.file.size / 1024 / 1024).toFixed(2)} MB</p>
+            </div>
+            <Button size="sm" onClick={() => void sendVideo()} disabled={uploading}>{uploading ? <Loader2 className="animate-spin" /> : <Send />} ส่งวิดีโอ</Button>
+            <Button size="icon" variant="ghost" aria-label="เอาวิดีโอออก" onClick={clearVideo} disabled={uploading}><X /></Button>
+          </div>
+        )}
+
         {!canReply ? (
           <p className="py-2 text-center text-xs text-muted-foreground">
             บัญชีของคุณดูได้อย่างเดียว ตอบแชทไม่ได้
@@ -1389,6 +1528,13 @@ function ChatRoom({
               className="hidden"
               onChange={(e) => pickImage(e.target.files?.[0] ?? null)}
             />
+            <input
+              ref={videoRef}
+              type="file"
+              accept={ALLOWED_VIDEO_MIMES.join(',')}
+              className="hidden"
+              onChange={(event) => pickVideo(event.target.files?.[0] ?? null)}
+            />
             <Button
               variant="ghost"
               size="icon"
@@ -1398,7 +1544,27 @@ function ChatRoom({
             >
               <Paperclip />
             </Button>
-            <Input
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="แนบวิดีโอ"
+              title="แนบวิดีโอ"
+              disabled={sending || uploading}
+              onClick={() => videoRef.current?.click()}
+            >
+              <Video />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="ดูชุดคำตอบทั้งหมด"
+              title="ดูชุดคำตอบทั้งหมด"
+              disabled={sending || uploading}
+              onClick={() => { setBrowseCanned((open) => !open); setDismissedCanned(false); }}
+            >
+              <Images />
+            </Button>
+            <textarea
               ref={inputRef}
               value={text}
               onChange={(e) => {
@@ -1417,8 +1583,10 @@ function ChatRoom({
                 }
                 if (e.key === 'Escape') setDismissedCanned(true);
               }}
-              placeholder="พิมพ์ข้อความ… (พิมพ์ / เพื่อค้นชุดคำตอบ)"
+              rows={2}
+              placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ · / ค้นชุดคำตอบ)"
               disabled={sending}
+              className="min-h-11 max-h-36 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border bg-transparent px-3 py-2 text-base leading-6 outline-none shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
             />
             {/* ⭐ ปุ่มส่งปุ่มเดียว — ไม่มีตัวเลือกช่องทางให้แอดมินกดเลย */}
             {/* ⭐ ใส่สินค้า (ข้อ 1.10) — วางลงช่องพิมพ์ ไม่ส่งเอง */}
@@ -1431,7 +1599,7 @@ function ChatRoom({
             >
               <Package />
             </Button>
-            <Button onClick={() => void send()} disabled={sending || text.trim().length === 0}>
+            <Button onClick={() => void send()} disabled={sending || (text.trim().length === 0 && cannedImages.length === 0)}>
               {sending ? <Loader2 className="animate-spin" /> : <Send />}
               ส่ง
             </Button>
@@ -1443,19 +1611,6 @@ function ChatRoom({
           *    เพราะเป็นจังหวะที่แอดมินกำลังจะพิมพ์พอดี = ต้องการคำอธิบายตอนนี้
           *    และตรงนี้มีความกว้างเต็มบรรทัดให้ข้อความยาวได้โดยไม่ดันอะไรพัง
           */}
-        {policy && !policy.can_send && (
-          <div className="mt-2 rounded-md border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-2.5 py-2">
-            <p className="flex items-start gap-1.5 text-xs text-[var(--destructive)]">
-              <X className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0">{policy.detail_th ?? policy.label_th}</span>
-            </p>
-            {policy.alternatives_th.length > 0 && (
-              <p className="mt-1 pl-5 text-[11px] text-muted-foreground">
-                ทำได้ : {policy.alternatives_th.join(' · ')}
-              </p>
-            )}
-          </div>
-        )}
       </div>
 
       {/* ---------- แผงข้อมูลลูกค้า (ข้อ 1.6 / 1.11) ---------- */}
@@ -1694,6 +1849,14 @@ function MessageBubble({
                     ? '🖼️ เปิดรูปไม่ได้ ลองรีเฟรชหน้าอีกครั้ง'
                     : '🖼️ รูปหมดอายุแล้ว (ยังไม่ได้ตั้งค่าที่เก็บไฟล์) — เปิดดูใน Messenger แทน'}
                 </span>
+              </span>
+            );
+          }
+
+          if (a.type === 'video' && src) {
+            return (
+              <span key={i} className="mt-1 block" onClick={(event) => event.stopPropagation()}>
+                <video src={src} controls preload="metadata" className="max-h-72 w-full rounded-lg bg-black" />
               </span>
             );
           }

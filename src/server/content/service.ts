@@ -10,6 +10,7 @@ import 'server-only';
  *     เพราะนั่นคือครั้งแรกที่ระบบส่งข้อความเองโดยไม่มีคนกด)
  */
 import { db } from '@/lib/supabase/admin';
+import type { ImageRef } from '@/types/db';
 
 /* ------------------------------------------------------------------------ */
 /* ชุดคำตอบ                                                                   */
@@ -21,11 +22,12 @@ export type CannedResponse = {
   title: string;
   shortcut: string | null;
   text: string | null;
+  images: ImageRef[];
   use_count: number;
   sort_order: number;
 };
 
-const CANNED_COLUMNS = 'id,category,title,shortcut,text,use_count,sort_order';
+const CANNED_COLUMNS = 'id,category,title,shortcut,text,images,use_count,sort_order';
 
 export class ContentConflictError extends Error {}
 
@@ -56,6 +58,7 @@ export type CannedInput = {
   shortcut?: string | null;
   category?: string | null;
   text?: string | null;
+  images?: ImageRef[];
   sort_order?: number;
 };
 
@@ -67,6 +70,7 @@ export async function createCanned(input: CannedInput): Promise<CannedResponse> 
       shortcut: input.shortcut?.trim() || null,
       category: input.category?.trim() || null,
       text: input.text ?? null,
+      images: input.images ?? [],
       sort_order: input.sort_order ?? 0,
     })
     .select(CANNED_COLUMNS)
@@ -85,6 +89,7 @@ export async function updateCanned(id: string, input: Partial<CannedInput>): Pro
   if (input.shortcut !== undefined) patch.shortcut = input.shortcut?.trim() || null;
   if (input.category !== undefined) patch.category = input.category?.trim() || null;
   if (input.text !== undefined) patch.text = input.text;
+  if (input.images !== undefined) patch.images = input.images;
   if (input.sort_order !== undefined) patch.sort_order = input.sort_order;
   if (Object.keys(patch).length === 0) return null;
 

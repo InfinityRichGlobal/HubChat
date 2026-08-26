@@ -27,6 +27,11 @@ const createSchema = z.object({
   shortcut: z.string().trim().max(40).optional().nullable(),
   category: z.string().trim().max(60).optional().nullable(),
   text: z.string().max(2000).optional().nullable(),
+  images: z.array(z.object({
+    url: z.string().url('ลิงก์รูปไม่ถูกต้อง'),
+    name: z.string().max(160).optional(),
+    mime: z.string().max(80).optional(),
+  })).min(1, 'ชุดคำตอบต้องมีรูปอย่างน้อย 1 รูป').max(10),
   sort_order: z.number().int().optional(),
 });
 

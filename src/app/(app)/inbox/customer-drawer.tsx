@@ -56,11 +56,21 @@ type Workspace = {
 };
 
 const STATUS_TH: Record<string, string> = {
-  draft: 'ร่าง', confirmed: 'ยืนยันแล้ว', packed: 'แพ็กแล้ว',
-  shipped: 'ส่งแล้ว', delivered: 'ถึงแล้ว', cancelled: 'ยกเลิก',
+  draft: 'ร่าง', confirmed: 'ยืนยันแล้ว', paid: 'จ่ายแล้ว', packed: 'แพ็กแล้ว',
+  shipped: 'ส่งแล้ว', completed: 'สำเร็จ', cancelled: 'ยกเลิก', returned: 'ตีกลับ',
 };
 const PAYMENT_TH: Record<string, string> = {
-  unpaid: 'ยังไม่จ่าย', paid: 'จ่ายแล้ว', refunded: 'คืนเงินแล้ว',
+  unpaid: 'ยังไม่จ่าย', deposit: 'มัดจำแล้ว', paid: 'จ่ายแล้ว',
+};
+const STATUS_CLASS: Record<string, string> = {
+  draft: 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  confirmed: 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300',
+  paid: 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  packed: 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300',
+  shipped: 'border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950 dark:text-cyan-300',
+  completed: 'border-green-300 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300',
+  cancelled: 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300',
+  returned: 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300',
 };
 
 function money(n: number): string {
@@ -275,7 +285,7 @@ export default function CustomerDrawer({
                 <div key={o.id} className="rounded-lg border p-2.5">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs font-medium">{o.order_no}</span>
-                    <Badge variant={o.status === 'cancelled' ? 'secondary' : 'outline'} className="text-[10px]">
+                    <Badge variant="outline" className={cn('text-[10px]', STATUS_CLASS[o.status])}>
                       {STATUS_TH[o.status] ?? o.status}
                     </Badge>
                     <span className="ml-auto text-sm font-medium">{money(o.total)} บาท</span>

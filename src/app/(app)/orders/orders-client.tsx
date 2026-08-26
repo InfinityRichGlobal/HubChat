@@ -45,6 +45,23 @@ const PAYMENT_LABEL: Record<PaymentStatus, string> = {
   paid: 'จ่ายครบ',
 };
 
+const STATUS_COLOR: Record<OrderStatus, string> = {
+  draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  confirmed: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+  paid: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+  packed: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300',
+  shipped: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300',
+  completed: 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300',
+  cancelled: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300',
+  returned: 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300',
+};
+
+const PAYMENT_COLOR: Record<PaymentStatus, string> = {
+  unpaid: 'border-red-300 text-red-700 dark:border-red-800 dark:text-red-300',
+  deposit: 'border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300',
+  paid: 'border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300',
+};
+
 const baht = (n: number) => `฿${Number(n).toLocaleString('th-TH')}`;
 
 function dayTh(iso: string) {
@@ -221,10 +238,10 @@ export default function OrdersClient({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-sm font-medium">{o.order_no}</span>
-                    <Badge variant={o.status === 'cancelled' ? 'destructive' : 'secondary'} className="text-[10px]">
+                    <Badge variant="secondary" className={cn('text-[10px]', STATUS_COLOR[o.status])}>
                       {STATUS_LABEL[o.status]}
                     </Badge>
-                    <Badge variant="outline" className="text-[10px]">{PAYMENT_LABEL[o.payment_status]}</Badge>
+                    <Badge variant="outline" className={cn('text-[10px]', PAYMENT_COLOR[o.payment_status])}>{PAYMENT_LABEL[o.payment_status]}</Badge>
                     {page && (
                       <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                         <span className="size-1.5 rounded-full" style={{ backgroundColor: page.tag_color }} />

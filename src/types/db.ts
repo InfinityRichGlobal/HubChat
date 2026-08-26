@@ -37,6 +37,9 @@ export type DevicePlatform = 'ios' | 'android' | 'desktop';
 
 /* ------------------------ โครงย่อยใน jsonb ------------------------ */
 export type ImageRef = {
+  media_id?: string;
+  name?: string;
+  mime?: string;
   r2_key?: string;
   drive_file_id?: string;
   meta_attachment_id?: string;

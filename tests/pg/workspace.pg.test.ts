@@ -249,7 +249,7 @@ describe.skipIf(!available)('PostgreSQL จริง — พื้นที่�
         `insert into products (id,name,variant,price,is_active) values ($1,'เสื้อยืด','ดำ',590,true)`,
         [pid],
       );
-      const r = await composeProducts(OWNER, ids.convA, [pid]);
+      const r = await composeProducts(OWNER, ids.convA, [{ product_id: pid, qty: 1 }], { show_price: true });
       expect(r.text).toContain('เสื้อยืด (ดำ)');
       expect(r.text).toContain('590 บาท');
     });
@@ -260,7 +260,7 @@ describe.skipIf(!available)('PostgreSQL จริง — พื้นที่�
         `insert into products (id,name,variant,price,is_active) values ($1,'ของเลิกขาย',null,100,false)`,
         [pid],
       );
-      const r = await composeProducts(OWNER, ids.convA, [pid]);
+      const r = await composeProducts(OWNER, ids.convA, [{ product_id: pid, qty: 1 }]);
       expect(r.missing_th).toContain('สินค้า');
     });
   });
