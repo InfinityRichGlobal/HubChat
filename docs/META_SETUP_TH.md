@@ -110,13 +110,22 @@ META_APP_SECRET=ค่าที่คัดลอกมา
 | `pages_read_engagement` | อ่านข้อมูลเพจและคอมเมนต์ |
 | `pages_show_list` | มองเห็นรายชื่อเพจ |
 | `instagram_basic` | ข้อมูลพื้นฐานของ IG |
-| `instagram_manage_messages` | ส่ง/รับข้อความ IG |
-| `business_management` | จัดการทรัพย์สินใน Business Manager |
+| `instagram_manage_messages` | ส่ง/รับข้อความ IG และย้ายผู้ติดต่อ IG ไปสแปม |
+| `business_management` | จัดการทรัพย์สินใน Business Manager และใช้คำสั่งดูแลบทสนทนา |
 
 > 🟡 **สิทธิ์ `Human Agent` ต้องยื่น App Review แยกต่างหาก**
 > สเปกบอกว่าให้ยื่นตั้งแต่สัปดาห์แรก เพราะรออนุมัตินาน
 > **แต่ยังไม่ต้องรอให้อนุมัติก่อนถึงจะเริ่มใช้ระบบได้** —
 > ระบบตั้งค่าเริ่มต้นไว้ว่าช่องทางนี้ **ปิด** อยู่ จนกว่าคุณจะยืนยันว่าได้รับอนุมัติจริง
+
+### กลุ่มแชทใดซิงก์กับ Business Suite จริง
+
+- **สแปม** — เมื่อกดจาก HubChat ระบบเรียก Moderate Conversations API ก่อน และจะบันทึกใน HubChat ต่อเมื่อ Meta ตอบว่าสำเร็จ
+- **สำคัญ / ติดตามผล / เรียบร้อย / กำหนดแล้ว / กลุ่ม AI** — เป็นกลุ่มงานของ HubChat เพราะ Meta ยังไม่มี API สาธารณะให้แอปภายนอกแก้สถานะภายใน Business Suite เหล่านี้โดยตรง
+- Meta ยังไม่มีคำสั่งสาธารณะสำหรับ **ย้ายออกจากสแปม** แอปจึงจะแจ้งให้คืนแชทใน Business Suite ก่อน แล้วกดปุ่มยืนยันใน HubChat แทนการแสดงผลว่าสำเร็จทั้งที่ไม่ได้ซิงก์
+
+> สำหรับร้านที่ใช้ Instagram กับผู้ใช้จริงนอกทีมทดสอบ ต้องขอ Advanced Access ให้
+> `instagram_manage_messages`, `instagram_basic` และ `business_management` ใน App Review ด้วย
 
 ---
 

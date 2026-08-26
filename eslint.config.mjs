@@ -37,6 +37,9 @@ const eslintConfig = defineConfig([
       // งานระดับลูกค้า (ดึงชื่อ/รูปใหม่) ต้องอ่านโปรไฟล์จาก Meta ได้
       // แต่ห้ามส่งข้อความ — มีกฎเฉพาะของมันอยู่ในบล็อกถัดไป
       "src/server/customers/**",
+      // สถานะสแปมใช้ Moderate Conversations API (ไม่ใช่ Send API)
+      // และต้องถูกเรียกหลังตรวจ session/สิทธิ์ห้องแชทแล้วเท่านั้น
+      "src/server/inbox/state.ts",
       "src/**/__tests__/**",
     ],
     rules: {
@@ -87,6 +90,7 @@ const eslintConfig = defineConfig([
       "src/server/pages/**/*.ts",
       "src/server/comments/**/*.ts",
       "src/server/customers/**/*.ts",
+      "src/server/inbox/state.ts",
     ],
     ignores: ["src/**/__tests__/**"],
     rules: {

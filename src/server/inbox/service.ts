@@ -24,7 +24,7 @@ export const LOCK_STALE_SECONDS = 180;
 
 export const INBOX_SELECTS = {
   pages: 'id,platform,page_name,display_name,tag_color',
-  conversations: 'id,customer_id,page_id,last_message_at,last_message_preview,last_customer_message_at,is_read,locked_by_admin_id,locked_at,referral_source,referral_ad_id,referral_ref',
+  conversations: 'id,customer_id,page_id,last_message_at,last_message_preview,last_customer_message_at,is_read,assigned_admin_id,locked_by_admin_id,locked_at,referral_source,referral_ad_id,referral_ref,inbox_status,is_important,meta_spam_synced_at,has_ai_reply,has_ai_handoff',
   customers: 'id,name,username,profile_pic_url,psid,phone,profile_error_th',
   messages: 'id,direction,sender_type,admin_id,text,attachments,sent_with_human_agent_tag,created_at,reply_to_message_id,reply_native',
 } as const;
@@ -55,6 +55,14 @@ export type ConversationRow = {
   last_message_preview: string | null;
   last_customer_message_at: string | null;
   is_read: boolean;
+  inbox_status: 'active' | 'done' | 'spam';
+  is_important: boolean;
+  /** สแปมถูกส่งไป Meta สำเร็จเมื่อใด — null = เป็นเพียงสถานะใน HubChat */
+  meta_spam_synced_at: string | null;
+  assigned_admin_id: string | null;
+  assigned_admin_name: string | null;
+  has_ai_reply: boolean;
+  has_ai_handoff: boolean;
   referral_source: ReferralSource | null;
   referral_ad_id: string | null;
   referral_ref: string | null;
@@ -66,6 +74,19 @@ export type ConversationRow = {
   /** จำนวนออเดอร์ทั้งหมดของลูกค้ารายนี้ (รวมร่าง/ยกเลิก เพื่อใช้ระบุตัวตนและค้นประวัติ) */
   order_count: number;
 };
+
+export type InboxGroup =
+  | 'all'
+  | 'facebook'
+  | 'instagram'
+  | 'ai_handoff'
+  | 'ai_reply'
+  | 'important'
+  | 'unread'
+  | 'follow_up'
+  | 'done'
+  | 'spam'
+  | 'assigned';
 
 export type MessageRow = {
   id: string;
@@ -98,7 +119,11 @@ export type MessageRow = {
 export type ListFilters = {
   page_ids?: string[];
   search?: string;
+  group?: InboxGroup;
+  /** รองรับผู้เรียกเดิมระหว่างเปลี่ยนมาใช้ group */
   unread_only?: boolean;
+  /** รองรับผู้เรียกเดิมระหว่างเปลี่ยนมาใช้ group */
+  follow_up_only?: boolean;
   /** กรองเฉพาะห้องที่ติดแท็กใดแท็กหนึ่งในรายการนี้ */
   tag_ids?: string[];
   limit?: number;
@@ -157,6 +182,34 @@ async function adminNames(ids: string[]): Promise<Map<string, string>> {
   return new Map(((data ?? []) as Array<{ id: string; name: string }>).map((a) => [a.id, a.name]));
 }
 
+/**
+ * ลูกค้าที่มีออเดอร์ในเพจที่แอดมินมองเห็น
+ *
+ * อ่านเป็นหน้า ๆ เพราะ Data API อาจจำกัดจำนวนแถวต่อคำขอ ถ้าดึงครั้งเดียวแล้ว
+ * ถูกตัดที่ 1,000 แถว ห้องเก่าจะหายจากกลุ่มติดตามผลโดยไม่มีคำเตือน
+ */
+async function customerIdsWithOrders(pageIds: string[]): Promise<string[]> {
+  const ids = new Set<string>();
+  const pageSize = 1_000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db()
+      .from('orders')
+      .select('customer_id')
+      .in('page_id', pageIds)
+      .not('customer_id', 'is', null)
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`อ่านกลุ่มติดตามผลไม่สำเร็จ: ${error.message}`);
+
+    const rows = (data ?? []) as Array<{ customer_id: string | null }>;
+    for (const row of rows) if (row.customer_id) ids.add(row.customer_id);
+    if (rows.length < pageSize) break;
+  }
+
+  return [...ids];
+}
+
 /* ------------------------------------------------------------------------ */
 /* 1) ลิสต์แชท                                                                */
 /* ------------------------------------------------------------------------ */
@@ -170,7 +223,12 @@ export async function listConversations(
 
   // ตัวกรองเพจจากหน้าเว็บ ต้องตัดเพจที่ไม่มีสิทธิ์ทิ้งเสมอ
   const requested = filters.page_ids?.filter((id) => pages.has(id));
-  const pageIds = requested && requested.length > 0 ? requested : [...pages.keys()];
+  let pageIds = requested && requested.length > 0 ? requested : [...pages.keys()];
+  const group = filters.group ?? (filters.follow_up_only ? 'follow_up' : filters.unread_only ? 'unread' : 'all');
+  if (group === 'facebook' || group === 'instagram') {
+    pageIds = pageIds.filter((id) => pages.get(id)?.platform === group);
+    if (pageIds.length === 0) return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
+  }
 
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
   const search = filters.search?.trim();
@@ -201,6 +259,21 @@ export async function listConversations(
     }
   }
 
+  /* กลุ่มติดตามผลซิงก์จากออเดอร์โดยตรง ไม่สร้างแท็กเงาที่อาจหลุดกันภายหลัง */
+  if (group === 'follow_up') {
+    const followUpCustomerIds = await customerIdsWithOrders(pageIds);
+    if (followUpCustomerIds.length === 0) {
+      return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
+    }
+    const followUpSet = new Set(followUpCustomerIds);
+    customerIdFilter = customerIdFilter
+      ? customerIdFilter.filter((id) => followUpSet.has(id))
+      : followUpCustomerIds;
+    if (customerIdFilter.length === 0) {
+      return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
+    }
+  }
+
   /* --- ตัวกรองแท็ก : หาว่าห้องไหนติดแท็กที่เลือกไว้บ้าง --- */
   let conversationIdFilter: string[] | null = null;
   if (filters.tag_ids && filters.tag_ids.length > 0) {
@@ -219,7 +292,13 @@ export async function listConversations(
     .order('id', { ascending: Boolean(filters.since) })
     .limit(limit + 1);
 
-  if (filters.unread_only) query = query.eq('is_read', false);
+  if (group === 'done' || group === 'spam') query = query.eq('inbox_status', group);
+  else query = query.eq('inbox_status', 'active');
+  if (group === 'unread') query = query.eq('is_read', false);
+  if (group === 'important') query = query.eq('is_important', true);
+  if (group === 'assigned') query = query.not('assigned_admin_id', 'is', null);
+  if (group === 'ai_reply') query = query.eq('has_ai_reply', true);
+  if (group === 'ai_handoff') query = query.eq('has_ai_handoff', true);
   if (customerIdFilter) query = query.in('customer_id', customerIdFilter);
   if (conversationIdFilter) query = query.in('id', conversationIdFilter);
   if (filters.before) query = query.lte('last_message_at', filters.before);
@@ -236,6 +315,12 @@ export async function listConversations(
     last_message_preview: string | null;
     last_customer_message_at: string | null;
     is_read: boolean;
+    inbox_status: 'active' | 'done' | 'spam';
+    is_important: boolean;
+    meta_spam_synced_at: string | null;
+    assigned_admin_id: string | null;
+    has_ai_reply: boolean;
+    has_ai_handoff: boolean;
     locked_by_admin_id: string | null;
     locked_at: string | null;
     referral_source: ReferralSource | null;
@@ -260,7 +345,7 @@ export async function listConversations(
        */
       .select(INBOX_SELECTS.customers)
       .in('id', customerIds),
-    adminNames(rows.map((r) => r.locked_by_admin_id).filter((v): v is string => Boolean(v))),
+    adminNames(rows.flatMap((r) => [r.locked_by_admin_id, r.assigned_admin_id]).filter((v): v is string => Boolean(v))),
     tagsForConversations(rows.map((r) => r.id)),
     db().from('orders').select('customer_id').in('customer_id', customerIds),
   ]);
@@ -311,6 +396,13 @@ export async function listConversations(
         last_message_preview: r.last_message_preview,
         last_customer_message_at: r.last_customer_message_at,
         is_read: r.is_read,
+        inbox_status: r.inbox_status,
+        is_important: r.is_important,
+        meta_spam_synced_at: r.meta_spam_synced_at,
+        assigned_admin_id: r.assigned_admin_id,
+        assigned_admin_name: r.assigned_admin_id ? (names.get(r.assigned_admin_id) ?? 'แอดมิน') : null,
+        has_ai_reply: r.has_ai_reply,
+        has_ai_handoff: r.has_ai_handoff,
         referral_source: r.referral_source,
         referral_ad_id: r.referral_ad_id,
         referral_ref: r.referral_ref,

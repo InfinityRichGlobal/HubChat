@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  Loader2, Package, StickyNote, Trash2, User, Copy, ExternalLink,
+  Loader2, Package, StickyNote, Trash2, User, Copy, ExternalLink, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -208,35 +208,31 @@ export default function CustomerDrawer({
   ];
 
   return (
-    /**
-     * ⚠️ บนมือถือกินเต็มจอ บนจอใหญ่เป็นแผงข้างขวา
-     *    ใช้ inset-0 + sm:left-auto เพื่อไม่ต้องเขียนสองชุด
-     */
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 sm:p-4" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-md flex-col bg-background shadow-xl"
+        className="flex h-[100dvh] w-full flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(92dvh,56rem)] sm:max-w-4xl sm:rounded-2xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
         {/* หัวแผง */}
-        <div className="flex items-center gap-2 border-b px-3 py-2.5">
-          <CustomerAvatar name={displayName} src={c?.profile_pic_url} size="md" />
+        <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
+          <CustomerAvatar name={displayName} src={c?.profile_pic_url} size="lg" />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">{displayName}</div>
-            <div className="text-[11px] text-muted-foreground">{c?.username ? `@${c.username} · ` : ''}{data?.page.name}</div>
+            <div className="break-words text-base font-semibold">{displayName}</div>
+            <div className="text-xs text-muted-foreground">{c?.username ? `@${c.username} · ` : ''}{data?.page.platform === 'instagram' ? 'Instagram · ' : 'Messenger · '}{data?.page.name}</div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>ปิด</Button>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="ปิดข้อมูลลูกค้า" title="ปิด"><X className="size-5" /></Button>
         </div>
 
         {/* แท็บ */}
-        <div className="flex border-b">
+        <div className="grid grid-cols-3 border-b px-2 sm:px-6">
           {TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
               className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 px-2 py-2 text-xs',
-                tab === t.key ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground',
+                'flex min-h-12 items-center justify-center gap-1.5 px-2 text-xs sm:text-sm',
+                tab === t.key ? 'border-b-2 border-primary font-semibold text-foreground' : 'text-muted-foreground hover:bg-accent/50',
               )}
             >
               <t.icon className="size-3.5" />
@@ -245,21 +241,25 @@ export default function CustomerDrawer({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {loading && !data && (
             <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin" /></div>
           )}
 
           {/* ---------- ข้อมูลลูกค้า ---------- */}
           {tab === 'customer' && c && (
-            <div className="flex flex-col gap-3">
-              <dl className="flex flex-col gap-2 text-sm">
-                {profileUrl && (
-                  <div className="flex items-center gap-3">
-                    <dt className="w-24 shrink-0 text-muted-foreground">โปรไฟล์</dt>
-                    <dd><Button asChild variant="outline" size="sm" className="h-8"><a href={profileUrl} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" /> เปิด Instagram</a></Button></dd>
+            <div className="mx-auto flex max-w-3xl flex-col gap-4">
+              <section className="rounded-xl border bg-card p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">ข้อมูลจัดส่ง</h3>
+                    <p className="text-xs text-muted-foreground">ข้อมูลที่ใช้สร้างออเดอร์และจัดส่งสินค้า</p>
                   </div>
-                )}
+                  {profileUrl && (
+                    <Button asChild variant="outline" size="sm"><a href={profileUrl} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" /> Instagram</a></Button>
+                  )}
+                </div>
+                <dl className="grid gap-3 text-sm">
                 <Row label="ชื่อผู้รับ" value={c.recipient_name} />
                 <Row label="เบอร์" value={c.phone} copyable />
                 <Row
@@ -267,14 +267,18 @@ export default function CustomerDrawer({
                   value={c.address ? `${c.address}${c.postcode ? ` ${c.postcode}` : ''}` : null}
                   copyable
                 />
-                <Row label="ซื้อไปแล้ว" value={`${c.total_orders} ออเดอร์ · ${money(c.total_spent)} บาท`} />
-                <Row label="ทักครั้งแรก" value={c.first_contact_at ? dateTh(c.first_contact_at) : null} />
-                <Row label="แก้ข้อมูลล่าสุด" value={c.contact_updated_at ? dateTh(c.contact_updated_at) : null} />
-              </dl>
+                </dl>
+              </section>
+
+              <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Summary label="ออเดอร์ทั้งหมด" value={`${c.total_orders}`} />
+                <Summary label="ยอดซื้อรวม" value={`${money(c.total_spent)} บาท`} />
+                <Summary label="ทักครั้งแรก" value={c.first_contact_at ? dateTh(c.first_contact_at) : '—'} />
+                <Summary label="แก้ข้อมูลล่าสุด" value={c.contact_updated_at ? dateTh(c.contact_updated_at) : '—'} />
+              </section>
 
               <Button
-                variant="outline"
-                size="sm"
+                className="w-full"
                 disabled={busy}
                 onClick={() => void compose({ kind: 'shipping' })}
               >
@@ -285,7 +289,7 @@ export default function CustomerDrawer({
 
           {/* ---------- ออเดอร์ ---------- */}
           {tab === 'orders' && data && (
-            <div className="flex flex-col gap-2">
+            <div className="mx-auto flex max-w-3xl flex-col gap-2">
               {data.orders.length === 0 && (
                 <p className="py-6 text-center text-sm text-muted-foreground">ยังไม่มีออเดอร์</p>
               )}
@@ -324,7 +328,7 @@ export default function CustomerDrawer({
 
           {/* ---------- บันทึกภายใน ---------- */}
           {tab === 'notes' && data && (
-            <div className="flex flex-col gap-2">
+            <div className="mx-auto flex max-w-3xl flex-col gap-3">
               <p className="rounded-md bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
                 🔒 บันทึกภายใน — ลูกค้าไม่เห็น และระบบไม่ส่งออกไปไม่ว่ากรณีใด
               </p>
@@ -378,8 +382,8 @@ export default function CustomerDrawer({
 
 function Row({ label, value, copyable }: { label: string; value: string | null; copyable?: boolean }) {
   return (
-    <div className="flex items-start gap-2">
-      <dt className="w-24 shrink-0 text-xs text-muted-foreground">{label}</dt>
+    <div className="grid grid-cols-[6rem_minmax(0,1fr)] items-start gap-3 border-b pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[8rem_minmax(0,1fr)]">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="min-w-0 flex-1 break-words">
         {value ? (
           <span className="flex items-start gap-1">
@@ -404,6 +408,15 @@ function Row({ label, value, copyable }: { label: string; value: string | null; 
           <span className="text-muted-foreground">—</span>
         )}
       </dd>
+    </div>
+  );
+}
+
+function Summary({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border bg-card p-3">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold">{value}</p>
     </div>
   );
 }

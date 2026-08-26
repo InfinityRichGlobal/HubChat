@@ -30,7 +30,7 @@ export type MetaPage = {
 };
 
 async function graphVersion(): Promise<string> {
-  return (await getRuntimeSetting('META_GRAPH_VERSION')) ?? 'v21.0';
+  return (await getRuntimeSetting('META_GRAPH_VERSION')) ?? 'v26.0';
 }
 
 /** payload ที่ adapter ประกอบขึ้นมา — client ไม่แก้ไขเนื้อหา ส่งตามนั้น */
