@@ -45,7 +45,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const conversationByCustomer = new Map(((conversations ?? []) as Array<{ id: string; customer_id: string }>).map((row) => [row.customer_id, row.id]));
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
       <div>
         <h1 className="text-xl font-semibold">ข้อมูลลูกค้า</h1>
         <p className="text-sm text-muted-foreground">ค้นหาชื่อ เบอร์โทร และเปิดกลับไปยังห้องแชทได้ทันที</p>
@@ -57,13 +57,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         </div>
         <Button type="submit">ค้นหา</Button>
       </form>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-2 md:grid-cols-2">
         {customers.map((customer) => {
           const conversationId = conversationByCustomer.get(customer.id);
           const name = customer.name || customer.recipient_name || 'ลูกค้า';
           return (
-            <Card key={customer.id}>
-              <CardHeader className="flex-row items-center gap-3">
+            <Card key={customer.id} className="gap-2 py-3">
+              <CardHeader className="flex-row items-center gap-2.5 px-4">
                 <CustomerAvatar name={name} src={customer.profile_pic_url} size="md" />
                 <div className="min-w-0 flex-1">
                   <CardTitle className="truncate text-base">{name}</CardTitle>
@@ -71,8 +71,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                 </div>
                 {customer.total_orders > 0 && <span className="inline-flex size-7 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white">{customer.total_orders}</span>}
               </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <p className="line-clamp-2 text-muted-foreground">{customer.address ? `${customer.address} ${customer.postcode ?? ''}` : 'ยังไม่มีที่อยู่จัดส่ง'}</p>
+              <CardContent className="space-y-1.5 px-4 text-sm">
+                <p className="truncate text-muted-foreground">{customer.address ? `${customer.address} ${customer.postcode ?? ''}` : 'ยังไม่มีที่อยู่จัดส่ง'}</p>
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1 text-xs text-muted-foreground"><ShoppingBag className="size-3.5" /> ยอดสะสม {Number(customer.total_spent).toLocaleString('th-TH')} บาท</span>
                   {conversationId && <Button asChild size="sm" variant="outline"><Link href={`/inbox?c=${conversationId}`}><UserRound /> เปิดแชท</Link></Button>}
