@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
-  Loader2, Lock, MapPin, MessageSquareOff, Megaphone, Package, Paperclip, Phone, Reply, RefreshCw,
-  Search, Send, ShoppingCart, SlidersHorizontal, User, Tag as TagIcon, Video, X,
+  Bot, CheckCircle2, Handshake, Inbox, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
+  Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShieldAlert, ShoppingCart,
+  SlidersHorizontal, Sparkles, Star, User, UserCheck, Tag as TagIcon, Video, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
 import CustomerDrawer from './customer-drawer';
@@ -24,7 +25,7 @@ import { displayName, hasRealName } from '@/lib/customer-name';
 import { mergeByTime } from '@/lib/inbox/merge';
 import { customerProfileUrl } from '@/lib/customer-profile';
 import { toast } from 'sonner';
-import type { ConversationRow, InboxPage, MessageRow } from '@/server/inbox/service';
+import type { ConversationRow, InboxGroup, InboxPage, MessageRow } from '@/server/inbox/service';
 import type { CannedResponse, Tag } from '@/server/content/service';
 import type { ExtractedAddress } from '@/server/extract/address';
 
@@ -116,9 +117,9 @@ function mergeConversations(
 function windowHint(lastCustomerMessageAt: string | null): { text: string; tone: 'ok' | 'warn' | 'over' } | null {
   if (!lastCustomerMessageAt) return null;
   const left = 24 - (Date.now() - new Date(lastCustomerMessageAt).getTime()) / 3_600_000;
-  if (left <= 0) return { text: 'พ้นกรอบ', tone: 'over' };
-  if (left < 3) return { text: `เหลือ ${Math.max(1, Math.round(left * 60))} นาที`, tone: 'warn' };
-  return { text: `เหลือ ${Math.floor(left)} ชม.`, tone: 'ok' };
+  if (left <= 0) return { text: 'พ้นกรอบตอบ 24 ชม.', tone: 'over' };
+  if (left < 3) return { text: `ตอบได้อีก ${Math.max(1, Math.round(left * 60))} นาที`, tone: 'warn' };
+  return { text: `ตอบได้อีก ${Math.floor(left)} ชม.`, tone: 'ok' };
 }
 
 const REFERRAL_LABEL: Record<string, string> = {
@@ -126,6 +127,20 @@ const REFERRAL_LABEL: Record<string, string> = {
   SHORTLINK: 'จากลิงก์',
   POST: 'จากโพสต์',
   ORGANIC: 'ทักเอง',
+};
+
+const GROUP_LABEL: Record<InboxGroup, string> = {
+  all: 'ข้อความทั้งหมด',
+  facebook: 'Messenger',
+  instagram: 'Instagram',
+  ai_handoff: 'ส่งต่อโดย AI',
+  ai_reply: 'การตอบกลับของ AI',
+  important: 'สำคัญ',
+  unread: 'ยังไม่ได้อ่าน',
+  follow_up: 'ติดตามผล',
+  done: 'เรียบร้อย',
+  spam: 'สแปม',
+  assigned: 'กำหนดแล้ว',
 };
 
 /**
@@ -248,7 +263,7 @@ export default function InboxClient({
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
-  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [inboxGroup, setInboxGroup] = useState<InboxGroup>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
   // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
@@ -290,7 +305,7 @@ export default function InboxClient({
       if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
       if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
       if (search.trim()) params.set('search', search.trim());
-      if (unreadOnly) params.set('unread', '1');
+      params.set('group', inboxGroup);
       if (before) params.set('before', before);
       if (since) params.set('since', since);
 
@@ -308,7 +323,7 @@ export default function InboxClient({
         return null;
       }
     },
-    [selectedPages, selectedTags, search, unreadOnly],
+    [selectedPages, selectedTags, search, inboxGroup],
   );
 
   const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean; truncated: boolean }) => {
@@ -395,11 +410,12 @@ export default function InboxClient({
     setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const unreadCount = conversations.filter((c) => !c.is_read).length;
+  const filterCount = selectedPages.length + selectedTags.length + Number(inboxGroup !== 'all');
 
   return (
     <div className="flex h-[calc(100dvh-9rem)] w-full gap-3 md:h-[calc(100dvh-6rem)]">
       {/* ---------------- ลิสต์แชท ---------------- */}
-      <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', activeId && 'hidden md:flex')}>
+      <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', active && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -413,22 +429,29 @@ export default function InboxClient({
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             <Button
-              variant={selectedPages.length > 0 || selectedTags.length > 0 ? 'secondary' : 'outline'}
+              variant={filterCount > 0 ? 'secondary' : 'outline'}
               size="sm"
               className="h-8 rounded-full px-3 text-xs"
               onClick={() => setFiltersOpen(true)}
             >
               <SlidersHorizontal className="size-3.5" />
               ตัวกรอง
-              {selectedPages.length + selectedTags.length > 0 && (
+              {filterCount > 0 && (
                 <span className="rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
-                  {selectedPages.length + selectedTags.length}
+                  {filterCount}
                 </span>
               )}
             </Button>
-            <FilterChip active={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
-              ยังไม่ได้อ่าน{unreadCount > 0 ? ` (${unreadCount})` : ''}
+            <FilterChip active={inboxGroup === 'follow_up'} onClick={() => setInboxGroup(inboxGroup === 'follow_up' ? 'all' : 'follow_up')}>
+              <Star className={cn('size-3.5', inboxGroup === 'follow_up' && 'fill-current')} />
+              ติดตามผล
             </FilterChip>
+            <FilterChip active={inboxGroup === 'unread'} onClick={() => setInboxGroup(inboxGroup === 'unread' ? 'all' : 'unread')}>
+              ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount})` : ''}
+            </FilterChip>
+            {inboxGroup !== 'all' && inboxGroup !== 'follow_up' && inboxGroup !== 'unread' && (
+              <FilterChip active onClick={() => setInboxGroup('all')}>{GROUP_LABEL[inboxGroup]}</FilterChip>
+            )}
             {selectedPages.map((id) => {
               const page = pages.find((p) => p.id === id);
               return page ? <FilterChip key={id} active onClick={() => toggle(setSelectedPages)(id)} dotColor={page.tag_color}>{page.name}</FilterChip> : null;
@@ -471,7 +494,7 @@ export default function InboxClient({
       </div>
 
       {/* ---------------- ห้องแชท ---------------- */}
-      <div className={cn('min-w-0 flex-1', !activeId && 'hidden md:block')}>
+      <div className={cn('min-w-0 flex-1', !active && 'hidden md:block')}>
         {active ? (
           <ChatRoom
             key={active.id}
@@ -481,6 +504,10 @@ export default function InboxClient({
             tags={tags}
             onBack={() => setActiveId(null)}
             onChanged={loadList}
+            onStateChanged={() => {
+              listInitRef.current = false;
+              void loadList();
+            }}
           />
         ) : (
           <div className="flex h-full items-center justify-center rounded-lg border text-sm text-muted-foreground">
@@ -496,11 +523,11 @@ export default function InboxClient({
         tags={tags}
         selectedPages={selectedPages}
         selectedTags={selectedTags}
-        unreadOnly={unreadOnly}
+        inboxGroup={inboxGroup}
         onTogglePage={toggle(setSelectedPages)}
         onToggleTag={toggle(setSelectedTags)}
-        onToggleUnread={() => setUnreadOnly((value) => !value)}
-        onClear={() => { setSelectedPages([]); setSelectedTags([]); setUnreadOnly(false); }}
+        onSelectGroup={setInboxGroup}
+        onClear={() => { setSelectedPages([]); setSelectedTags([]); setInboxGroup('all'); }}
       />
     </div>
   );
@@ -535,8 +562,8 @@ function FilterChip({
 }
 
 function InboxFilterDialog({
-  open, onOpenChange, pages, tags, selectedPages, selectedTags, unreadOnly,
-  onTogglePage, onToggleTag, onToggleUnread, onClear,
+  open, onOpenChange, pages, tags, selectedPages, selectedTags, inboxGroup,
+  onTogglePage, onToggleTag, onSelectGroup, onClear,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -544,22 +571,32 @@ function InboxFilterDialog({
   tags: Tag[];
   selectedPages: string[];
   selectedTags: string[];
-  unreadOnly: boolean;
+  inboxGroup: InboxGroup;
   onTogglePage: (id: string) => void;
   onToggleTag: (id: string) => void;
-  onToggleUnread: () => void;
+  onSelectGroup: (group: InboxGroup) => void;
   onClear: () => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bottom-0 left-0 top-auto w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-3xl p-5 sm:left-1/2 sm:top-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg">
+      <DialogContent className="bottom-0 left-0 top-auto max-h-[88dvh] w-full max-w-none translate-x-0 translate-y-0 gap-4 overflow-y-auto rounded-b-none rounded-t-3xl p-4 sm:left-1/2 sm:top-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg">
         <DialogHeader className="text-center sm:text-left">
           <DialogTitle>กรองและจัดกลุ่มแชท</DialogTitle>
-          <DialogDescription>เลือกได้หลายรายการพร้อมกัน แล้วแตะใช้ตัวกรอง</DialogDescription>
+          <DialogDescription>เลือกกลุ่มงานหนึ่งกลุ่ม แล้วกรองเพจหรือป้ายเพิ่มได้</DialogDescription>
         </DialogHeader>
-        <div className="space-y-5">
-          <FilterGroup title="สถานะ">
-            <FilterChoice active={unreadOnly} onClick={onToggleUnread} icon={<AlertCircle className="size-4" />}>ยังไม่ได้อ่าน</FilterChoice>
+        <div className="space-y-4">
+          <FilterGroup title="กลุ่มแชท">
+            <FilterChoice active={inboxGroup === 'all'} onClick={() => onSelectGroup('all')} icon={<Inbox className="size-4" />}>ข้อความทั้งหมด</FilterChoice>
+            <FilterChoice active={inboxGroup === 'facebook'} onClick={() => onSelectGroup('facebook')} icon={<MessageCircle className="size-4" />}>Messenger</FilterChoice>
+            <FilterChoice active={inboxGroup === 'instagram'} onClick={() => onSelectGroup('instagram')} icon={<Send className="size-4" />}>Instagram</FilterChoice>
+            <FilterChoice active={inboxGroup === 'ai_handoff'} onClick={() => onSelectGroup('ai_handoff')} icon={<Handshake className="size-4" />}>ส่งต่อโดย AI</FilterChoice>
+            <FilterChoice active={inboxGroup === 'ai_reply'} onClick={() => onSelectGroup('ai_reply')} icon={<Sparkles className="size-4" />}>การตอบกลับของ AI</FilterChoice>
+            <FilterChoice active={inboxGroup === 'important'} onClick={() => onSelectGroup('important')} icon={<AlertCircle className="size-4" />}>สำคัญ</FilterChoice>
+            <FilterChoice active={inboxGroup === 'unread'} onClick={() => onSelectGroup('unread')} icon={<MessageSquareOff className="size-4" />}>ยังไม่ได้อ่าน</FilterChoice>
+            <FilterChoice active={inboxGroup === 'follow_up'} onClick={() => onSelectGroup('follow_up')} icon={<Star className={cn('size-4', inboxGroup === 'follow_up' && 'fill-current text-amber-500')} />}>ติดตามผล · มีออเดอร์</FilterChoice>
+            <FilterChoice active={inboxGroup === 'done'} onClick={() => onSelectGroup('done')} icon={<CheckCircle2 className="size-4" />}>เรียบร้อย</FilterChoice>
+            <FilterChoice active={inboxGroup === 'spam'} onClick={() => onSelectGroup('spam')} icon={<ShieldAlert className="size-4" />}>สแปม · ซิงก์ Meta</FilterChoice>
+            <FilterChoice active={inboxGroup === 'assigned'} onClick={() => onSelectGroup('assigned')} icon={<UserCheck className="size-4" />}>กำหนดแล้ว</FilterChoice>
           </FilterGroup>
           <FilterGroup title="ช่องทาง / เพจ">
             {pages.map((page) => (
@@ -628,13 +665,13 @@ function ConversationItem({
   const lockedByOther = c.locked_by_admin_id !== null && c.locked_by_admin_id !== meId;
 
   return (
-    <li className="p-1.5">
+    <li>
       <button
         type="button"
         onClick={onSelect}
         className={cn(
-          'relative flex w-full items-start gap-3 rounded-xl px-2.5 py-3 text-left hover:bg-accent/60',
-          isActive && 'bg-accent ring-1 ring-border',
+          'relative flex w-full items-start gap-2.5 px-2.5 py-2 text-left hover:bg-accent/60',
+          isActive && 'bg-accent',
         )}
       >
         <div className="relative shrink-0">
@@ -648,27 +685,37 @@ function ConversationItem({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-2">
-            <span className={cn('min-w-0 flex-1 text-sm leading-5', !c.is_read && 'font-semibold')}>
+          <div className="flex items-start gap-1.5">
+            <span className={cn('min-w-0 flex-1 break-words text-sm leading-5', !c.is_read && 'font-semibold')}>
               {displayName(c)}
             </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
+            <span className="flex shrink-0 flex-col items-end gap-0.5">
+              <span className="text-[11px] text-muted-foreground">{dayTh(c.last_message_at)}</span>
+              {(c.order_count > 0 || c.is_important) && (
+                <Star className="size-4 fill-amber-500 text-amber-500" aria-label={c.order_count > 0 ? 'ติดตามผล' : 'สำคัญ'} />
+              )}
+            </span>
           </div>
 
           {c.username && <p className="truncate text-[11px] text-muted-foreground">@{c.username}</p>}
-          <p className={cn('mt-1 line-clamp-2 text-xs leading-5', c.is_read ? 'text-muted-foreground' : 'font-medium')}>
+          <p className={cn('mt-0.5 truncate text-xs leading-5', c.is_read ? 'text-muted-foreground' : 'font-medium')}>
             {c.last_message_preview ?? '—'}
           </p>
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5">
+          <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
               <span className="size-1.5 rounded-full" style={{ backgroundColor: c.page.tag_color }} /> {c.page.name}
             </span>
             {c.order_count > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">
-                <ShoppingCart className="size-2.5" /> {c.order_count} ออเดอร์
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                <ShoppingCart className="size-2.5" /> {c.order_count}
               </span>
             )}
+            {c.inbox_status === 'done' && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 className="size-2.5" /> เรียบร้อย</span>}
+            {c.inbox_status === 'spam' && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive"><ShieldAlert className="size-2.5" /> สแปม</span>}
+            {c.assigned_admin_name && <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5"><UserCheck className="size-2.5" /> {c.assigned_admin_name}</span>}
+            {c.has_ai_reply && <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-violet-800 dark:bg-violet-950 dark:text-violet-300"><Bot className="size-2.5" /> AI ตอบ</span>}
+            {c.has_ai_handoff && <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-1.5 py-0.5 text-orange-800 dark:bg-orange-950 dark:text-orange-300"><Handshake className="size-2.5" /> AI ส่งต่อ</span>}
             {c.referral_source && (
               <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5">
                 <Megaphone className="size-3" />
@@ -678,7 +725,7 @@ function ConversationItem({
             {hint && (
               <span
                 className={cn(
-                  'rounded-full bg-muted px-2 py-0.5',
+                  'rounded-full bg-muted px-1.5 py-0.5',
                   hint.tone === 'over' && 'text-[var(--destructive)]',
                   hint.tone === 'warn' && 'text-[var(--warning,#b45309)]',
                 )}
@@ -691,7 +738,7 @@ function ConversationItem({
 
           {c.tag_ids.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {c.tag_ids.map((id) => {
+              {c.tag_ids.slice(0, 1).map((id) => {
                 const t = tagById.get(id);
                 if (!t) return null;
                 return (
@@ -704,6 +751,7 @@ function ConversationItem({
                   </span>
                 );
               })}
+              {c.tag_ids.length > 1 && <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">+{c.tag_ids.length - 1}</span>}
             </div>
           )}
 
@@ -730,6 +778,7 @@ function ChatRoom({
   tags,
   onBack,
   onChanged,
+  onStateChanged,
 }: {
   conversation: ConversationRow;
   canReply: boolean;
@@ -737,6 +786,7 @@ function ChatRoom({
   tags: Tag[];
   onBack: () => void;
   onChanged: () => void;
+  onStateChanged: () => void;
 }) {
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
   /** ยังมีข้อความเก่ากว่าที่โหลดมาอีกไหม */
@@ -755,6 +805,7 @@ function ChatRoom({
   /** ตัวเลือกสินค้า (ข้อ 1.10) */
   const [productOpen, setProductOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [stateBusy, setStateBusy] = useState(false);
   const [menuFor, setMenuFor] = useState<MessageRow | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [contactSource, setContactSource] = useState<string | null>(null);
@@ -977,6 +1028,18 @@ function ChatRoom({
       setNewBelow(true);
     }
   }, [messages]);
+
+  /** ช่องพิมพ์โตตามข้อความสูงสุด 6 บรรทัด หลังจากนั้นเลื่อนภายในช่อง */
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const lineHeight = Number.parseFloat(window.getComputedStyle(el).lineHeight) || 24;
+    const maxHeight = lineHeight * 6 + 16;
+    const nextHeight = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${Math.max(44, nextHeight)}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [text]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -1331,12 +1394,35 @@ function ChatRoom({
     }
   }
 
+  async function changeInboxState(
+    input:
+      | { action: 'important'; value: boolean }
+      | { action: 'status'; value: 'active' | 'done' | 'spam' }
+      | { action: 'assignment'; value: 'me' | 'none' }
+      | { action: 'confirm_spam_restored'; value: true },
+    success: string,
+  ) {
+    setStateBusy(true);
+    try {
+      const result = await apiCall<Record<string, unknown>>(`/api/conversations/${c.id}/inbox-state`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      if (!result) return;
+      toast.success(success);
+      onStateChanged();
+    } finally {
+      setStateBusy(false);
+    }
+  }
+
   const profileUrl = customerProfileUrl(c.page.platform, c.username);
+  const replyHint = windowHint(c.last_customer_message_at);
 
   return (
     <div className="flex h-full flex-col rounded-lg border">
       {/* ---------- หัวห้อง ---------- */}
-      <header className="border-b bg-card/60 px-3 py-2.5">
+      <header className="border-b bg-card/60 px-2.5 py-2">
         <div className="flex items-start gap-2.5">
           <Button variant="ghost" size="icon" className="-ml-2 size-9 md:hidden" onClick={onBack} aria-label="กลับ">
             <ArrowLeft />
@@ -1348,52 +1434,65 @@ function ChatRoom({
           ) : <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />}
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-2">
+            <div className="flex items-start gap-1.5">
               {profileUrl ? (
-                <a href={profileUrl} target="_blank" rel="noreferrer" className="min-w-0 text-base font-semibold leading-5 hover:underline">
+                <a href={profileUrl} target="_blank" rel="noreferrer" className="min-w-0 break-words text-base font-semibold leading-5 hover:underline">
                   {displayName(c)} <ExternalLink className="mb-0.5 inline size-3.5" />
                 </a>
-              ) : <h2 className="min-w-0 text-base font-semibold leading-5">{displayName(c)}</h2>}
+              ) : <h2 className="min-w-0 break-words text-base font-semibold leading-5">{displayName(c)}</h2>}
               {c.order_count > 0 && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white"><ShoppingCart className="size-3" />{c.order_count}</span>}
-              {policy && !policy.can_send && (
-          /**
-           * 🔴 ป้ายนี้ต้อง "สั้นเสมอ" และ shrink-0 + whitespace-nowrap
-           *    เดิมใช้ label_th ซึ่งตอนส่งไม่ได้เป็นประโยคเต็ม
-           *    ทำให้แถวหัวห้องถูกดันจนรูป/ชื่อ/ปุ่มเบียดกันจนใช้ไม่ได้บนมือถือ
-           *    เหตุผลเต็มย้ายไปอยู่ใต้ช่องพิมพ์ ซึ่งมีที่ให้อ่านจริง ๆ
-           */
-          <button
-            type="button"
-            aria-label={policy.detail_th ?? policy.label_th}
-            title={`${policy.detail_th ?? policy.label_th}${policy.alternatives_th.length ? `\nทำได้: ${policy.alternatives_th.join(' · ')}` : ''}`}
-            onClick={() => toast.error(policy.detail_th ?? policy.label_th, {
-              description: policy.alternatives_th.length ? `ทำได้: ${policy.alternatives_th.join(' · ')}` : undefined,
-              duration: 10_000,
-            })}
-            className="shrink-0 rounded-full p-1.5 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <AlertCircle className="size-5" />
-          </button>
-              )}
+              {c.order_count > 0 && <Star className="mt-0.5 size-4 shrink-0 fill-amber-500 text-amber-500" aria-label="ติดตามผล" />}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
               <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full" style={{ backgroundColor: c.page.tag_color }} />{c.page.platform === 'instagram' ? 'Instagram' : 'Messenger'} · {c.page.name}</span>
               {c.username && <span>@{c.username}</span>}
               {c.phone && <button type="button" className="inline-flex items-center gap-1 underline decoration-dotted" onClick={() => void copyText(c.phone!).then((done) => done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'))}><Phone className="size-3" />{c.phone}</button>}
-              {(() => { const hint = windowHint(c.last_customer_message_at); return hint ? <span className={cn(hint.tone === 'over' && 'text-destructive', hint.tone === 'warn' && 'text-amber-600 dark:text-amber-500')}>กรอบตอบ {hint.text}</span> : null; })()}
               {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
             </div>
           </div>
         </div>
 
-        <div className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5 pl-0 md:pl-12">
+        {policy && !policy.can_send ? (
+          <button
+            type="button"
+            onClick={() => toast.error(policy.detail_th ?? policy.label_th, {
+              description: policy.alternatives_th.length ? `ทำได้: ${policy.alternatives_th.join(' · ')}` : undefined,
+              duration: 10_000,
+            })}
+            className="mt-2 flex w-full items-start gap-2 rounded-lg bg-destructive/10 px-2.5 py-1.5 text-left text-xs text-destructive hover:bg-destructive/15"
+          >
+            <MessageSquareOff className="mt-0.5 size-4 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">{policy.badge_th ?? 'ส่งไม่ได้ตามนโยบาย Meta'}</span>
+              {replyHint && <span className="block text-[11px] opacity-80">{replyHint.text}</span>}
+            </span>
+          </button>
+        ) : replyHint ? (
+          <div className={cn(
+            'mt-2 flex items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs',
+            replyHint.tone === 'warn' && 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+            replyHint.tone === 'over' && 'bg-destructive/10 text-destructive',
+          )}>
+            <MessageSquareOff className="size-4 shrink-0" />
+            <span>{replyHint.text}</span>
+          </div>
+        ) : null}
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-0 md:pl-12" aria-label="การทำงานของห้องแชท">
+          {canReply && <Button variant={c.is_important ? 'secondary' : 'outline'} size="icon" className="size-9" disabled={stateBusy} aria-label={c.is_important ? 'ยกเลิกสำคัญ' : 'ทำเครื่องหมายว่าสำคัญ'} title={c.is_important ? 'ยกเลิกสำคัญ' : 'สำคัญ'} onClick={() => void changeInboxState({ action: 'important', value: !c.is_important }, c.is_important ? 'นำออกจากกลุ่มสำคัญแล้ว' : 'เพิ่มในกลุ่มสำคัญแล้ว')}><Star className={cn('size-4', c.is_important && 'fill-amber-500 text-amber-500')} /></Button>}
+          {canReply && c.inbox_status !== 'spam' && <Button variant={c.inbox_status === 'done' ? 'secondary' : 'outline'} size="icon" className="size-9" disabled={stateBusy} aria-label={c.inbox_status === 'done' ? 'เปิดแชทอีกครั้ง' : 'ทำเครื่องหมายว่าเรียบร้อย'} title={c.inbox_status === 'done' ? 'เปิดแชทอีกครั้ง' : 'เรียบร้อย'} onClick={() => void changeInboxState({ action: 'status', value: c.inbox_status === 'done' ? 'active' : 'done' }, c.inbox_status === 'done' ? 'เปิดแชทอีกครั้งแล้ว' : 'ย้ายไปกลุ่มเรียบร้อยแล้ว')}><CheckCircle2 className="size-4" /></Button>}
+          {canReply && c.inbox_status !== 'spam' && <Button variant="outline" size="icon" className="size-9 text-destructive hover:text-destructive" disabled={stateBusy} aria-label="ย้ายไปสแปมและซิงก์ Meta" title="สแปม · ซิงก์ Meta" onClick={() => { if (window.confirm('ย้ายแชทนี้ไปสแปมทั้งใน HubChat และ Meta Business Suite ใช่ไหม?')) void changeInboxState({ action: 'status', value: 'spam' }, 'ย้ายไปสแปมและซิงก์ Meta แล้ว'); }}><ShieldAlert className="size-4" /></Button>}
+          {canReply && c.inbox_status === 'spam' && <Button variant="outline" size="icon" className="size-9" disabled={stateBusy} aria-label="ยืนยันว่าคืนจากสแปมใน Business Suite แล้ว" title="คืนจากสแปมแล้ว" onClick={() => { if (window.confirm('คุณคืนแชทนี้ออกจากสแปมใน Meta Business Suite แล้วใช่ไหม?')) void changeInboxState({ action: 'confirm_spam_restored', value: true }, 'คืนแชทเข้าอินบ็อกซ์ HubChat แล้ว'); }}><RefreshCw className="size-4" /></Button>}
+          {canReply && <Button variant={c.assigned_admin_id === meId ? 'secondary' : 'outline'} size="icon" className="size-9" disabled={stateBusy} aria-label={c.assigned_admin_id === meId ? 'ยกเลิกการมอบหมาย' : 'มอบหมายให้ฉัน'} title={c.assigned_admin_id === meId ? 'ยกเลิกการมอบหมาย' : 'มอบหมายให้ฉัน'} onClick={() => void changeInboxState({ action: 'assignment', value: c.assigned_admin_id === meId ? 'none' : 'me' }, c.assigned_admin_id === meId ? 'ยกเลิกการมอบหมายแล้ว' : 'มอบหมายให้คุณแล้ว')}><UserCheck className="size-4" /></Button>}
           {profileUrl ? (
-            <Button asChild variant="outline" size="sm" className="h-8 text-xs"><a href={profileUrl} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />โปรไฟล์</a></Button>
+            <Button asChild variant="outline" size="icon" className="size-9"><a href={profileUrl} target="_blank" rel="noreferrer" aria-label="เปิดโปรไฟล์ลูกค้า" title="เปิดโปรไฟล์ลูกค้า"><ExternalLink className="size-4" /></a></Button>
           ) : (
             <Button
               variant="outline"
-              size="sm"
-              className="h-8 text-xs"
+              size="icon"
+              className="size-9"
+              aria-label="ดึงหรือเปิดโปรไฟล์ลูกค้า"
+              title="ดึงหรือเปิดโปรไฟล์ลูกค้า"
               onClick={() => {
                 if (c.page.platform === 'facebook') {
                   toast.info('Facebook ไม่คืน public profile link จาก PSID — ระบบจึงไม่เดาลิงก์ผิดคน');
@@ -1409,12 +1508,12 @@ function ChatRoom({
                   .catch((err) => toast.error(err instanceof Error ? err.message : 'ดึงโปรไฟล์ไม่สำเร็จ'));
               }}
             >
-              <RefreshCw className="size-3.5" />ดึงโปรไฟล์
+              <RefreshCw className="size-4" />
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setDrawerOpen(true)}><User className="size-3.5" />ข้อมูลลูกค้า</Button>
-          {canReply && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setOrderSource(null); setOrderOpen(true); }}><ShoppingCart className="size-3.5" />สร้างออเดอร์</Button>}
-          {canReply && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setTagsOpen(true)}><TagIcon className="size-3.5" />ป้าย / กลุ่ม</Button>}
+          <Button variant="outline" size="icon" className="size-9" aria-label="ข้อมูลลูกค้า" title="ข้อมูลลูกค้า" onClick={() => setDrawerOpen(true)}><User className="size-4" /></Button>
+          {canReply && <Button variant="outline" size="icon" className="size-9" aria-label="สร้างออเดอร์" title="สร้างออเดอร์" onClick={() => { setOrderSource(null); setOrderOpen(true); }}><ShoppingCart className="size-4" /></Button>}
+          {canReply && <Button variant="outline" size="icon" className="size-9" aria-label="ป้ายและกลุ่ม" title="ป้ายและกลุ่ม" onClick={() => setTagsOpen(true)}><TagIcon className="size-4" /></Button>}
         </div>
       </header>
 
@@ -1517,18 +1616,18 @@ function ChatRoom({
       {/* ---------- ช่องพิมพ์ ---------- */}
       <div className="relative border-t p-2">
         {canReply && (
-          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5" aria-label="เครื่องมือแชท">
-            <Button variant={browseCanned ? 'secondary' : 'ghost'} size="sm" className="h-8 text-xs" onClick={() => { setBrowseCanned((open) => !open); setDismissedCanned(false); }} disabled={sending || uploading}>
-              <Images className="size-3.5" /> ชุดคำตอบ
+          <div className="mb-1.5 flex items-center gap-1" aria-label="เครื่องมือแชท">
+            <Button variant={browseCanned ? 'secondary' : 'ghost'} size="icon" className="size-8" aria-label="ชุดคำตอบ" title="ชุดคำตอบ" onClick={() => { setBrowseCanned((open) => !open); setDismissedCanned(false); }} disabled={sending || uploading}>
+              <Images className="size-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setProductOpen(true)} disabled={sending || uploading}>
-              <Package className="size-3.5" /> สินค้า / โปร
+            <Button variant="ghost" size="icon" className="size-8" aria-label="สินค้าและโปรโมชัน" title="สินค้าและโปรโมชัน" onClick={() => setProductOpen(true)} disabled={sending || uploading}>
+              <Package className="size-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setLibraryKind('image')} disabled={sending || uploading}>
-              <ImageIcon className="size-3.5" /> คลังรูป
+            <Button variant="ghost" size="icon" className="size-8" aria-label="คลังรูป" title="คลังรูป" onClick={() => setLibraryKind('image')} disabled={sending || uploading}>
+              <ImageIcon className="size-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setLibraryKind('video')} disabled={sending || uploading}>
-              <Video className="size-3.5" /> คลังวิดีโอ
+            <Button variant="ghost" size="icon" className="size-8" aria-label="คลังวิดีโอ" title="คลังวิดีโอ" onClick={() => setLibraryKind('video')} disabled={sending || uploading}>
+              <Video className="size-4" />
             </Button>
           </div>
         )}
@@ -1705,7 +1804,7 @@ function ChatRoom({
               rows={1}
               placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ · / ค้นชุดคำตอบ)"
               disabled={sending}
-              className="min-h-11 max-h-40 min-w-0 flex-1 resize-y overflow-y-auto rounded-xl border bg-background px-3 py-2 text-base leading-6 outline-none shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+              className="min-h-11 max-h-[10rem] min-w-0 flex-1 resize-none overflow-y-hidden rounded-xl border bg-background px-3 py-2 text-base leading-6 outline-none shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
             />
             <Button className="h-11 px-3" onClick={() => void send()} disabled={sending || (text.trim().length === 0 && cannedImages.length === 0)}>
               {sending ? <Loader2 className="animate-spin" /> : <Send />}

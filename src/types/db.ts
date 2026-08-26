@@ -34,6 +34,7 @@ export type Courier = 'flash' | 'kerry' | 'jt' | 'thailand_post' | 'custom';
 export type PromotionType = 'single' | 'bundle' | 'buy_x_get_y' | 'boxset';
 export type QueueStatus = 'pending' | 'processing' | 'done' | 'failed';
 export type DevicePlatform = 'ios' | 'android' | 'desktop';
+export type InboxStatus = 'active' | 'done' | 'spam';
 
 /* ------------------------ โครงย่อยใน jsonb ------------------------ */
 export type ImageRef = {
@@ -121,6 +122,13 @@ export type Conversation = {
   last_message_preview: string | null;
   last_customer_message_at: string | null;
   is_read: boolean;
+  inbox_status: InboxStatus;
+  is_important: boolean;
+  inbox_state_updated_at: string | null;
+  inbox_state_updated_by: string | null;
+  meta_spam_synced_at: string | null;
+  has_ai_reply: boolean;
+  has_ai_handoff: boolean;
   assigned_admin_id: string | null;
   locked_by_admin_id: string | null;
   locked_at: string | null;
