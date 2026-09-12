@@ -12,27 +12,68 @@ export const dynamic = 'force-dynamic';
 const ALLOWED = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/quicktime', 'video/webm'];
 const MAX_BYTES = 25 * 1024 * 1024;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await requirePermission('content.view');
-    const { data, error } = await db()
-      .from('media_assets')
-      .select('id,storage_key,mime,bytes,created_at')
-      .eq('kind', 'library')
-      .eq('status', 'stored')
-      .order('created_at', { ascending: false })
-      .limit(200);
+    const forPicker = req.nextUrl.searchParams.get('for_picker') === '1';
+
+    const [{ data, error }, { data: settingsData }] = await Promise.all([
+      db()
+        .from('media_assets')
+        .select('id,storage_key,mime,bytes,created_at')
+        .eq('kind', 'library')
+        .eq('status', 'stored')
+        .order('created_at', { ascending: false })
+        .limit(200),
+      db()
+        .from('app_settings')
+        .select('key,value')
+        .in('key', ['media_albums', 'media_categories', 'media_hidden_ids']),
+    ]);
 
     if (error) throw new Error(`อ่านคลังสื่อไม่สำเร็จ: ${error.message}`);
-    const items = ((data ?? []) as Array<{ id: string; storage_key: string; mime: string; bytes: number; created_at: string }>).map((item) => {
-      const publicUrl = item.storage_key ? getPublicUrl(item.storage_key) : `/api/media/${item.id}`;
-      return {
-        ...item,
-        preview_url: `/api/media/${item.id}`,
-        public_url: publicUrl,
-      };
+
+    const settingsMap = new Map((settingsData ?? []).map((s) => [s.key, s.value]));
+    const defaultAlbums = ['โปรโมชั่น', 'สินค้า', 'รีวิว / สลิป', 'วิดีโอ', 'ระบบ', 'ทั่วไป'];
+    const albums = (settingsMap.get('media_albums') as string[] | undefined) ?? defaultAlbums;
+    const rawCategories = (settingsMap.get('media_categories') as Record<string, string | string[]> | undefined) ?? {};
+    const hiddenIds = (settingsMap.get('media_hidden_ids') as string[] | undefined) ?? [];
+
+    // Normalise categories to string[]
+    const categories: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(rawCategories)) {
+      categories[k] = Array.isArray(v) ? v : [v];
+    }
+
+    const items = ((data ?? []) as Array<{ id: string; storage_key: string; mime: string; bytes: number; created_at: string }>)
+      .map((item) => {
+        const isVideo = item.mime.startsWith('video/');
+        const defaultCats = isVideo ? ['วิดีโอ'] : ['ทั่วไป'];
+        const itemCats = categories[item.id] ?? defaultCats;
+        const isHidden = hiddenIds.includes(item.id);
+        const publicUrl = item.storage_key ? getPublicUrl(item.storage_key) : `/api/media/${item.id}`;
+
+        return {
+          ...item,
+          preview_url: `/api/media/${item.id}`,
+          public_url: publicUrl,
+          categories: itemCats,
+          is_hidden: isHidden,
+        };
+      })
+      .filter((item) => {
+        // เมื่อเรียกจากกล่องเลือกรูปในห้องแชท ห้ามนำไฟล์ที่ปิดตามาแสดงผลเด็ดขาด
+        if (forPicker && item.is_hidden) return false;
+        return true;
+      });
+
+    return ok({
+      items,
+      albums,
+      categories,
+      hidden_ids: hiddenIds,
+      public_ready: true,
     });
-    return ok({ items, public_ready: true });
   } catch (err) {
     return toErrorResponse(err);
   }

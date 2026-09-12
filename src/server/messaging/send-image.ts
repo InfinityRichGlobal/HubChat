@@ -151,6 +151,7 @@ export async function sendImageUrl(input: SendImageUrlInput): Promise<SendResult
   // พยายามดาวน์โหลดรูปภาพจาก URL แล้วส่งเป็น Attachment ล่วงหน้า
   // เพื่อป้องกันกรณีที่ Meta crawler ถูกบล็อกโดย Google Drive หรือ CDN ภายนอก (Meta Error 100/2018047)
   let attachmentId: string | null = null;
+  let mediaId: string | null = null;
   try {
     const res = await fetch(input.url, { headers: { 'User-Agent': 'HubChat-Server/1.0' } });
     if (res.ok) {
@@ -158,6 +159,15 @@ export async function sendImageUrl(input: SendImageUrlInput): Promise<SendResult
       const mime = contentType.split(';')[0].trim();
       const buf = await res.arrayBuffer();
       if (buf.byteLength > 0 && buf.byteLength <= MAX_IMAGE_BYTES) {
+        // เก็บสำเนาไว้ใน Storage เพื่อให้แอดมินเปิดดูในแชทได้ตลอดไป
+        try {
+          mediaId = await storeUploadedFile(buf, mime, 'outbound', {
+            conversation_id: input.conversation_id,
+          });
+        } catch (storageErr) {
+          console.warn('[send-image-url] เก็บสำเนาลง Storage ไม่สำเร็จ:', storageErr);
+        }
+
         attachmentId = await uploadImageForConversation(input.conversation_id, {
           bytes: buf,
           mime: ALLOWED_IMAGE_MIMES.includes(mime as (typeof ALLOWED_IMAGE_MIMES)[number]) ? mime : 'image/jpeg',
@@ -175,9 +185,11 @@ export async function sendImageUrl(input: SendImageUrlInput): Promise<SendResult
     provenance: input.provenance,
     content: {
       images: [
-        attachmentId
-          ? { meta_attachment_id: attachmentId }
-          : { url: input.url },
+        {
+          meta_attachment_id: attachmentId ?? undefined,
+          url: input.url,
+          media_id: mediaId ?? undefined,
+        },
       ],
     },
     idempotency_key: input.idempotency_key ?? null,

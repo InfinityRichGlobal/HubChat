@@ -177,11 +177,23 @@ export function baht(n: number): string {
 
 export function productText(
   items: ProductFacts[],
-  options: { show_price?: boolean; promotions?: string[] } = {},
+  options: {
+    show_price?: boolean;
+    promotions?: string[];
+    discount?: number;
+    total?: number;
+    custom_header?: string;
+    custom_footer?: string;
+  } = {},
 ): ComposeResult {
   if (items.length === 0) return { text: '', missing_th: ['สินค้า'] };
 
   const lines: string[] = [];
+  if (options.custom_header?.trim()) {
+    lines.push(options.custom_header.trim());
+    lines.push('');
+  }
+
   let totalAmount = 0;
   for (const p of items) {
     const title = p.variant?.trim() ? `${p.name} (${p.variant.trim()})` : p.name;
@@ -194,10 +206,24 @@ export function productText(
       lines.push(`• ${title} x ${qty}`);
     }
   }
-  if (options.show_price && items.length > 1) {
-    lines.push(`ยอดรวมสินค้า: ${baht(totalAmount)}`);
+
+  if (options.show_price) {
+    const hasDiscount = Boolean(options.discount && options.discount > 0);
+    if (hasDiscount) {
+      lines.push(`ส่วนลด: -${baht(options.discount!)}`);
+      lines.push(`ยอดรวม: ${baht(options.total ?? (totalAmount - options.discount!))}`);
+    } else if (items.length > 1) {
+      lines.push(`ยอดรวมสินค้า: ${baht(options.total ?? totalAmount)}`);
+    }
   }
+
   for (const promotion of options.promotions ?? []) lines.push(`🎁 ${promotion}`);
+
+  if (options.custom_footer?.trim()) {
+    lines.push('');
+    lines.push(options.custom_footer.trim());
+  }
+
   return { text: lines.join('\n'), missing_th: [] };
 }
 

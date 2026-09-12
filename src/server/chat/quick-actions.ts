@@ -194,7 +194,14 @@ export async function composeProducts(
   admin: PublicAdmin,
   conversationId: string,
   items: Array<{ product_id: string; qty: number }>,
-  options: { promotion_ids?: string[]; show_price?: boolean } = {},
+  options: {
+    promotion_ids?: string[];
+    show_price?: boolean;
+    discount?: number;
+    total?: number;
+    custom_header?: string;
+    custom_footer?: string;
+  } = {},
 ): Promise<ComposeResult> {
   await requireConversationAccess(admin, conversationId);
   if (items.length === 0) return productText([]);
@@ -240,6 +247,10 @@ export async function composeProducts(
   return productText(facts, {
     show_price: options.show_price,
     promotions: ((promos ?? []) as Array<{ name: string }>).map((promo) => promo.name),
+    discount: options.discount,
+    total: options.total,
+    custom_header: options.custom_header,
+    custom_footer: options.custom_footer,
   });
 }
 

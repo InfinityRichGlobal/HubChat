@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowLeft, ArrowDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
-  Bot, CheckCircle2, Handshake, Inbox, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
-  Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShieldAlert, ShoppingCart,
+  AlertCircle, ArrowLeft, ArrowDown, Check, CheckCheck, ChevronDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
+  Bot, CheckCircle2, Handshake, Inbox, Layers, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
+  Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShieldAlert, ShoppingBag, ShoppingCart,
   SlidersHorizontal, Sparkles, Star, User, UserCheck, Tag as TagIcon, Video, X,
 } from 'lucide-react';
 import OrderDialog from './order-dialog';
@@ -19,6 +19,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import CustomerAvatar from '@/components/customer-avatar';
 import PlatformIcon from '@/components/platform-icon';
@@ -209,6 +212,8 @@ type LibraryItem = {
   mime: string;
   bytes: number;
   preview_url: string;
+  categories?: string[];
+  is_hidden?: boolean;
   created_at: string;
 };
 
@@ -282,6 +287,7 @@ export default function InboxClient({
   const [inboxGroup, setInboxGroup] = useState<InboxGroup>('all');
   const [orderFilter, setOrderFilter] = useState<OrderFilterGroup>('all');
   const [assignedAdminFilter, setAssignedAdminFilter] = useState<string>('all');
+  const [platformFilter, setPlatformFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
   // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
@@ -433,10 +439,12 @@ export default function InboxClient({
     selectedTags.length +
     Number(inboxGroup !== 'all') +
     Number(orderFilter !== 'all') +
-    Number(assignedAdminFilter !== 'all');
+    Number(assignedAdminFilter !== 'all') +
+    Number(platformFilter !== 'all');
 
   const displayedConversations = useMemo(() => {
     return conversations.filter((c) => {
+      if (platformFilter !== 'all' && c.page.platform !== platformFilter) return false;
       if (orderFilter !== 'all') {
         if (orderFilter === '0' && c.order_count !== 0) return false;
         if (orderFilter === '1' && c.order_count !== 1) return false;
@@ -450,7 +458,7 @@ export default function InboxClient({
       if (assignedAdminFilter !== 'all' && assignedAdminFilter !== 'unassigned' && c.assigned_admin_id !== assignedAdminFilter) return false;
       return true;
     });
-  }, [conversations, orderFilter, assignedAdminFilter]);
+  }, [conversations, orderFilter, assignedAdminFilter, platformFilter]);
 
   return (
     <div className="flex h-[calc(100dvh-9rem)] w-full gap-3 md:h-[calc(100dvh-6rem)]">
@@ -471,7 +479,7 @@ export default function InboxClient({
             <Button
               variant={filterCount > 0 ? 'secondary' : 'outline'}
               size="sm"
-              className="h-8 rounded-full px-3 text-xs"
+              className="h-8 rounded-full px-3 text-xs shrink-0"
               onClick={() => setFiltersOpen(true)}
             >
               <SlidersHorizontal className="size-3.5" />
@@ -482,6 +490,153 @@ export default function InboxClient({
                 </span>
               )}
             </Button>
+
+            {/* ปุ่มดรอปดาวน์: ตะกร้าออเดอร์ */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors',
+                    orderFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  )}
+                  title="กรองตามประวัติการสั่งซื้อ"
+                >
+                  <ShoppingBag className="size-3.5" />
+                  <span>{orderFilter === 'all' ? 'ออเดอร์' : ORDER_FILTER_LABELS[orderFilter]}</span>
+                  <ChevronDown className="size-3 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">จำนวนประวัติการสั่งซื้อ</DropdownMenuLabel>
+                {(Object.keys(ORDER_FILTER_LABELS) as OrderFilterGroup[]).map((grp) => (
+                  <DropdownMenuItem
+                    key={grp}
+                    className={cn('cursor-pointer text-xs flex items-center justify-between', orderFilter === grp && 'font-semibold bg-accent')}
+                    onClick={() => setOrderFilter(grp)}
+                  >
+                    <span>{ORDER_FILTER_LABELS[grp]}</span>
+                    {orderFilter === grp && <Check className="size-3 text-primary" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* ปุ่มดรอปดาวน์: ผู้ดูแล / แอดมิน */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors',
+                    assignedAdminFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  )}
+                  title="กรองตามแอดมินผู้ดูแล"
+                >
+                  <User className="size-3.5" />
+                  <span className="max-w-[80px] truncate">
+                    {assignedAdminFilter === 'all'
+                      ? 'ผู้ดูแล'
+                      : assignedAdminFilter === 'unassigned'
+                        ? 'ยังไม่มอบหมาย'
+                        : (admins.find((a) => a.id === assignedAdminFilter)?.name ?? 'ผู้ดูแล')}
+                  </span>
+                  <ChevronDown className="size-3 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">แอดมินผู้ดูแล</DropdownMenuLabel>
+                <DropdownMenuItem
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', assignedAdminFilter === 'all' && 'font-semibold bg-accent')}
+                  onClick={() => setAssignedAdminFilter('all')}
+                >
+                  <span>ทั้งหมด</span>
+                  {assignedAdminFilter === 'all' && <Check className="size-3 text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', assignedAdminFilter === 'unassigned' && 'font-semibold bg-accent')}
+                  onClick={() => setAssignedAdminFilter('unassigned')}
+                >
+                  <span>ยังไม่มอบหมาย</span>
+                  {assignedAdminFilter === 'unassigned' && <Check className="size-3 text-primary" />}
+                </DropdownMenuItem>
+                {admins.length > 0 && <DropdownMenuSeparator />}
+                {admins.map((adm) => (
+                  <DropdownMenuItem
+                    key={adm.id}
+                    className={cn('cursor-pointer text-xs flex items-center justify-between', assignedAdminFilter === adm.id && 'font-semibold bg-accent')}
+                    onClick={() => setAssignedAdminFilter(adm.id)}
+                  >
+                    <span className="truncate">{adm.name}</span>
+                    {assignedAdminFilter === adm.id && <Check className="size-3 text-primary shrink-0" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* ปุ่มดรอปดาวน์: แพลตฟอร์ม */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors',
+                    platformFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  )}
+                  title="กรองตามแพลตฟอร์ม"
+                >
+                  {platformFilter === 'all' ? (
+                    <Layers className="size-3.5" />
+                  ) : (
+                    <PlatformIcon platform={platformFilter} size="xs" />
+                  )}
+                  <span>
+                    {platformFilter === 'all'
+                      ? 'แพลตฟอร์ม'
+                      : platformFilter === 'facebook'
+                        ? 'Facebook'
+                        : platformFilter === 'instagram'
+                          ? 'Instagram'
+                          : platformFilter === 'line'
+                            ? 'LINE'
+                            : platformFilter}
+                  </span>
+                  <ChevronDown className="size-3 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-44">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">ช่องทาง / แพลตฟอร์ม</DropdownMenuLabel>
+                <DropdownMenuItem
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'all' && 'font-semibold bg-accent')}
+                  onClick={() => setPlatformFilter('all')}
+                >
+                  <span className="flex items-center gap-2"><Layers className="size-3.5 text-muted-foreground" /> ทั้งหมด</span>
+                  {platformFilter === 'all' && <Check className="size-3 text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'facebook' && 'font-semibold bg-accent')}
+                  onClick={() => setPlatformFilter('facebook')}
+                >
+                  <span className="flex items-center gap-2"><PlatformIcon platform="facebook" size="xs" /> Facebook</span>
+                  {platformFilter === 'facebook' && <Check className="size-3 text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'instagram' && 'font-semibold bg-accent')}
+                  onClick={() => setPlatformFilter('instagram')}
+                >
+                  <span className="flex items-center gap-2"><PlatformIcon platform="instagram" size="xs" /> Instagram</span>
+                  {platformFilter === 'instagram' && <Check className="size-3 text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'line' && 'font-semibold bg-accent')}
+                  onClick={() => setPlatformFilter('line')}
+                >
+                  <span className="flex items-center gap-2"><PlatformIcon platform="line" size="xs" /> LINE</span>
+                  {platformFilter === 'line' && <Check className="size-3 text-primary" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <FilterChip active={inboxGroup === 'follow_up'} onClick={() => setInboxGroup(inboxGroup === 'follow_up' ? 'all' : 'follow_up')}>
               <Star className={cn('size-3.5', inboxGroup === 'follow_up' && 'fill-current')} />
               ติดตามผล
@@ -491,18 +646,6 @@ export default function InboxClient({
             </FilterChip>
             {inboxGroup !== 'all' && inboxGroup !== 'follow_up' && inboxGroup !== 'unread' && (
               <FilterChip active onClick={() => setInboxGroup('all')}>{GROUP_LABEL[inboxGroup]}</FilterChip>
-            )}
-            {orderFilter !== 'all' && (
-              <FilterChip active onClick={() => setOrderFilter('all')}>
-                {ORDER_FILTER_LABELS[orderFilter]}
-              </FilterChip>
-            )}
-            {assignedAdminFilter !== 'all' && (
-              <FilterChip active onClick={() => setAssignedAdminFilter('all')}>
-                {assignedAdminFilter === 'unassigned'
-                  ? 'ยังไม่มอบหมาย'
-                  : `ผู้ดูแล: ${admins.find((a) => a.id === assignedAdminFilter)?.name ?? 'แอดมิน'}`}
-              </FilterChip>
             )}
             {selectedPages.map((id) => {
               const page = pages.find((p) => p.id === id);
@@ -590,6 +733,7 @@ export default function InboxClient({
           setInboxGroup('all');
           setOrderFilter('all');
           setAssignedAdminFilter('all');
+          setPlatformFilter('all');
         }}
       />
     </div>
@@ -921,7 +1065,7 @@ function ChatRoom({
   const [pendingVideo, setPendingVideo] = useState<{ file: File; preview: string } | null>(null);
   /** สื่อจากคลังเป็นคนละงานกับ Paperclip ซึ่งแนบไฟล์ใหม่จากเครื่อง */
   const [libraryKind, setLibraryKind] = useState<'image' | 'video' | null>(null);
-  const [pendingLibrary, setPendingLibrary] = useState<LibraryItem | null>(null);
+  const [pendingLibraryItems, setPendingLibraryItems] = useState<LibraryItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [canned, setCanned] = useState<CannedResponse[]>([]);
@@ -1303,27 +1447,36 @@ function ChatRoom({
   }
 
   async function sendLibraryMedia() {
-    const pending = pendingLibrary;
-    if (!pending || uploading) return;
+    const items = [...pendingLibraryItems];
+    if (items.length === 0 || uploading) return;
     setUploading(true);
+    let sentCount = 0;
     try {
-      const res = await fetch(`/api/conversations/${c.id}/reply-library-media`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ media_id: pending.id, idempotency_key: idempotencyKey.current }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok || !json.data?.sent) {
-        toast.error(json?.error?.message_th ?? json?.data?.reason_th ?? 'ส่งไฟล์จากคลังไม่สำเร็จ');
-        return;
+      for (const item of items) {
+        const res = await fetch(`/api/conversations/${c.id}/reply-library-media`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ media_id: item.id, idempotency_key: newIdempotencyKey() }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok || !json.data?.sent) {
+          toast.error(json?.error?.message_th ?? json?.data?.reason_th ?? 'ส่งไฟล์จากคลังไม่สำเร็จ');
+          setPendingLibraryItems(items.slice(sentCount));
+          return;
+        }
+        sentCount++;
       }
-      setPendingLibrary(null);
+      setPendingLibraryItems([]);
       idempotencyKey.current = newIdempotencyKey();
       stickBottomRef.current = true;
       await loadMessages();
       onChanged();
+      if (sentCount > 1) {
+        toast.success(`ส่งไฟล์จากคลังสำเร็จ ${sentCount} รายการ`);
+      }
     } catch (err) {
       toast.error('ส่งไฟล์จากคลังไม่สำเร็จ', { description: err instanceof Error ? err.message : undefined });
+      setPendingLibraryItems(items.slice(sentCount));
     } finally {
       setUploading(false);
     }
@@ -1702,6 +1855,12 @@ function ChatRoom({
                     )}
                     <MessageBubble
                       message={m}
+                      isRead={
+                        m.direction === 'out' && (
+                          Boolean(c.last_customer_message_at && new Date(m.created_at).getTime() <= new Date(c.last_customer_message_at).getTime()) ||
+                          messages.some((other) => other.direction === 'in' && new Date(other.created_at).getTime() >= new Date(m.created_at).getTime())
+                        )
+                      }
                       onTap={() => setMenuFor(m)}
                       onSwipeRight={() => replyTo(m)}
                     />
@@ -1856,18 +2015,46 @@ function ChatRoom({
           </div>
         )}
 
-        {canReply && pendingLibrary && (
-          <div className="mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2">
-            {pendingLibrary.mime.startsWith('video/')
-              ? <video src={pendingLibrary.preview_url} className="h-20 w-28 shrink-0 rounded bg-black object-contain" />
-              // eslint-disable-next-line @next/next/no-img-element
-              : <img src={pendingLibrary.preview_url} alt="สื่อจากคลัง" className="size-16 shrink-0 rounded object-cover" />}
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium">{pendingLibrary.mime.startsWith('video/') ? 'วิดีโอจากคลัง' : 'รูปจากคลัง'}</p>
-              <p className="text-[11px] text-muted-foreground">{(pendingLibrary.bytes / 1024 / 1024).toFixed(1)} MB · ตรวจตัวอย่างก่อนส่ง</p>
+        {canReply && pendingLibraryItems.length > 0 && (
+          <div className="mb-2 rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-foreground">
+                สื่อจากคลัง ({pendingLibraryItems.length} รายการ) · ตรวจตัวอย่างก่อนส่ง
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" className="h-7 text-xs" onClick={() => void sendLibraryMedia()} disabled={uploading}>
+                  {uploading ? <Loader2 className="size-3 animate-spin mr-1" /> : <Send className="size-3 mr-1" />}
+                  ส่ง ({pendingLibraryItems.length})
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setPendingLibraryItems([])} disabled={uploading}>
+                  ล้างทั้งหมด
+                </Button>
+              </div>
             </div>
-            <Button size="sm" onClick={() => void sendLibraryMedia()} disabled={uploading}>{uploading ? <Loader2 className="animate-spin" /> : <Send />} ส่ง</Button>
-            <Button size="icon" variant="ghost" className="size-9" aria-label="เอาไฟล์จากคลังออก" onClick={() => setPendingLibrary(null)} disabled={uploading}><X /></Button>
+            <div className="flex items-center gap-2 overflow-x-auto py-1">
+              {pendingLibraryItems.map((item) => (
+                <div key={item.id} className="relative group shrink-0 rounded-lg border bg-background overflow-hidden">
+                  {item.mime.startsWith('video/') ? (
+                    <video src={item.preview_url} className="h-16 w-20 bg-black object-contain" />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.preview_url} alt="สื่อจากคลัง" className="size-16 object-cover" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPendingLibraryItems((prev) => prev.filter((x) => x.id !== item.id))}
+                    disabled={uploading}
+                    className="absolute top-1 right-1 size-5 rounded-full bg-black/70 text-white flex items-center justify-center text-xs hover:bg-destructive transition"
+                    title="ลบออก"
+                  >
+                    <X className="size-3" />
+                  </button>
+                  <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[9px] text-center truncate px-0.5">
+                    {(item.bytes / 1024 / 1024).toFixed(1)}M
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1962,7 +2149,14 @@ function ChatRoom({
       <MediaLibraryPicker
         kind={libraryKind}
         onClose={() => setLibraryKind(null)}
-        onSelect={(item) => { setPendingLibrary(item); setLibraryKind(null); }}
+        onSelectMultiple={(items) => {
+          setPendingLibraryItems((prev) => {
+            const map = new Map(prev.map((i) => [i.id, i]));
+            for (const it of items) map.set(it.id, it);
+            return Array.from(map.values());
+          });
+          setLibraryKind(null);
+        }}
       />
 
       {/* ---------- เมนูแตะข้อความ ---------- */}
@@ -2027,59 +2221,203 @@ function ChatRoom({
 function MediaLibraryPicker({
   kind,
   onClose,
-  onSelect,
+  onSelectMultiple,
 }: {
   kind: 'image' | 'video' | null;
   onClose: () => void;
-  onSelect: (item: LibraryItem) => void;
+  onSelectMultiple: (items: LibraryItem[]) => void;
 }) {
-  const [loaded, setLoaded] = useState<{ kind: 'image' | 'video'; items: LibraryItem[] } | null>(null);
+  const [loaded, setLoaded] = useState<{ items: LibraryItem[]; albums: string[] } | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<string>('ทั้งหมด');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!kind) return;
     let alive = true;
-    void fetch('/api/media-library', { cache: 'no-store' })
+    setSelectedIds(new Set());
+    setSelectedAlbum('ทั้งหมด');
+    void fetch('/api/media-library?for_picker=1', { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => {
         if (!alive) return;
         if (!json.ok) throw new Error(json?.error?.message_th ?? 'อ่านคลังสื่อไม่สำเร็จ');
-        const all = json.data.items as LibraryItem[];
-        setLoaded({ kind, items: all.filter((item) => kind === 'video' ? item.mime.startsWith('video/') : item.mime.startsWith('image/')) });
+        const all = (json.data.items as LibraryItem[]) || [];
+        const albums = (json.data.albums as string[]) || ['โปรโมชั่น', 'สินค้า', 'รีวิว / สลิป', 'วิดีโอ', 'ระบบ', 'ทั่วไป'];
+        setLoaded({
+          items: all,
+          albums,
+        });
       })
       .catch((err) => {
-        if (alive) { setLoaded({ kind, items: [] }); toast.error(err instanceof Error ? err.message : 'อ่านคลังสื่อไม่สำเร็จ'); }
+        if (alive) {
+          setLoaded({ items: [], albums: [] });
+          toast.error(err instanceof Error ? err.message : 'อ่านคลังสื่อไม่สำเร็จ');
+        }
       });
     return () => { alive = false; };
   }, [kind]);
 
-  const items = kind && loaded?.kind === kind ? loaded.items : null;
+  const allItems = useMemo(() => {
+    if (!loaded || !kind) return [];
+    return loaded.items.filter((item) =>
+      kind === 'video' ? item.mime.startsWith('video/') : item.mime.startsWith('image/'),
+    );
+  }, [loaded, kind]);
+
+  const filteredItems = useMemo(() => {
+    if (selectedAlbum === 'ทั้งหมด') return allItems;
+    return allItems.filter((item) => {
+      if (selectedAlbum === 'วิดีโอ') return item.mime.startsWith('video/');
+      return item.categories?.includes(selectedAlbum);
+    });
+  }, [allItems, selectedAlbum]);
+
+  const toggleSelect = (item: LibraryItem) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    const selected = allItems.filter((item) => selectedIds.has(item.id));
+    if (selected.length === 0) return;
+    onSelectMultiple(selected);
+    onClose();
+  };
+
+  const albumsList = useMemo(() => {
+    if (!loaded?.albums) return ['ทั้งหมด'];
+    return ['ทั้งหมด', ...loaded.albums.filter((a) => a !== 'ทั้งหมด')];
+  }, [loaded?.albums]);
 
   return (
     <Dialog open={kind !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="bottom-0 left-0 top-auto w-full max-w-none translate-x-0 translate-y-0 rounded-b-none rounded-t-3xl p-4 sm:left-1/2 sm:top-1/2 sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg">
-        <DialogHeader>
-          <DialogTitle>{kind === 'video' ? 'เลือกจากคลังวิดีโอ' : 'เลือกจากคลังรูป'}</DialogTitle>
-          <DialogDescription>เลือกไฟล์แล้วระบบจะนำมาพรีวิวในห้องแชทก่อน คุณต้องกดส่งอีกครั้ง</DialogDescription>
+      <DialogContent className="bottom-0 left-0 top-auto w-full max-w-none translate-x-0 translate-y-0 rounded-b-none rounded-t-3xl p-4 sm:left-1/2 sm:top-1/2 sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl max-h-[88dvh] flex flex-col gap-3">
+        <DialogHeader className="pb-1 text-left">
+          <DialogTitle className="text-base">
+            {kind === 'video' ? 'เลือกจากคลังวิดีโอ' : 'เลือกจากคลังรูปภาพ'}
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            แตะที่รูปเพื่อเลือกหลายรายการพร้อมกัน แล้วกดปุ่ม “นำไปใส่ในแชท” ด้านล่าง
+          </DialogDescription>
         </DialogHeader>
-        {items === null ? (
-          <div className="flex justify-center py-12"><Loader2 className="animate-spin" /></div>
-        ) : items.length === 0 ? (
-          <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
-            ยังไม่มี{kind === 'video' ? 'วิดีโอ' : 'รูป'}ในคลัง<br />เพิ่มไฟล์ได้ที่เมนู “คลังสื่อ”
-          </div>
-        ) : (
-          <div className="grid max-h-[60vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
-            {items.map((item) => (
-              <button key={item.id} type="button" onClick={() => onSelect(item)} className="overflow-hidden rounded-xl border text-left transition hover:border-primary hover:ring-2 hover:ring-primary/20">
-                {item.mime.startsWith('video/')
-                  ? <video src={item.preview_url} muted preload="metadata" className="aspect-video w-full bg-black object-contain" />
-                  // eslint-disable-next-line @next/next/no-img-element
-                  : <img src={item.preview_url} alt="รูปในคลัง" className="aspect-video w-full object-cover" />}
-                <span className="block px-2 py-1.5 text-[11px] text-muted-foreground">{(item.bytes / 1024 / 1024).toFixed(1)} MB · เลือก</span>
-              </button>
-            ))}
+
+        {/* --- แถบเลือกอัลบั้ม --- */}
+        {loaded && albumsList.length > 1 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+            {albumsList.map((alb) => {
+              const active = selectedAlbum === alb;
+              return (
+                <button
+                  key={alb}
+                  type="button"
+                  onClick={() => setSelectedAlbum(alb)}
+                  className={cn(
+                    'shrink-0 rounded-full px-3 py-1 text-xs transition border',
+                    active
+                      ? 'border-primary bg-primary text-primary-foreground font-medium'
+                      : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  )}
+                >
+                  {alb}
+                </button>
+              );
+            })}
           </div>
         )}
+
+        {/* --- ตารางรูปภาพย่อแบบกะทัดรัด (4-6 คอลัมน์) --- */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {loaded === null ? (
+            <div className="flex justify-center py-12"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>
+          ) : filteredItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed py-12 text-center text-xs text-muted-foreground">
+              {allItems.length === 0 ? (
+                <>ยังไม่มี{kind === 'video' ? 'วิดีโอ' : 'รูปภาพ'}ในคลัง<br />เพิ่มไฟล์ได้ที่เมนู “คลังสื่อ”</>
+              ) : (
+                <>ไม่มีไฟล์ในอัลบั้ม “{selectedAlbum}”</>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 p-0.5">
+              {filteredItems.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => toggleSelect(item)}
+                    className={cn(
+                      'group relative aspect-square w-full overflow-hidden rounded-lg border bg-muted text-left transition focus:outline-none',
+                      isSelected ? 'border-primary ring-2 ring-primary ring-offset-1' : 'hover:border-primary/50',
+                    )}
+                  >
+                    {item.mime.startsWith('video/') ? (
+                      <video src={item.preview_url} muted preload="metadata" className="size-full object-cover bg-black" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.preview_url} alt="รูปในคลัง" loading="lazy" className="size-full object-cover" />
+                    )}
+
+                    {/* เครื่องหมายถูกเมื่อเลือก */}
+                    <div
+                      className={cn(
+                        'absolute top-1 right-1 size-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm transition',
+                        isSelected
+                          ? 'bg-primary text-primary-foreground scale-100'
+                          : 'border border-white/80 bg-black/40 text-transparent opacity-0 group-hover:opacity-100',
+                      )}
+                    >
+                      <Check className="size-3 stroke-[3]" />
+                    </div>
+
+                    {/* ป้ายบอกขนาดไฟล์ */}
+                    <span className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white text-[9px] px-1 pb-0.5 pt-2 truncate">
+                      {(item.bytes / 1024 / 1024).toFixed(1)}MB
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* --- แถบล่างสรุปการเลือกและปุ่มยืนยัน --- */}
+        <div className="flex items-center justify-between border-t pt-2 mt-auto text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground font-medium">
+              เลือกแล้ว <strong className="text-foreground">{selectedIds.size}</strong> รายการ
+            </span>
+            {filteredItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedIds.size === filteredItems.length) setSelectedIds(new Set());
+                  else setSelectedIds(new Set(filteredItems.map((i) => i.id)));
+                }}
+                className="text-primary hover:underline"
+              >
+                {selectedIds.size === filteredItems.length ? 'ล้างที่เลือก' : 'เลือกทั้งหมดในหน้านี้'}
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              ยกเลิก
+            </Button>
+            <Button
+              size="sm"
+              disabled={selectedIds.size === 0}
+              onClick={handleConfirm}
+            >
+              นำไปใส่ในแชท ({selectedIds.size})
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -2142,10 +2480,12 @@ function RefreshNameButton({
 
 function MessageBubble({
   message: m,
+  isRead = false,
   onTap,
   onSwipeRight,
 }: {
   message: MessageRow;
+  isRead?: boolean;
   onTap: () => void;
   onSwipeRight: () => void;
 }) {
@@ -2293,6 +2633,17 @@ function MessageBubble({
 
       <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
         <span>{clockTh(m.created_at)}</span>
+        {outgoing && (
+          isRead ? (
+            <span className="inline-flex items-center gap-0.5 text-sky-600 dark:text-sky-400 font-medium">
+              <CheckCheck className="size-3" /> อ่านแล้ว
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+              <Check className="size-3" /> ส่งแล้ว
+            </span>
+          )
+        )}
         {outgoing && m.admin_name && <span>· {m.admin_name}</span>}
         {outgoing && m.sender_type === 'bot' && <span>· ตอบอัตโนมัติ</span>}
         {/* ป้ายบอกช่องทางที่ใช้ส่ง — อ่านอย่างเดียว ไม่ใช่ตัวเลือก */}

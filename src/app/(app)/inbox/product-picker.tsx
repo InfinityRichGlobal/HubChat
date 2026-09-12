@@ -4,15 +4,12 @@
  * ===========================================================================
  * ⚠️ ตั้งใจ **ไม่** ทำหน้าร้านใหม่ — ใช้แคตตาล็อกที่มีอยู่แล้ว
  *    สิ่งที่แอดมินต้องการตอนคุยกับลูกค้าคือ "พิมพ์ชื่อกับราคาให้ถูก โดยไม่ต้องจำ"
- *    ไม่ใช่ระบบเลือกสินค้าที่สวยแต่กดหลายขั้น
  *
- * 🔴 ราคาที่วางลงช่องพิมพ์มาจาก **เซิร์ฟเวอร์** เท่านั้น
- *    คอมโพเนนต์นี้ส่งไปแค่ id สินค้า ไม่เคยส่งราคากลับไป
- *    (ถ้าเบราว์เซอร์ส่งราคาได้ ก็แก้ราคาแล้วเสนอผิดให้ลูกค้าได้)
+ * 🔴 ราคาและโปรโมชันมาจากเซิร์ฟเวอร์เท่านั้น เพื่อความถูกต้อง
+ *    มีช่องตัวอย่างข้อความแบบแก้ไขได้ ให้แอดมินพิมพ์ข้อความเพิ่มหรือแก้คำได้อิสระก่อนใส่ลงแชท
  */
-import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { Loader2, Minus, Plus, Search, Tag } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { Loader2, Minus, Plus, RefreshCw, Search, Tag } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -27,7 +24,13 @@ type Product = {
   is_active: boolean;
 };
 
-type Promotion = { id: string; name: string; is_active: boolean };
+type Promotion = {
+  id: string;
+  name: string;
+  type?: string;
+  price?: number | null;
+  is_active: boolean;
+};
 
 export default function ProductPicker({
   conversationId,
@@ -43,26 +46,34 @@ export default function ProductPicker({
   const [products, setProducts] = useState<Product[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [composing, setComposing] = useState(false);
   const [q, setQ] = useState('');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [promotionIds, setPromotionIds] = useState<string[]>([]);
-  const [showPrice, setShowPrice] = useState(false);
+  const [showAmount, setShowAmount] = useState(true);
 
-  /**
-   * ⚠️ ตั้งค่า state ใน callback ของ promise ไม่ใช่ในตัว effect ตรง ๆ
-   *    React ห้าม setState แบบซิงโครนัสในตัว effect เพราะทำให้ render ซ้อนกันหลายรอบ
-   *    (บทเรียนเดียวกับหน้าตั้งค่าแจ้งเตือนในรอบ 10)
-   */
+  // ปะหัว-ปะท้าย snippets
+  const [headerSnippet, setHeaderSnippet] = useState(true);
+  const [transferSnippet, setTransferSnippet] = useState(false);
+  const [codSnippet, setCodSnippet] = useState(false);
+
+  // ข้อความตัวอย่างที่แก้ไขได้อิสระ
+  const [previewText, setPreviewText] = useState('');
+  const [isManualEdited, setIsManualEdited] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     let alive = true;
 
     void (async () => {
-      // เปิดใหม่ = เริ่มจากศูนย์ ไม่ค้างของรอบก่อน
       if (alive) setQuantities({});
       if (alive) setPromotionIds([]);
-      if (alive) setShowPrice(false);
+      if (alive) setShowAmount(true);
+      if (alive) setHeaderSnippet(true);
+      if (alive) setTransferSnippet(false);
+      if (alive) setCodSnippet(false);
+      if (alive) setPreviewText('');
+      if (alive) setIsManualEdited(false);
       if (alive) setQ('');
       if (alive) setLoading(true);
 
@@ -96,34 +107,57 @@ export default function ProductPicker({
       if (next === 0) delete copy[id]; else copy[id] = next;
       return copy;
     });
+    setIsManualEdited(false);
   }
 
-  async function insert() {
-    const items = Object.entries(quantities).map(([product_id, qty]) => ({ product_id, qty }));
-    if (items.length === 0) return;
-    setBusy(true);
+  // คำนวณและดึงข้อความจากเซิร์ฟเวอร์
+  const fetchComposedText = useCallback(async (
+    currentQuantities: Record<string, number>,
+    currentPromos: string[],
+    includeAmount: boolean,
+    hasHeader: boolean,
+    hasTransfer: boolean,
+    hasCod: boolean,
+  ) => {
+    const items = Object.entries(currentQuantities).map(([product_id, qty]) => ({ product_id, qty }));
+    if (items.length === 0) {
+      setPreviewText('');
+      return;
+    }
+
+    const footerParts: string[] = [];
+    if (hasTransfer) footerParts.push('ลูกค้าเลือกชำระแบบโอน แอดมินจัดส่งฟรีให้ค่า');
+    if (hasCod) footerParts.push('หากเลือกชำระปลายทาง + เพิ่ม 40 บาทค่า');
+
     try {
+      setComposing(true);
       const res = await fetch(`/api/conversations/${conversationId}/compose`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        // ⭐ ส่งแค่ id/จำนวน/ตัวเลือกแสดงผล — ราคาให้เซิร์ฟเวอร์เป็นคนหา
-        body: JSON.stringify({ kind: 'products', items: items.slice(0, 10), promotion_ids: promotionIds, include_amount: showPrice }),
+        body: JSON.stringify({ kind: 'products', items: items.slice(0, 10), promotion_ids: currentPromos, include_amount: includeAmount, custom_header: hasHeader ? 'แอดมินสรุปยอดให้เรียบร้อยนะคะ' : undefined, custom_footer: footerParts.length > 0 ? footerParts.join('\n') : undefined }),
       });
       const json = (await res.json()) as {
         ok: boolean;
-        data?: { text: string; ready: boolean; warning_th: string | null };
-        error?: { message_th: string };
+        data?: { text: string };
       };
-      if (!json.ok || !json.data?.text) {
-        toast.error(json.error?.message_th ?? 'ใส่สินค้าไม่สำเร็จ');
-        return;
+      if (json.ok && json.data?.text) {
+        setPreviewText(json.data.text);
       }
-      onInsertText(json.data.text);
-      onClose();
+    } catch {
+      // Ignored
     } finally {
-      setBusy(false);
+      setComposing(false);
     }
-  }
+  }, [conversationId]);
+
+  // ซิงก์พรีวิวเมื่อตัวเลือกเปลี่ยน และยังไม่ได้พิมพ์เอง
+  useEffect(() => {
+    if (!open || isManualEdited) return;
+    const timer = setTimeout(() => {
+      void fetchComposedText(quantities, promotionIds, showAmount, headerSnippet, transferSnippet, codSnippet);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [open, quantities, promotionIds, showAmount, headerSnippet, transferSnippet, codSnippet, isManualEdited, fetchComposedText]);
 
   const selectedItems = Object.entries(quantities).map(([id, qty]) => {
     const p = products.find((x) => x.id === id);
@@ -131,15 +165,20 @@ export default function ProductPicker({
   }).filter((x) => Boolean(x.product));
 
   const totalQty = selectedItems.reduce((sum, item) => sum + item.qty, 0);
-  const totalEstimatedAmount = selectedItems.reduce((sum, item) => sum + (Number(item.product?.price ?? 0) * item.qty), 0);
+
+  function insert() {
+    if (!previewText.trim()) return;
+    onInsertText(previewText.trim());
+    onClose();
+  }
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle>ใส่สินค้าในช่องพิมพ์</DialogTitle>
+      <DialogContent className="max-h-[90vh] overflow-hidden flex flex-col max-w-xl">
+        <DialogHeader className="pb-1">
+          <DialogTitle>สรุปยอด / ใส่รายการสินค้า</DialogTitle>
           <DialogDescription>
-            เลือกสินค้าและจำนวน แล้วเลือกได้ว่าจะใส่ราคา/โปรโมชันหรือไม่ ระบบจะจัดรูปแบบรายการสินค้าให้อัตโนมัติ
+            เลือกสินค้า โปรโมชัน และข้อความสรุปยอด สามารถพิมพ์แก้ไขข้อความได้อิสระก่อนใส่ลงแชท
           </DialogDescription>
         </DialogHeader>
 
@@ -148,18 +187,17 @@ export default function ProductPicker({
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหาสินค้า"
-            className="pl-8"
-            autoFocus
+            placeholder="ค้นหาชื่อสินค้า / รุ่น..."
+            className="pl-8 h-9 text-sm"
           />
         </div>
 
-        <div className="-mx-1 max-h-56 overflow-y-auto px-1">
+        <div className="-mx-1 max-h-44 overflow-y-auto px-1 divide-y">
           {loading && (
-            <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin" /></div>
+            <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
           )}
           {!loading && visible.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
+            <p className="py-6 text-center text-sm text-muted-foreground">
               {products.length === 0 ? 'ยังไม่มีสินค้าในระบบ' : 'ไม่พบสินค้าที่ค้นหา'}
             </p>
           )}
@@ -170,24 +208,24 @@ export default function ProductPicker({
               <div
                 key={p.id}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md border-b px-2 py-2 text-left last:border-b-0',
-                  on ? 'bg-accent' : '',
+                  'flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors',
+                  on ? 'bg-primary/5' : 'hover:bg-muted/40',
                 )}
               >
-                <span className="min-w-0 flex-1 truncate text-sm">
+                <span className="min-w-0 flex-1 truncate text-xs sm:text-sm font-medium">
                   {p.name}
-                  {p.variant && <span className="text-muted-foreground"> ({p.variant})</span>}
+                  {p.variant && <span className="text-muted-foreground font-normal"> ({p.variant})</span>}
                 </span>
-                <span className="shrink-0 text-sm text-muted-foreground">
+                <span className="shrink-0 text-xs sm:text-sm font-semibold text-muted-foreground">
                   {Number(p.price).toLocaleString('th-TH')} ฿
                 </span>
                 <div className="flex shrink-0 items-center rounded-md border bg-background">
-                  <Button type="button" variant="ghost" size="icon" className="size-8" onClick={() => changeQty(p.id, -1)} disabled={!on} aria-label={`ลดจำนวน ${p.name}`}>
-                    <Minus className="size-3.5" />
+                  <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => changeQty(p.id, -1)} disabled={!on} aria-label={`ลดจำนวน ${p.name}`}>
+                    <Minus className="size-3" />
                   </Button>
-                  <span className="w-7 text-center text-sm font-medium">{qty}</span>
-                  <Button type="button" variant="ghost" size="icon" className="size-8" onClick={() => changeQty(p.id, 1)} aria-label={`เพิ่มจำนวน ${p.name}`}>
-                    <Plus className="size-3.5" />
+                  <span className="w-6 text-center text-xs font-semibold">{qty}</span>
+                  <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => changeQty(p.id, 1)} aria-label={`เพิ่มจำนวน ${p.name}`}>
+                    <Plus className="size-3" />
                   </Button>
                 </div>
               </div>
@@ -195,14 +233,10 @@ export default function ProductPicker({
           })}
         </div>
 
-        <div className="flex items-center gap-2 rounded-md border p-2">
-          <Checkbox id="show-product-price" checked={showPrice} onCheckedChange={(value) => setShowPrice(value === true)} />
-          <label htmlFor="show-product-price" className="text-sm font-medium cursor-pointer">แสดงราคาและยอดรวมด้วย</label>
-        </div>
-
+        {/* --- โปรโมชัน --- */}
         {promotions.length > 0 && (
-          <div className="space-y-1.5 rounded-md border p-2">
-            <p className="flex items-center gap-1.5 text-xs font-medium"><Tag className="size-3.5" /> โปรโมชันที่ต้องการใส่</p>
+          <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground"><Tag className="size-3.5 text-primary" /> โปรโมชัน</p>
             <div className="flex flex-wrap gap-1.5">
               {promotions.map((promotion) => {
                 const on = promotionIds.includes(promotion.id);
@@ -212,10 +246,14 @@ export default function ProductPicker({
                     type="button"
                     size="sm"
                     variant={on ? 'default' : 'outline'}
-                    className="h-7 text-xs"
-                    onClick={() => setPromotionIds((prev) => on ? prev.filter((id) => id !== promotion.id) : [...prev, promotion.id])}
+                    className="h-7 text-xs px-2.5"
+                    onClick={() => {
+                      setPromotionIds((prev) => on ? prev.filter((id) => id !== promotion.id) : [promotion.id]);
+                      setIsManualEdited(false);
+                    }}
                   >
                     {promotion.name}
+                    {promotion.price ? ` (${Number(promotion.price).toLocaleString('th-TH')}฿)` : ''}
                   </Button>
                 );
               })}
@@ -223,37 +261,83 @@ export default function ProductPicker({
           </div>
         )}
 
-        {/* --- ตัวอย่างข้อความที่วางจริง --- */}
-        {selectedItems.length > 0 && (
-          <div className="rounded-md border bg-muted/40 p-2.5 text-xs space-y-1 max-h-28 overflow-y-auto">
-            <div className="flex items-center justify-between font-semibold text-foreground pb-1 border-b">
-              <span>ตัวอย่างข้อความที่จะวาง</span>
-              {showPrice && (
-                <span className="text-primary">
-                  รวม {totalEstimatedAmount.toLocaleString('th-TH')} บาท
-                </span>
-              )}
-            </div>
-            <div className="text-muted-foreground whitespace-pre-wrap leading-snug">
-              {selectedItems.map((item) => {
-                const title = item.product?.variant ? `${item.product.name} (${item.product.variant})` : item.product?.name;
-                const priceStr = showPrice ? ` — ${(Number(item.product?.price ?? 0) * item.qty).toLocaleString('th-TH')} บาท` : '';
-                return `• ${title} x ${item.qty}${priceStr}`;
-              }).join('\n')}
-              {showPrice && selectedItems.length > 1 && (
-                `\nยอดรวมสินค้า: ${totalEstimatedAmount.toLocaleString('th-TH')} บาท`
-              )}
-              {promotionIds.length > 0 && (
-                '\n' + promotions.filter((pr) => promotionIds.includes(pr.id)).map((pr) => `🎁 ${pr.name}`).join('\n')
-              )}
-            </div>
+        {/* --- ตัวเลือกสรุปยอดและ Snippets หัวท้าย --- */}
+        <div className="space-y-1.5 rounded-lg border bg-muted/10 p-2.5 text-xs">
+          <div className="flex items-center gap-2 pb-1 border-b">
+            <Checkbox
+              id="show-product-price"
+              checked={showAmount}
+              onCheckedChange={(value) => { setShowAmount(value === true); setIsManualEdited(false); }}
+            />
+            <label htmlFor="show-product-price" className="font-semibold cursor-pointer text-foreground">
+              แสดงราคา ส่วนลด และยอดรวม
+            </label>
           </div>
-        )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+            <label className="flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground">
+              <Checkbox
+                checked={headerSnippet}
+                onCheckedChange={(v) => { setHeaderSnippet(v === true); setIsManualEdited(false); }}
+              />
+              <span>แอดมินสรุปยอดให้</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground">
+              <Checkbox
+                checked={transferSnippet}
+                onCheckedChange={(v) => { setTransferSnippet(v === true); setIsManualEdited(false); }}
+              />
+              <span>โอนเงิน = ส่งฟรี</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground">
+              <Checkbox
+                checked={codSnippet}
+                onCheckedChange={(v) => { setCodSnippet(v === true); setIsManualEdited(false); }}
+              />
+              <span>ปลายทาง +40 บ.</span>
+            </label>
+          </div>
+        </div>
+
+        {/* --- ช่องแก้ไขข้อความก่อนส่ง --- */}
+        <div className="space-y-1 flex-1 min-h-0 flex flex-col">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              ตัวอย่างข้อความ
+              {composing && <Loader2 className="size-3 animate-spin text-primary" />}
+              {isManualEdited && <span className="text-[10px] text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded font-normal">แก้ไขเอง</span>}
+            </span>
+            {isManualEdited && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsManualEdited(false);
+                  void fetchComposedText(quantities, promotionIds, showAmount, headerSnippet, transferSnippet, codSnippet);
+                }}
+                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+              >
+                <RefreshCw className="size-3" /> รีเซ็ตข้อความ
+              </button>
+            )}
+          </div>
+          <textarea
+            value={previewText}
+            onChange={(e) => {
+              setPreviewText(e.target.value);
+              setIsManualEdited(true);
+            }}
+            placeholder={selectedItems.length === 0 ? 'เลือกสินค้าด้านบนเพื่อสร้างข้อความสรุปยอด' : 'กำลังคำนวณข้อความ...'}
+            rows={4}
+            className="w-full flex-1 min-h-[90px] rounded-md border border-input bg-background p-2 text-xs font-mono leading-relaxed outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
 
         <div className="flex justify-end gap-2 pt-2 border-t mt-auto">
-          <Button variant="ghost" onClick={onClose}>ยกเลิก</Button>
-          <Button disabled={busy || selectedItems.length === 0} onClick={() => void insert()}>
-            {busy && <Loader2 className="size-4 animate-spin" />}
+          <Button variant="ghost" size="sm" onClick={onClose}>ยกเลิก</Button>
+          <Button
+            size="sm"
+            disabled={!previewText.trim() || selectedItems.length === 0}
+            onClick={insert}
+          >
             ใส่ลงแชท ({totalQty} ชิ้น)
           </Button>
         </div>

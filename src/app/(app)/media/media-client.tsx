@@ -7,14 +7,13 @@ import {
   Eye,
   EyeOff,
   Folder,
-  FolderPlus,
   ImagePlus,
   Loader2,
   MoreHorizontal,
   Pencil,
   Plus,
   Trash2,
-  X,
+  Video,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -44,13 +43,11 @@ type Item = {
   preview_url: string;
   public_url: string | null;
   created_at: string;
+  categories?: string[];
+  is_hidden?: boolean;
 };
 
-const DEFAULT_ALBUMS = ['โปรโมชั่น', 'สินค้า', 'รีวิว / สลิป', 'ระบบ', 'ทั่วไป'] as const;
-
-const ALBUMS_STORAGE_KEY = 'hubchat_media_albums_v2';
-const FOLDER_STORAGE_KEY = 'hubchat_media_categories_v2';
-const HIDDEN_STORAGE_KEY = 'hubchat_media_hidden_items_v2';
+const DEFAULT_ALBUMS = ['โปรโมชั่น', 'สินค้า', 'รีวิว / สลิป', 'วิดีโอ', 'ระบบ', 'ทั่วไป'] as const;
 
 export default function MediaClient({
   initialItems,
@@ -63,7 +60,7 @@ export default function MediaClient({
   const [busy, setBusy] = useState(false);
   const [albums, setAlbums] = useState<string[]>([...DEFAULT_ALBUMS]);
   const [activeTab, setActiveTab] = useState<string>('ทั้งหมด');
-  const [itemCategories, setItemCategories] = useState<Record<string, string>>({});
+  const [itemCategories, setItemCategories] = useState<Record<string, string[]>>({});
   const [hiddenItemIds, setHiddenItemIds] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
   const [previewItem, setPreviewItem] = useState<Item | null>(null);
@@ -77,33 +74,39 @@ export default function MediaClient({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // โหลดอัลบั้ม, หมวดหมู่ของไฟล์, และรายการที่ถูกซ่อนจาก LocalStorage
+  // โหลดอัลบั้ม, หมวดหมู่ของไฟล์, และรายการที่ถูกซ่อนจากเซิร์ฟเวอร์
   useEffect(() => {
-    try {
-      const savedAlbums = localStorage.getItem(ALBUMS_STORAGE_KEY);
-      if (savedAlbums) {
-        const parsed = JSON.parse(savedAlbums);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setAlbums(parsed);
+    void fetch('/api/media-library', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (!json.ok) return;
+        if (json.data?.items) setItems(json.data.items);
+        if (json.data?.albums && Array.isArray(json.data.albums) && json.data.albums.length > 0) {
+          // ให้แน่ใจว่ามี 'วิดีโอ' อยู่ในอัลบั้มเสมอ
+          const merged = Array.from(new Set([...json.data.albums, 'วิดีโอ']));
+          setAlbums(merged);
         }
-      }
-    } catch {}
-
-    try {
-      const savedCats = localStorage.getItem(FOLDER_STORAGE_KEY);
-      if (savedCats) setItemCategories(JSON.parse(savedCats));
-    } catch {}
-
-    try {
-      const savedHidden = localStorage.getItem(HIDDEN_STORAGE_KEY);
-      if (savedHidden) setHiddenItemIds(JSON.parse(savedHidden));
-    } catch {}
+        if (json.data?.categories) setItemCategories(json.data.categories);
+        if (json.data?.hidden_ids) setHiddenItemIds(json.data.hidden_ids);
+      })
+      .catch(() => {});
   }, []);
 
-  function saveAlbums(newAlbums: string[]) {
-    setAlbums(newAlbums);
+  async function syncSettings(
+    newAlbums?: string[],
+    newCategories?: Record<string, string[]>,
+    newHiddenIds?: string[],
+  ) {
     try {
-      localStorage.setItem(ALBUMS_STORAGE_KEY, JSON.stringify(newAlbums));
+      await fetch('/api/media-library/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          albums: newAlbums,
+          categories: newCategories,
+          hidden_ids: newHiddenIds,
+        }),
+      });
     } catch {}
   }
 
@@ -118,10 +121,11 @@ export default function MediaClient({
       return;
     }
     const updated = [...albums, trimmed];
-    saveAlbums(updated);
+    setAlbums(updated);
     setActiveTab(trimmed);
     setNewAlbumName('');
     setIsAddAlbumOpen(false);
+    void syncSettings(updated);
     toast.success(`สร้างอัลบั้ม "${trimmed}" เรียบร้อย`);
   }
 
@@ -141,72 +145,73 @@ export default function MediaClient({
       return;
     }
 
-    const updated = albums.map((a) => (a === renamingAlbum ? trimmed : a));
-    saveAlbums(updated);
+    const updatedAlbums = albums.map((a) => (a === renamingAlbum ? trimmed : a));
+    setAlbums(updatedAlbums);
 
-    // อัปเดตรายการรูปที่เคยอยู่ในอัลบั้มนี้
-    setItemCategories((prev) => {
-      const next: Record<string, string> = {};
-      for (const [id, cat] of Object.entries(prev)) {
-        next[id] = cat === renamingAlbum ? trimmed : cat;
-      }
-      try {
-        localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    const updatedCats: Record<string, string[]> = {};
+    for (const [id, cats] of Object.entries(itemCategories)) {
+      updatedCats[id] = cats.map((c) => (c === renamingAlbum ? trimmed : c));
+    }
+    setItemCategories(updatedCats);
 
     if (activeTab === renamingAlbum) setActiveTab(trimmed);
     setIsRenameAlbumOpen(false);
     setRenamingAlbum(null);
+    void syncSettings(updatedAlbums, updatedCats);
     toast.success(`เปลี่ยนชื่ออัลบั้มเป็น "${trimmed}" เรียบร้อย`);
   }
 
   function handleDeleteAlbum(albumName: string) {
-    if (albumName === 'ทั่วไป' || albumName === 'ระบบ') {
-      toast.error(`ไม่สามารถลบอัลบั้ม "${albumName}" ได้`);
+    if (albumName === 'ทั่วไป' || albumName === 'ระบบ' || albumName === 'วิดีโอ') {
+      toast.error(`ไม่สามารถลบอัลบั้มหลัก "${albumName}" ได้`);
       return;
     }
-    if (!confirm(`ต้องการลบอัลบั้ม "${albumName}" หรือไม่? รูปในอัลบั้มนี้จะถูกย้ายไปที่ "ทั่วไป"`)) return;
+    if (!confirm(`ต้องการลบอัลบั้ม "${albumName}" หรือไม่? รูปในอัลบั้มนี้จะยังอยู่ในอัลบั้มอื่นๆ หรือ "ทั่วไป"`)) return;
 
-    const updated = albums.filter((a) => a !== albumName);
-    saveAlbums(updated);
+    const updatedAlbums = albums.filter((a) => a !== albumName);
+    setAlbums(updatedAlbums);
 
-    // ย้ายรูปไปทั่วไป
-    setItemCategories((prev) => {
-      const next: Record<string, string> = {};
-      for (const [id, cat] of Object.entries(prev)) {
-        next[id] = cat === albumName ? 'ทั่วไป' : cat;
-      }
-      try {
-        localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    const updatedCats: Record<string, string[]> = {};
+    for (const [id, cats] of Object.entries(itemCategories)) {
+      const filtered = cats.filter((c) => c !== albumName);
+      updatedCats[id] = filtered.length > 0 ? filtered : ['ทั่วไป'];
+    }
+    setItemCategories(updatedCats);
 
     if (activeTab === albumName) setActiveTab('ทั้งหมด');
+    void syncSettings(updatedAlbums, updatedCats);
     toast.success(`ลบอัลบั้ม "${albumName}" เรียบร้อย`);
   }
 
-  function setCategoryForItem(id: string, cat: string, showToast = true) {
+  function toggleCategoryForItem(id: string, cat: string) {
     setItemCategories((prev) => {
-      const next = { ...prev, [id]: cat };
-      try {
-        localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
+      const item = items.find((x) => x.id === id);
+      const isVideo = item?.mime.startsWith('video/');
+      const current = prev[id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
+
+      let nextCats: string[];
+      if (current.includes(cat)) {
+        // หากคลิกอัลบั้มที่มีอยู่แล้ว ให้ถอดออก (แต่ถ้าเหลือ 0 ให้ใส่ 'ทั่วไป' หรือ 'วิดีโอ')
+        nextCats = current.filter((c) => c !== cat);
+        if (nextCats.length === 0) nextCats = isVideo ? ['วิดีโอ'] : ['ทั่วไป'];
+      } else {
+        // เพิ่มเข้าไป (รูปอยู่ได้หลายอัลบั้ม)
+        nextCats = [...current, cat];
+      }
+
+      const next = { ...prev, [id]: nextCats };
+      void syncSettings(undefined, next);
+      toast.success(nextCats.includes(cat) ? `เพิ่มเข้าอัลบั้ม "${cat}" แล้ว` : `นำออกจากอัลบั้ม "${cat}" แล้ว`);
       return next;
     });
-    if (showToast) toast.success(`ย้ายไฟล์ไปยังอัลบั้ม "${cat}" แล้ว`);
   }
 
   function toggleHideItem(id: string) {
     setHiddenItemIds((prev) => {
       const isCurrentlyHidden = prev.includes(id);
       const next = isCurrentlyHidden ? prev.filter((x) => x !== id) : [...prev, id];
-      try {
-        localStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify(next));
-      } catch {}
-      toast.success(isCurrentlyHidden ? 'ยกเลิกการซ่อนไฟล์แล้ว' : 'ซ่อนไฟล์นี้เรียบร้อย (กดไอคอนตาเพื่อดูไฟล์ที่ซ่อน)');
+      void syncSettings(undefined, undefined, next);
+      toast.success(isCurrentlyHidden ? 'ยกเลิกการซ่อนไฟล์แล้ว' : 'ซ่อนไฟล์นี้เรียบร้อย (ไฟล์จะไม่แสดงในห้องแชทของทุก User)');
       return next;
     });
   }
@@ -214,7 +219,78 @@ export default function MediaClient({
   async function refresh() {
     const res = await fetch('/api/media-library', { cache: 'no-store' });
     const json = await res.json();
-    if (json.ok) setItems(json.data.items);
+    if (json.ok) {
+      setItems(json.data.items);
+      if (json.data.categories) setItemCategories(json.data.categories);
+      if (json.data.hidden_ids) setHiddenItemIds(json.data.hidden_ids);
+    }
+  }
+
+  /**
+   * อัปโหลดไฟล์ตรงเข้า Supabase Storage ผ่าน Presigned URL
+   * เพื่อข้ามขีดจำกัด 4.5MB ของ Vercel Serverless อย่างปลอดภัย 100%
+   */
+  async function uploadDirect(file: File): Promise<string> {
+    const isVideo = file.type.startsWith('video/');
+
+    // 1. ขอ Signed Upload URL จากเซิร์ฟเวอร์
+    const urlRes = await fetch('/api/media-library/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: file.name,
+        mime: file.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+        bytes: file.size,
+      }),
+    });
+    const urlJson = await urlRes.json();
+    if (!urlRes.ok || !urlJson.ok) {
+      throw new Error(urlJson?.error?.message_th ?? 'ไม่สามารถสร้างช่องทางอัปโหลดได้');
+    }
+
+    const { signedUrl, key } = urlJson.data;
+
+    // 2. ยิงไฟล์ไบนารีตรงเข้า Supabase Storage ด้วย PUT
+    const putRes = await fetch(signedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if (!putRes.ok) {
+      throw new Error(`อัปโหลดไฟล์ขึ้น Storage ล้มเหลว (${putRes.status})`);
+    }
+
+    // 3. แจ้งเซิร์ฟเวอร์บันทึกประวัติลงตาราง media_assets
+    const compRes = await fetch('/api/media-library/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key,
+        mime: file.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+        bytes: file.size,
+      }),
+    });
+    const compJson = await compRes.json();
+    if (!compRes.ok || !compJson.ok) {
+      throw new Error(compJson?.error?.message_th ?? 'บันทึกรายการสื่อไม่สำเร็จ');
+    }
+
+    const newId = compJson.data?.id;
+
+    // 4. จัดหมวดหมู่อัตโนมัติ: วิดีโอจับลง "วิดีโอ" เสมอ, อื่นๆ ลง activeTab หรือ "ทั่วไป"
+    if (newId) {
+      let initialCats = isVideo ? ['วิดีโอ'] : ['ทั่วไป'];
+      if (activeTab !== 'ทั้งหมด' && !initialCats.includes(activeTab)) {
+        initialCats = [...initialCats, activeTab];
+      }
+      setItemCategories((prev) => {
+        const next = { ...prev, [newId]: initialCats };
+        void syncSettings(undefined, next);
+        return next;
+      });
+    }
+
+    return newId;
   }
 
   async function uploadMultiple(files: FileList | File[] | null) {
@@ -225,22 +301,18 @@ export default function MediaClient({
     try {
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
-        const form = new FormData();
-        form.append('file', file);
-        const res = await fetch('/api/media-library', { method: 'POST', body: form });
-        const json = await res.json();
-        if (res.ok && json.ok) {
+        try {
+          await uploadDirect(file);
           successCount++;
-          const newId = json.data?.id;
-          if (newId && activeTab !== 'ทั้งหมด') {
-            setCategoryForItem(newId, activeTab, false);
-          }
+        } catch (err) {
+          console.error(`[upload error] ${file.name}:`, err);
+          toast.error(`${file.name}: ${err instanceof Error ? err.message : 'อัปโหลดล้มเหลว'}`);
         }
       }
-      toast.success(`เพิ่มไฟล์เข้าคลังสื่อสำเร็จ ${successCount} รายการ`);
-      await refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'อัปโหลดไม่สำเร็จ');
+      if (successCount > 0) {
+        toast.success(`เพิ่มไฟล์เข้าคลังสื่อสำเร็จ ${successCount} รายการ`);
+        await refresh();
+      }
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -278,8 +350,9 @@ export default function MediaClient({
     const isHidden = hiddenItemIds.includes(item.id);
     if (!showHidden && isHidden) return false;
     if (activeTab === 'ทั้งหมด') return true;
-    const cat = itemCategories[item.id] ?? 'ทั่วไป';
-    return cat === activeTab;
+    const isVideo = item.mime.startsWith('video/');
+    const cats = itemCategories[item.id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
+    return cats.includes(activeTab);
   });
 
   return (
@@ -288,7 +361,7 @@ export default function MediaClient({
         <div>
           <CardTitle>คลังรูปและวิดีโอ (Media Library)</CardTitle>
           <CardDescription>
-            จัดการอัลบั้ม ซ่อน/แสดงไฟล์ และคัดลอกลิงก์ไปใช้ในแชทหรือชุดคำตอบได้ทันที
+            จัดการอัลบั้ม จัดกลุ่มหลายแฟ้ม ซ่อน/แสดงไฟล์ และคัดลอกลิงก์ไปใช้ในแชทได้ทันที
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -350,8 +423,12 @@ export default function MediaClient({
 
           {albums.map((cat) => {
             const active = activeTab === cat;
-            const count = items.filter((it) => (itemCategories[it.id] ?? 'ทั่วไป') === cat).length;
-            const isSystemOrGeneral = cat === 'ทั่วไป' || cat === 'ระบบ';
+            const count = items.filter((it) => {
+              const isVideo = it.mime.startsWith('video/');
+              const cats = itemCategories[it.id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
+              return cats.includes(cat);
+            }).length;
+            const isProtected = cat === 'ทั่วไป' || cat === 'ระบบ' || cat === 'วิดีโอ';
 
             return (
               <div key={cat} className="flex items-center shrink-0">
@@ -365,15 +442,15 @@ export default function MediaClient({
                       : 'bg-muted/70 text-muted-foreground hover:bg-muted',
                   )}
                 >
-                  <Folder className="size-3.5" />
+                  {cat === 'วิดีโอ' ? <Video className="size-3.5" /> : <Folder className="size-3.5" />}
                   <span>{cat}</span>
                   <span className={cn('text-[10px] px-1 rounded-full', active ? 'bg-primary-foreground/20' : 'bg-background')}>
                     {count}
                   </span>
                 </button>
 
-                {/* เมนูจัดการอัลบั้ม (เปลี่ยนชื่อ/ลบ) */}
-                {canManage && !isSystemOrGeneral && (
+                {/* เมนูจัดการอัลบั้ม (เปลี่ยนชื่อ/ลบ) สำหรับอัลบั้มที่สร้างเอง */}
+                {canManage && !isProtected && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -425,8 +502,8 @@ export default function MediaClient({
         {/* --- รายการไฟล์ (Grid 4 คอลัมน์บนจอมือถือ, 6-8 คอลัมน์บนจอใหญ่) --- */}
         <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 sm:gap-2.5">
           {displayedItems.map((item) => {
-            const currentCat = itemCategories[item.id] ?? 'ทั่วไป';
             const isVideo = item.mime.startsWith('video/');
+            const cats = itemCategories[item.id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
             const isHidden = hiddenItemIds.includes(item.id);
 
             return (
@@ -457,7 +534,7 @@ export default function MediaClient({
                   {/* ปุ่มเปิด/ปิดตา (ซ่อน/แสดง) มุมขวาบน */}
                   <button
                     type="button"
-                    title={isHidden ? 'ไฟล์นี้ถูกซ่อนอยู่ (คลิกเพื่อยกเลิกซ่อน)' : 'คลิกเพื่อซ่อนไฟล์นี้'}
+                    title={isHidden ? 'ไฟล์นี้ถูกซ่อนอยู่ (คลิกเพื่อยกเลิกซ่อน)' : 'คลิกเพื่อซ่อนไฟล์นี้ (จะไม่แสดงในช่องแชท)'}
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleHideItem(item.id);
@@ -473,10 +550,17 @@ export default function MediaClient({
                   </button>
 
                   {/* ป้ายอัลบั้มมุมซ้ายบน */}
-                  <div className="absolute top-1 left-1 max-w-[70%] truncate">
-                    <Badge variant="secondary" className="text-[8px] sm:text-[9px] px-1 py-0 bg-background/85 backdrop-blur-sm truncate">
-                      {currentCat}
-                    </Badge>
+                  <div className="absolute top-1 left-1 max-w-[70%] truncate flex flex-wrap gap-0.5">
+                    {cats.slice(0, 1).map((cat) => (
+                      <Badge key={cat} variant="secondary" className="text-[8px] sm:text-[9px] px-1 py-0 bg-background/85 backdrop-blur-sm truncate">
+                        {cat}
+                      </Badge>
+                    ))}
+                    {cats.length > 1 && (
+                      <Badge variant="secondary" className="text-[8px] px-1 py-0 bg-background/85 backdrop-blur-sm">
+                        +{cats.length - 1}
+                      </Badge>
+                    )}
                   </div>
 
                   {/* ป้ายวิดีโอ */}
@@ -616,7 +700,7 @@ export default function MediaClient({
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t text-sm">
+              <div className="flex flex-col gap-3 pt-2 border-t text-sm">
                 <div>
                   <p className="font-mono text-xs text-muted-foreground">ID: {previewItem.id}</p>
                   <p className="text-xs text-muted-foreground">
@@ -624,21 +708,31 @@ export default function MediaClient({
                   </p>
                 </div>
 
-                {/* เปลี่ยนอัลบั้ม */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium">ย้ายอัลบั้ม:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {albums.map((cat) => (
-                      <Button
-                        key={cat}
-                        size="sm"
-                        variant={(itemCategories[previewItem.id] ?? 'ทั่วไป') === cat ? 'default' : 'outline'}
-                        className="h-7 text-xs px-2"
-                        onClick={() => setCategoryForItem(previewItem.id, cat)}
-                      >
-                        {cat}
-                      </Button>
-                    ))}
+                {/* จัดการอัลบั้ม (อยู่ได้มากกว่า 1 อัลบั้ม) */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-foreground">
+                    เลือกอัลบั้ม (คลิกเพื่อเพิ่ม/ถอด — รูปอยู่ได้หลายอัลบั้ม):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {albums.map((cat) => {
+                      const isVideo = previewItem.mime.startsWith('video/');
+                      const currentCats = itemCategories[previewItem.id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
+                      const isSelected = currentCats.includes(cat);
+
+                      return (
+                        <Button
+                          key={cat}
+                          type="button"
+                          size="sm"
+                          variant={isSelected ? 'default' : 'outline'}
+                          className="h-7 text-xs px-2.5 gap-1"
+                          onClick={() => toggleCategoryForItem(previewItem.id, cat)}
+                        >
+                          {isSelected && <Check className="size-3" />}
+                          <span>{cat}</span>
+                        </Button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
