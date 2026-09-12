@@ -21,7 +21,7 @@ import { captureInboundMedia } from '@/server/storage/media';
 import { claimJobs, finishJob, nextStatusAfterFailure, type QueueJob } from './queue';
 import type { EchoMessageEvent, IngestEvent, InboundMessageEvent } from './types';
 import { getFilterWords, saveIncomingComment } from '@/server/comments/service';
-import { dispatchNotification } from '@/server/notify/dispatch';
+import { dispatchNotification, flushNotifications } from '@/server/notify/dispatch';
 
 /** สรุปผลของการทำงานหนึ่งรอบ — ใช้ตอบกลับหน้าจอและใช้ในชุดทดสอบ */
 export type ProcessSummary = {
@@ -491,6 +491,15 @@ export async function processWebhookBatch(limit = 20): Promise<ProcessSummary> {
       summary.failed_jobs += 1;
       console.error(`[ingest] งานคิว #${job.id} ล้มเหลว (ครั้งที่ ${job.attempts}) → ${next}: ${message}`);
       await finishJob(job.id, next, message.slice(0, 500));
+    }
+  }
+
+  // ⭐ ส่งแจ้งเตือนที่เข้าคิวในรอบนี้ทันที ไม่ต้องรอนาฬิกา cron
+  if (summary.notifications_queued > 0) {
+    try {
+      await flushNotifications();
+    } catch (err) {
+      console.error('[ingest] ส่งแจ้งเตือนทันทีไม่สำเร็จ (ยังค้างในคิว):', err);
     }
   }
 
