@@ -13,7 +13,7 @@ import { requireAdmin } from '@/lib/auth/current-admin';
 import { fail, toErrorResponse } from '@/lib/api';
 import { canSeePage } from '@/lib/auth/permissions';
 import { getMediaAsset } from '@/server/storage/media';
-import { getObject } from '@/server/storage/supabase-storage';
+import { getObject, getPublicUrl } from '@/server/storage/supabase-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,13 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         : asset.status === 'pending' ? 'กำลังเก็บไฟล์ ลองใหม่อีกครู่'
         : 'เก็บไฟล์ไม่สำเร็จ';
       return fail('not_stored', why, 404);
+    }
+
+    // วิดีโอ: ส่ง 302 Redirect ไปยัง Public CDN ของ Supabase Storage
+    // เพื่อให้ iOS Safari / Chrome รองรับ HTTP Range Requests (206 Partial Content) สำหรับเล่นและดึงเฟรมแรก
+    if (asset.mime?.startsWith('video/') && asset.storage_key) {
+      const publicUrl = getPublicUrl(asset.storage_key);
+      return Response.redirect(publicUrl, 302);
     }
 
     const object = await getObject(asset.storage_key);

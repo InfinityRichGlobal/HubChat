@@ -279,7 +279,7 @@ export default function AppShell({
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => setNavCustomizeOpen(true)}>
                 <SlidersHorizontal className="size-4 mr-2" />
-                ปรับแต่งปุ่มเมนูล่าง (1 - 4 ปุ่ม)
+                ปรับแต่ง
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -290,7 +290,7 @@ export default function AppShell({
       <Dialog open={navCustomizeOpen} onOpenChange={setNavCustomizeOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>เลือกปุ่มหลักสำหรับแถบล่าง (1 - 4 ปุ่ม)</DialogTitle>
+            <DialogTitle>ปรับแต่งเมนูล่าง</DialogTitle>
             <DialogDescription>
               เลือกเมนูที่คุณต้องการให้แสดงที่แถบล่างได้ 1 ถึง 4 ปุ่ม ส่วนที่เหลือจะไปอยู่ในปุ่ม &quot;เพิ่มเติม (...)&quot;
             </DialogDescription>

@@ -261,19 +261,10 @@ export async function listConversations(
     }
   }
 
-  /* กลุ่มติดตามผลซิงก์จากออเดอร์โดยตรง ไม่สร้างแท็กเงาที่อาจหลุดกันภายหลัง */
+  /* กลุ่มติดตามผล: รวมถึงคนที่มีออเดอร์ หรือกดติดดาว (สำคัญ) */
+  let followUpCustomerIds: string[] = [];
   if (group === 'follow_up') {
-    const followUpCustomerIds = await customerIdsWithOrders(pageIds);
-    if (followUpCustomerIds.length === 0) {
-      return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
-    }
-    const followUpSet = new Set(followUpCustomerIds);
-    customerIdFilter = customerIdFilter
-      ? customerIdFilter.filter((id) => followUpSet.has(id))
-      : followUpCustomerIds;
-    if (customerIdFilter.length === 0) {
-      return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
-    }
+    followUpCustomerIds = await customerIdsWithOrders(pageIds);
   }
 
   /* --- ตัวกรองแท็ก : หาว่าห้องไหนติดแท็กที่เลือกไว้บ้าง --- */
@@ -298,6 +289,13 @@ export async function listConversations(
   else query = query.eq('inbox_status', 'active');
   if (group === 'unread') query = query.eq('is_read', false);
   if (group === 'important') query = query.eq('is_important', true);
+  if (group === 'follow_up') {
+    if (followUpCustomerIds.length > 0) {
+      query = query.or(`is_important.eq.true,customer_id.in.(${followUpCustomerIds.join(',')})`);
+    } else {
+      query = query.eq('is_important', true);
+    }
+  }
   if (group === 'assigned') query = query.not('assigned_admin_id', 'is', null);
   if (group === 'ai_reply') query = query.eq('has_ai_reply', true);
   if (group === 'ai_handoff') query = query.eq('has_ai_handoff', true);

@@ -351,39 +351,69 @@ export default function NotificationsClient({
       {/* ------------------------------------------------------------------ */}
       <Card>
         <CardHeader>
-          <CardTitle>ช่วงเวลาห้ามรบกวน</CardTitle>
-          <CardDescription>
-            ในช่วงนี้จะไม่มีอะไรเด้งบนหน้าจอ แต่ยังส่งเข้ากลุ่ม Telegram ตามปกติ
-            เพื่อให้ย้อนดูตอนเช้าได้ว่ามีใครทักมาบ้าง
-          </CardDescription>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <CardTitle>ช่วงเวลาห้ามรบกวน</CardTitle>
+              <CardDescription>
+                {prefs.quiet_hours_start && prefs.quiet_hours_end
+                  ? 'ปิดเสียงและการเด้งเตือนบนหน้าจอในช่วงเวลานี้ (ยังส่งเข้า Telegram ตามปกติ)'
+                  : 'ปิดใช้งานอยู่ — ระบบจะแจ้งเตือนตลอด 24 ชั่วโมง'}
+              </CardDescription>
+            </div>
+            <Switch
+              checked={Boolean(prefs.quiet_hours_start && prefs.quiet_hours_end)}
+              onCheckedChange={(on) => {
+                if (on) {
+                  void save({ ...prefs, quiet_hours_start: '22:00', quiet_hours_end: '08:00' });
+                } else {
+                  void save({ ...prefs, quiet_hours_start: null, quiet_hours_end: null });
+                }
+              }}
+              disabled={saving}
+              aria-label="เปิด/ปิดช่วงเวลาห้ามรบกวน"
+            />
+          </div>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="qs">ตั้งแต่</Label>
-            <Input
-              id="qs" type="time" className="w-32"
-              value={prefs.quiet_hours_start ?? ''}
-              onChange={(e) => setPrefs({ ...prefs, quiet_hours_start: e.target.value || null })}
-              onBlur={() => save(prefs)}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="qe">ถึง</Label>
-            <Input
-              id="qe" type="time" className="w-32"
-              value={prefs.quiet_hours_end ?? ''}
-              onChange={(e) => setPrefs({ ...prefs, quiet_hours_end: e.target.value || null })}
-              onBlur={() => save(prefs)}
-            />
-          </div>
-          <Button
-            variant="ghost"
-            onClick={() => save({ ...prefs, quiet_hours_start: null, quiet_hours_end: null })}
-            disabled={saving}
-          >
-            ไม่ใช้
-          </Button>
-        </CardContent>
+        {prefs.quiet_hours_start && prefs.quiet_hours_end ? (
+          <CardContent className="flex flex-wrap items-end gap-3 pt-0">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="qs">ตั้งแต่</Label>
+              <Input
+                id="qs"
+                type="time"
+                className="w-32"
+                value={prefs.quiet_hours_start ?? ''}
+                onChange={(e) => setPrefs({ ...prefs, quiet_hours_start: e.target.value || null })}
+                onBlur={() => save(prefs)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="qe">ถึง</Label>
+              <Input
+                id="qe"
+                type="time"
+                className="w-32"
+                value={prefs.quiet_hours_end ?? ''}
+                onChange={(e) => setPrefs({ ...prefs, quiet_hours_end: e.target.value || null })}
+                onBlur={() => save(prefs)}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void save({ ...prefs, quiet_hours_start: null, quiet_hours_end: null })}
+              disabled={saving}
+            >
+              ปิด (เตือน 24 ชม.)
+            </Button>
+          </CardContent>
+        ) : (
+          <CardContent className="pt-0">
+            <div className="rounded-lg bg-emerald-500/10 p-2.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+              ✅ กำลังเปิดรับแจ้งเตือนตลอด 24 ชั่วโมง (ไม่จำกัดเวลา)
+            </div>
+          </CardContent>
+        )}
       </Card>
 
       {/* ------------------------------------------------------------------ */}

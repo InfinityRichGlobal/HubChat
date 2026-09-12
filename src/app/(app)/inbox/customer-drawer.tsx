@@ -210,11 +210,11 @@ export default function CustomerDrawer({
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 sm:p-4" onClick={onClose}>
       <div
-        className="flex h-[100dvh] w-full flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(92dvh,56rem)] sm:max-w-4xl sm:rounded-2xl sm:border"
+        className="flex h-[100dvh] w-full flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(92dvh,56rem)] sm:max-w-4xl sm:rounded-2xl sm:border pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* หัวแผง */}
-        <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-3 border-b px-4 pt-[max(0.875rem,calc(env(safe-area-inset-top)+0.5rem))] pb-3 sm:px-6 sm:pt-3">
           <CustomerAvatar name={displayName} src={c?.profile_pic_url} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="break-words text-base font-semibold">{displayName}</div>

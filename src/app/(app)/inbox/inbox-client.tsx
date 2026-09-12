@@ -212,6 +212,7 @@ type LibraryItem = {
   mime: string;
   bytes: number;
   preview_url: string;
+  public_url?: string;
   categories?: string[];
   is_hidden?: boolean;
   created_at: string;
@@ -435,7 +436,7 @@ export default function InboxClient({
     };
     const onVisibility = () => { if (!document.hidden) poll(); };
     document.addEventListener('visibilitychange', onVisibility);
-    const timer = setInterval(poll, 8000);
+    const timer = setInterval(poll, 4000);
     return () => {
       alive = false;
       controller?.abort();
@@ -458,6 +459,9 @@ export default function InboxClient({
 
   const displayedConversations = useMemo(() => {
     return conversations.filter((c) => {
+      if (inboxGroup === 'follow_up' && !c.is_important && c.order_count === 0) return false;
+      if (inboxGroup === 'unread' && c.is_read) return false;
+      if (selectedTags.length > 0 && (!c.tag_ids || !selectedTags.some((t) => c.tag_ids.includes(t)))) return false;
       if (platformFilter !== 'all') {
         if (platformFilter.startsWith('page:')) {
           if (c.page.id !== platformFilter.slice(5)) return false;
@@ -478,7 +482,7 @@ export default function InboxClient({
       if (assignedAdminFilter !== 'all' && assignedAdminFilter !== 'unassigned' && c.assigned_admin_id !== assignedAdminFilter) return false;
       return true;
     });
-  }, [conversations, orderFilter, assignedAdminFilter, platformFilter]);
+  }, [conversations, orderFilter, assignedAdminFilter, platformFilter, inboxGroup, selectedTags]);
 
   return (
     <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] w-full gap-3 md:h-[calc(100dvh-6rem)]">
@@ -534,7 +538,68 @@ export default function InboxClient({
               ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount})` : ''}
             </FilterChip>
 
-            {/* 3. ชิป: ติดตามผล */}
+            {/* 3. ปุ่มดรอปดาวน์: ป้ายแท็ก (วางก่อนติดตามผล) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
+                    selectedTags.length > 0 ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  )}
+                  title="กรองตามป้ายแท็ก"
+                >
+                  <TagIcon className="size-3.5" />
+                  <span className="max-w-[80px] truncate">
+                    {selectedTags.length === 0
+                      ? 'ป้ายแท็ก'
+                      : selectedTags.length === 1
+                        ? (tags.find((t) => t.id === selectedTags[0])?.name ?? '1 แท็ก')
+                        : `${selectedTags.length} แท็ก`}
+                  </span>
+                  <ChevronDown className="size-3 opacity-60 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48 max-h-64 overflow-y-auto">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">ป้ายแท็ก</DropdownMenuLabel>
+                {tags.length === 0 ? (
+                  <div className="p-2 text-xs text-muted-foreground text-center">ยังไม่มีแท็ก</div>
+                ) : (
+                  tags.map((t) => {
+                    const isSelected = selectedTags.includes(t.id);
+                    return (
+                      <DropdownMenuItem
+                        key={t.id}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          toggle(setSelectedTags)(t.id);
+                        }}
+                        className="flex items-center justify-between text-xs cursor-pointer"
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
+                          <span className="truncate">{t.name}</span>
+                        </span>
+                        {isSelected && <Check className="size-3.5 text-primary shrink-0" />}
+                      </DropdownMenuItem>
+                    );
+                  })
+                )}
+                {selectedTags.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => setSelectedTags([])}
+                      className="text-xs text-destructive justify-center cursor-pointer font-medium"
+                    >
+                      ล้างป้ายแท็กที่เลือก
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* 4. ชิป: ติดตามผล */}
             <FilterChip active={inboxGroup === 'follow_up'} onClick={() => setInboxGroup(inboxGroup === 'follow_up' ? 'all' : 'follow_up')}>
               <Star className={cn('size-3.5', inboxGroup === 'follow_up' && 'fill-current text-amber-500')} />
               ติดตามผล
@@ -821,6 +886,11 @@ export default function InboxClient({
             onStateChanged={() => {
               listInitRef.current = false;
               void loadList();
+            }}
+            onUpdateConversation={(patch) => {
+              setConversations((prev) =>
+                prev.map((item) => (item.id === active.id ? { ...item, ...patch } : item)),
+              );
             }}
           />
         ) : (
@@ -1151,6 +1221,7 @@ function ChatRoom({
   onBack,
   onChanged,
   onStateChanged,
+  onUpdateConversation,
 }: {
   conversation: ConversationRow;
   canReply: boolean;
@@ -1159,6 +1230,7 @@ function ChatRoom({
   onBack: () => void;
   onChanged: () => void;
   onStateChanged: () => void;
+  onUpdateConversation?: (patch: Partial<ConversationRow>) => void;
 }) {
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
   /** ยังมีข้อความเก่ากว่าที่โหลดมาอีกไหม */
@@ -1347,7 +1419,7 @@ function ChatRoom({
       if (alive && p) setPolicy(p);
     });
 
-    const msgTimer = setInterval(pullMessages, 4000);
+    const msgTimer = setInterval(pullMessages, 2500);
     // ต่ออายุล็อกทุก 45 วินาที — สั้นกว่าอายุล็อก 3 นาทีพอสมควร เผื่อเน็ตสะดุดหนึ่งรอบ
     const lockTimer = setInterval(pullLock, 45_000);
     const onVisibility = () => { if (!document.hidden) { pullMessages(); pullLock(); } };
@@ -1794,6 +1866,14 @@ function ChatRoom({
     success: string,
   ) {
     setStateBusy(true);
+    // อัปเดต UI ทันที (Optimistic Update) ให้ผู้ใช้เห็นการเปลี่ยนแปลงทันที
+    if (input.action === 'important') {
+      onUpdateConversation?.({ is_important: input.value });
+    } else if (input.action === 'status') {
+      onUpdateConversation?.({ inbox_status: input.value });
+    } else if (input.action === 'assignment') {
+      onUpdateConversation?.({ assigned_admin_id: input.value === 'me' ? meId : null });
+    }
     try {
       const result = await apiCall<Record<string, unknown>>(`/api/conversations/${c.id}/inbox-state`, {
         method: 'POST',
@@ -2171,7 +2251,18 @@ function ChatRoom({
               {pendingLibraryItems.map((item) => (
                 <div key={item.id} className="relative group shrink-0 rounded-lg border bg-background overflow-hidden">
                   {item.mime.startsWith('video/') ? (
-                    <video src={item.preview_url} className="h-16 w-20 bg-black object-contain" />
+                    <div className="relative h-16 w-20 bg-black flex items-center justify-center">
+                      <video
+                        src={`${item.public_url || item.preview_url}#t=0.001`}
+                        playsInline
+                        muted
+                        preload="metadata"
+                        className="size-full object-cover"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+                        <Video className="size-4 text-white drop-shadow-md" />
+                      </div>
+                    </div>
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={item.preview_url} alt="สื่อจากคลัง" className="size-16 object-cover" />
@@ -2227,19 +2318,23 @@ function ChatRoom({
                 setDismissedCanned(false);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  // กำลังเลือกชุดคำตอบอยู่ → Enter หมายถึง "เลือกอันแรก" ไม่ใช่ "ส่ง"
-                  if (cannedVisible.length > 0) {
+                if (e.key === 'Enter') {
+                  // กำลังเลือกชุดคำตอบอยู่ → Enter หมายถึง "เลือกอันแรก"
+                  if (cannedVisible.length > 0 && !e.shiftKey) {
+                    e.preventDefault();
                     applyCanned(cannedVisible[0]);
                     return;
                   }
-                  void send();
+                  // ส่งข้อความเมื่อกด Ctrl+Enter หรือ Cmd+Enter เท่านั้น (Enter ธรรมดาขึ้นบรรทัดใหม่)
+                  if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
+                    e.preventDefault();
+                    void send();
+                  }
                 }
                 if (e.key === 'Escape') setDismissedCanned(true);
               }}
               rows={1}
-              placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ · / ค้นชุดคำตอบ)"
+              placeholder="พิมพ์ข้อความ..."
               disabled={sending}
               className="min-h-11 max-h-[10rem] min-w-0 flex-1 resize-none overflow-y-hidden rounded-xl border bg-background px-3 py-2 text-base leading-6 outline-none shadow-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
             />
@@ -2497,7 +2592,18 @@ function MediaLibraryPicker({
                     )}
                   >
                     {item.mime.startsWith('video/') ? (
-                      <video src={item.preview_url} muted preload="metadata" className="size-full object-cover bg-black" />
+                      <div className="relative size-full bg-black flex items-center justify-center">
+                        <video
+                          src={`${item.public_url || item.preview_url}#t=0.001`}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          className="size-full object-cover"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
+                          <Video className="size-6 text-white drop-shadow-md" />
+                        </div>
+                      </div>
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={item.preview_url} alt="รูปในคลัง" loading="lazy" className="size-full object-cover" />
@@ -2742,8 +2848,14 @@ function MessageBubble({
 
           if (a.type === 'video' && src) {
             return (
-              <span key={i} className="mt-1 block" onClick={(event) => event.stopPropagation()}>
-                <video src={src} controls preload="metadata" className="max-h-72 w-full rounded-lg bg-black" />
+              <span key={i} className="mt-1 block overflow-hidden rounded-lg" onClick={(event) => event.stopPropagation()}>
+                <video
+                  src={`${src}#t=0.001`}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="max-h-72 w-full rounded-lg bg-black"
+                />
               </span>
             );
           }

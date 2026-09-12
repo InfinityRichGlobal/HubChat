@@ -91,8 +91,8 @@ export async function getPrefs(admin: PublicAdmin): Promise<PrefsView> {
     // ยังไม่เคยตั้งค่า = เปิดทุกอย่าง (ค่าเริ่มต้นที่ปลอดภัยกว่าคือ "แจ้ง")
     enabled_events: row ? cleanEvents(row.enabled_events) : [...ALL_EVENTS],
     page_ids: row?.page_ids ?? [],
-    quiet_hours_start: trimTime(row?.quiet_hours_start) ?? '22:00',
-    quiet_hours_end: trimTime(row?.quiet_hours_end) ?? '08:00',
+    quiet_hours_start: trimTime(row?.quiet_hours_start),
+    quiet_hours_end: trimTime(row?.quiet_hours_end),
     sound_enabled: row?.sound_enabled ?? true,
     pages: await visiblePages(admin),
     events: ALL_EVENTS.map((k) => ({ key: k, label_th: EVENT_LABEL_TH[k] })),
