@@ -27,6 +27,7 @@ import { Separator } from '@/components/ui/separator';
 import {
   checkPushSupport, currentSubscription, disablePush, enablePush, isIos, isStandalone,
 } from '@/lib/push-client';
+import SettingsBackButton from '@/components/settings-back-button';
 
 type PrefsView = {
   enabled_events: string[];
@@ -181,6 +182,7 @@ export default function NotificationsClient({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-8">
+      <SettingsBackButton title="แจ้งเตือน" />
       <Card>
         <CardHeader>
           <CardTitle className="text-base">สถานะตัวส่งแจ้งเตือน</CardTitle>

@@ -13,7 +13,7 @@ export default async function OrdersPage() {
 
   const [orders, { data: pages }] = await Promise.all([
     listOrders(result.admin),
-    db().from('pages').select('id,display_name,page_name,tag_color').order('created_at'),
+    db().from('pages').select('id,display_name,page_name,tag_color,platform').order('created_at'),
   ]);
 
   return (
@@ -26,6 +26,7 @@ export default async function OrdersPage() {
           display_name: string | null;
           page_name: string;
           tag_color: string;
+          platform?: import('@/types/db').Platform;
         }>
       }
     />

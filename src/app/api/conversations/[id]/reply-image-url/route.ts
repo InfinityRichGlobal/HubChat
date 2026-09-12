@@ -4,9 +4,8 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { InboxAccessError, markRead } from '@/server/inbox/service';
-import { sendMessage } from '@/server/messaging/send-message';
+import { sendImageUrl } from '@/server/messaging/send-image';
 import { humanAdminReply, ProvenanceDeniedError } from '@/server/messaging/provenance';
-import { messageTypeForAdminChatReply } from '@/server/policy/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,11 +22,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const body = schema.parse(await req.json());
     await markRead(admin, id);
 
-    const result = await sendMessage({
+    const result = await sendImageUrl({
       conversation_id: id,
-      message_type: messageTypeForAdminChatReply(),
       provenance: await humanAdminReply(),
-      content: { images: [{ url: body.url }] },
+      url: body.url,
       idempotency_key: body.idempotency_key,
     });
 

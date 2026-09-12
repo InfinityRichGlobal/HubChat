@@ -6,7 +6,7 @@ export type Readiness = 'CONFIGURED' | 'TESTED' | 'LIVE_VERIFIED';
 export type SettingDefinition = {
   key: string;
   label_th: string;
-  group: 'Meta' | 'Storage' | 'Notifications' | 'Application';
+  group: 'Meta' | 'Storage' | 'Notifications' | 'Application' | 'AI';
   kind: SettingKind;
   schema: z.ZodType<string>;
 };
@@ -19,11 +19,13 @@ const positiveInt = z.string().trim().regex(/^\d+$/).refine((v) => Number(v) > 0
 export const SETTING_DEFINITIONS = [
   { key: 'META_APP_SECRET', label_th: 'Meta App Secret', group: 'Meta', kind: 'secret', schema: text },
   { key: 'META_VERIFY_TOKEN', label_th: 'Meta Verify Token', group: 'Meta', kind: 'secret', schema: text },
+  { key: 'GEMINI_API_KEY', label_th: 'Google Gemini API Key (สำหรับตอบคอมเมนต์และ AI Assistant)', group: 'AI', kind: 'secret', schema: text },
   { key: 'TELEGRAM_BOT_TOKEN', label_th: 'Telegram Bot Token', group: 'Notifications', kind: 'secret', schema: text },
   { key: 'CRON_SECRET', label_th: 'Cron Secret', group: 'Notifications', kind: 'secret', schema: text },
   { key: 'VAPID_PRIVATE_KEY', label_th: 'VAPID Private Key', group: 'Notifications', kind: 'secret', schema: text },
   { key: 'META_APP_ID', label_th: 'Meta App ID', group: 'Meta', kind: 'general', schema: short },
   { key: 'META_GRAPH_VERSION', label_th: 'Meta Graph Version', group: 'Meta', kind: 'general', schema: z.string().trim().regex(/^v\d+\.\d+$/) },
+  { key: 'AI_AUTO_REPLY_COMMENTS', label_th: 'บอท AI Gemini ตอบคอมเมนต์อัตโนมัติ (on / off)', group: 'AI', kind: 'general', schema: z.enum(['on', 'off']) },
   { key: 'TELEGRAM_CHAT_ID', label_th: 'Telegram Chat ID', group: 'Notifications', kind: 'general', schema: short },
   { key: 'VAPID_PUBLIC_KEY', label_th: 'VAPID Public Key', group: 'Notifications', kind: 'general', schema: text },
   { key: 'VAPID_SUBJECT', label_th: 'VAPID Subject', group: 'Notifications', kind: 'general', schema: z.string().trim().refine((v) => v.startsWith('mailto:') || v.startsWith('https://')) },

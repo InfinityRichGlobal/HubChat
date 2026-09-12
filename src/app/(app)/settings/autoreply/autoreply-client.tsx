@@ -26,6 +26,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import SettingsBackButton from '@/components/settings-back-button';
 import { toast } from 'sonner';
 import type { KeywordRule, AutoReplyLog } from '@/server/autoreply/service';
 import type { MatchType } from '@/types/db';
@@ -112,6 +113,7 @@ export default function AutoReplyClient({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <SettingsBackButton title="ตอบอัตโนมัติ (คีย์เวิร์ด)" />
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold">ตอบอัตโนมัติด้วยคีย์เวิร์ด</h1>

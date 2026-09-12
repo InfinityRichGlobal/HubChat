@@ -20,13 +20,53 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PlatformIcon from '@/components/platform-icon';
 import type { OrderRow, OrderLog } from '@/server/orders/service';
-import type { OrderStatus, PaymentStatus } from '@/types/db';
+import type { OrderStatus, PaymentStatus, Platform } from '@/types/db';
 
 /**
  * หน้าออเดอร์ (ฝั่งหน้าเว็บ) — สเปกหัวข้อ 5.3
  * ลิสต์ + กรอง / รายละเอียดแก้ได้ / ปุ่มไปแชทต้นทาง / ปุ่มคัดลอกที่อยู่
  */
+
+export type PeriodFilter = 'all' | 'today' | 'yesterday' | '7days' | 'month';
+
+const PERIOD_LABELS: Record<PeriodFilter, string> = {
+  all: 'ทั้งหมด',
+  today: 'วันนี้',
+  yesterday: 'เมื่อวาน',
+  '7days': '7 วันล่าสุด',
+  month: 'เดือนนี้',
+};
+
+function getPeriodRange(period: PeriodFilter): { since?: string; until?: string } {
+  if (period === 'all') return {};
+  const now = new Date();
+  const bkkStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+  const [y, m] = bkkStr.split('-').map(Number);
+  const todayStart = new Date(`${bkkStr}T00:00:00+07:00`);
+
+  if (period === 'today') {
+    return { since: todayStart.toISOString() };
+  }
+  if (period === 'yesterday') {
+    const yestDate = new Date(todayStart);
+    yestDate.setDate(yestDate.getDate() - 1);
+    const yestStr = yestDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+    const yestStart = new Date(`${yestStr}T00:00:00+07:00`);
+    return { since: yestStart.toISOString(), until: todayStart.toISOString() };
+  }
+  if (period === '7days') {
+    const d7 = new Date(todayStart);
+    d7.setDate(d7.getDate() - 6);
+    return { since: d7.toISOString() };
+  }
+  if (period === 'month') {
+    const monthStart = new Date(`${y}-${String(m).padStart(2, '0')}-01T00:00:00+07:00`);
+    return { since: monthStart.toISOString() };
+  }
+  return {};
+}
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   draft: 'ร่าง',
@@ -92,7 +132,13 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-type PageInfo = { id: string; display_name: string | null; page_name: string; tag_color: string };
+type PageInfo = {
+  id: string;
+  display_name: string | null;
+  page_name: string;
+  tag_color: string;
+  platform?: Platform;
+};
 
 /* ================================================================== */
 
@@ -107,6 +153,7 @@ export default function OrdersClient({
 }) {
   const [orders, setOrders] = useState(initialOrders);
   const [search, setSearch] = useState('');
+  const [period, setPeriod] = useState<PeriodFilter>('all');
   const [status, setStatus] = useState<string>('all');
   const [payment, setPayment] = useState<string>('all');
   const [pageId, setPageId] = useState<string>('all');
@@ -120,6 +167,9 @@ export default function OrdersClient({
     if (status !== 'all') params.set('status', status);
     if (payment !== 'all') params.set('payment_status', payment);
     if (pageId !== 'all') params.set('page_id', pageId);
+    const range = getPeriodRange(period);
+    if (range.since) params.set('since', range.since);
+    if (range.until) params.set('until', range.until);
     try {
       const res = await fetch(`/api/orders?${params.toString()}`, { cache: 'no-store' });
       const json = await res.json();
@@ -127,7 +177,7 @@ export default function OrdersClient({
     } catch {
       return null;
     }
-  }, [search, status, payment, pageId]);
+  }, [search, status, payment, pageId, period]);
 
   const reload = useCallback(async () => {
     const rows = await fetchOrders();
@@ -151,6 +201,20 @@ export default function OrdersClient({
     .filter((o) => o.status !== 'cancelled' && o.status !== 'returned')
     .reduce((s, o) => s + Number(o.total), 0);
 
+  const pendingShipCount = orders.filter(
+    (o) => o.status === 'confirmed' || o.status === 'paid' || o.status === 'packed',
+  ).length;
+
+  const completedCount = orders.filter(
+    (o) => o.status === 'shipped' || o.status === 'completed',
+  ).length;
+
+  const cancelledCount = orders.filter(
+    (o) => o.status === 'cancelled' || o.status === 'returned',
+  ).length;
+
+  const validOrdersCount = orders.length - cancelledCount;
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -168,6 +232,54 @@ export default function OrdersClient({
             </Link>
           </Button>
         )}
+      </div>
+
+      {/* ---------- สรุป KPI ยอดขาย & สถานะ ---------- */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="rounded-xl border bg-card p-3 shadow-sm">
+          <div className="text-xs text-muted-foreground">ยอดขายรวม</div>
+          <div className="mt-1 text-lg font-bold text-primary sm:text-xl">{baht(totalSales)}</div>
+          <div className="text-[11px] text-muted-foreground">{validOrdersCount} รายการที่สำเร็จ/ส่ง</div>
+        </div>
+        <div className="rounded-xl border bg-card p-3 shadow-sm">
+          <div className="text-xs text-muted-foreground">ออเดอร์ทั้งหมด</div>
+          <div className="mt-1 text-lg font-bold sm:text-xl">{orders.length}</div>
+          <div className="text-[11px] text-muted-foreground">ทุกสถานะ</div>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="text-xs font-medium text-amber-800 dark:text-amber-300">รอส่ง/รอแพ็ก</div>
+          <div className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-300 sm:text-xl">{pendingShipCount}</div>
+          <div className="text-[11px] text-amber-600/80 dark:text-amber-400/80">ยืนยัน/จ่ายแล้ว/แพ็ก</div>
+        </div>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/20">
+          <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300">ส่งสำเร็จ</div>
+          <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300 sm:text-xl">{completedCount}</div>
+          <div className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80">ส่งแล้ว/สำเร็จ</div>
+        </div>
+        <div className="col-span-2 rounded-xl border border-red-200 bg-red-50/40 p-3 shadow-sm dark:border-red-900/50 dark:bg-red-950/20 sm:col-span-1">
+          <div className="text-xs font-medium text-red-800 dark:text-red-300">ยกเลิก</div>
+          <div className="mt-1 text-lg font-bold text-red-700 dark:text-red-300 sm:text-xl">{cancelledCount}</div>
+          <div className="text-[11px] text-red-600/80 dark:text-red-400/80">ยกเลิก/ตีกลับ</div>
+        </div>
+      </div>
+
+      {/* ---------- ตัวเลือกช่วงเวลา ---------- */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+        {(Object.keys(PERIOD_LABELS) as PeriodFilter[]).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setPeriod(p)}
+            className={cn(
+              'whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+              period === p
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border bg-background text-muted-foreground hover:bg-accent/60',
+            )}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
       </div>
 
       {/* ---------- ตัวกรอง ---------- */}
@@ -228,16 +340,27 @@ export default function OrdersClient({
         <div className="flex flex-col gap-2">
           {orders.map((o) => {
             const page = o.page_id ? pageById.get(o.page_id) : undefined;
+            const isCancelled = o.status === 'cancelled' || o.status === 'returned';
             return (
               <button
                 key={o.id}
                 type="button"
                 onClick={() => setOpenId(o.id)}
-                className="flex items-start gap-3 rounded-lg border p-3 text-left hover:bg-accent/50"
+                className={cn(
+                  'flex items-start gap-3 rounded-lg border p-3 text-left transition-all hover:bg-accent/50',
+                  isCancelled
+                    ? 'border-dashed border-red-300/80 bg-red-50/30 opacity-75 hover:opacity-100 dark:border-red-900/60 dark:bg-red-950/20'
+                    : 'border-border bg-card',
+                )}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-sm font-medium">{o.order_no}</span>
+                    {page?.platform && (
+                      <PlatformIcon platform={page.platform} size="xs" />
+                    )}
+                    <span className={cn('font-mono text-sm font-medium', isCancelled && 'line-through decoration-red-500 text-muted-foreground')}>
+                      {o.order_no}
+                    </span>
                     <Badge variant="secondary" className={cn('text-[10px]', STATUS_COLOR[o.status])}>
                       {STATUS_LABEL[o.status]}
                     </Badge>
@@ -265,7 +388,9 @@ export default function OrdersClient({
                   )}
                 </div>
                 <div className="shrink-0 text-right">
-                  <div className="text-sm font-semibold">{baht(o.total)}</div>
+                  <div className={cn('text-sm font-semibold', isCancelled && 'line-through decoration-red-500 text-muted-foreground')}>
+                    {baht(o.total)}
+                  </div>
                   <div className="text-[11px] text-muted-foreground">{dayTh(o.created_at)}</div>
                 </div>
               </button>

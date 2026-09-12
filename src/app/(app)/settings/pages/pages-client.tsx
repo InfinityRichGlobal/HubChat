@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import PlatformIcon from '@/components/platform-icon';
+import SettingsBackButton from '@/components/settings-back-button';
 
 /**
  * หน้าจัดการเพจ (ฝั่งหน้าเว็บ)
@@ -115,6 +116,7 @@ export default function PagesClient({ initialPages }: { initialPages: SafePage[]
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+      <SettingsBackButton title="จัดการเพจ" />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold">จัดการเพจ</h1>

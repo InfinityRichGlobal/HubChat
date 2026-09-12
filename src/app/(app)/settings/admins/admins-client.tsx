@@ -20,6 +20,8 @@ import {
 import { ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import type { AdminRole } from '@/types/db';
 import ImageUploadCrop from '@/components/image-upload-crop';
+import PlatformIcon from '@/components/platform-icon';
+import SettingsBackButton from '@/components/settings-back-button';
 import { toast } from 'sonner';
 
 export type AdminRow = {
@@ -94,6 +96,7 @@ export default function AdminsClient({
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+      <SettingsBackButton title="แอดมิน + สิทธิ์" />
       <div className="flex items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold">แอดมิน + สิทธิ์</h1>
@@ -192,8 +195,8 @@ export default function AdminsClient({
                               );
                             }}
                           />
-                          <span className="inline-flex items-center gap-1">
-                            <span className="size-2 rounded-full" style={{ backgroundColor: p.tag_color }} />
+                          <span className="inline-flex items-center gap-1.5 font-medium">
+                            <PlatformIcon platform={p.platform} size="xs" />
                             {p.display_name || p.page_name}
                           </span>
                         </label>
@@ -379,7 +382,10 @@ function CreateAdminDialog({
                         setPageIds((prev) => (v ? [...prev, p.id] : prev.filter((id) => id !== p.id)))
                       }
                     />
-                    {p.display_name || p.page_name}
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <PlatformIcon platform={p.platform} size="xs" />
+                      {p.display_name || p.page_name}
+                    </span>
                   </label>
                 ))}
               </div>

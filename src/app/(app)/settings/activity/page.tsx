@@ -5,6 +5,7 @@ import { db } from '@/lib/supabase/admin';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import SettingsBackButton from '@/components/settings-back-button';
 
 /**
  * Activity log — สเปกหัวข้อ 5.7
@@ -58,6 +59,7 @@ export default async function ActivityPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+      <SettingsBackButton title="ประวัติการใช้งาน" />
       <Card>
         <CardHeader>
           <CardTitle>ประวัติการใช้งาน</CardTitle>

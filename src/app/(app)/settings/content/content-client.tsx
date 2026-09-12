@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import SettingsBackButton from '@/components/settings-back-button';
 import { toast } from 'sonner';
 import type { CannedResponse, Tag } from '@/server/content/service';
 
@@ -109,6 +110,7 @@ export default function ContentClient({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <SettingsBackButton title="ชุดคำตอบ + แท็ก" />
       {/* ------------------ ชุดคำตอบ ------------------ */}
       <Card>
         <CardHeader>

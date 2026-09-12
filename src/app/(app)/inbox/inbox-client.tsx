@@ -236,6 +236,19 @@ async function apiCall<T>(url: string, init?: RequestInit): Promise<T | null> {
 
 /* ================================================================== */
 
+export type OrderFilterGroup = 'all' | '0' | '1' | '2' | '3' | '4' | '5_10' | '11_plus';
+
+const ORDER_FILTER_LABELS: Record<OrderFilterGroup, string> = {
+  all: 'ทั้งหมด',
+  '0': '0 ออเดอร์ (ยังไม่สั่ง)',
+  '1': '1 ออเดอร์ (สั่งครั้งแรก)',
+  '2': '2 ออเดอร์ (ซื้อซ้ำ)',
+  '3': '3 ออเดอร์',
+  '4': '4 ออเดอร์',
+  '5_10': '5 - 10 ออเดอร์ (ลูกค้าประจำ)',
+  '11_plus': '11+ ออเดอร์ (ลูกค้า VIP)',
+};
+
 export default function InboxClient({
   me,
   canReply,
@@ -267,7 +280,7 @@ export default function InboxClient({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [inboxGroup, setInboxGroup] = useState<InboxGroup>('all');
-  const [orderFilter, setOrderFilter] = useState<'all' | 'zero' | 'has_orders'>('all');
+  const [orderFilter, setOrderFilter] = useState<OrderFilterGroup>('all');
   const [assignedAdminFilter, setAssignedAdminFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
@@ -424,8 +437,15 @@ export default function InboxClient({
 
   const displayedConversations = useMemo(() => {
     return conversations.filter((c) => {
-      if (orderFilter === 'zero' && c.order_count > 0) return false;
-      if (orderFilter === 'has_orders' && c.order_count === 0) return false;
+      if (orderFilter !== 'all') {
+        if (orderFilter === '0' && c.order_count !== 0) return false;
+        if (orderFilter === '1' && c.order_count !== 1) return false;
+        if (orderFilter === '2' && c.order_count !== 2) return false;
+        if (orderFilter === '3' && c.order_count !== 3) return false;
+        if (orderFilter === '4' && c.order_count !== 4) return false;
+        if (orderFilter === '5_10' && (c.order_count < 5 || c.order_count > 10)) return false;
+        if (orderFilter === '11_plus' && c.order_count < 11) return false;
+      }
       if (assignedAdminFilter === 'unassigned' && c.assigned_admin_id !== null) return false;
       if (assignedAdminFilter !== 'all' && assignedAdminFilter !== 'unassigned' && c.assigned_admin_id !== assignedAdminFilter) return false;
       return true;
@@ -472,11 +492,10 @@ export default function InboxClient({
             {inboxGroup !== 'all' && inboxGroup !== 'follow_up' && inboxGroup !== 'unread' && (
               <FilterChip active onClick={() => setInboxGroup('all')}>{GROUP_LABEL[inboxGroup]}</FilterChip>
             )}
-            {orderFilter === 'zero' && (
-              <FilterChip active onClick={() => setOrderFilter('all')}>ลูกค้าใหม่ (0 ออเดอร์)</FilterChip>
-            )}
-            {orderFilter === 'has_orders' && (
-              <FilterChip active onClick={() => setOrderFilter('all')}>ลูกค้าเก่า (1+ ออเดอร์)</FilterChip>
+            {orderFilter !== 'all' && (
+              <FilterChip active onClick={() => setOrderFilter('all')}>
+                {ORDER_FILTER_LABELS[orderFilter]}
+              </FilterChip>
             )}
             {assignedAdminFilter !== 'all' && (
               <FilterChip active onClick={() => setAssignedAdminFilter('all')}>
@@ -618,12 +637,12 @@ function InboxFilterDialog({
   selectedTags: string[];
   inboxGroup: InboxGroup;
   admins: Array<{ id: string; name: string }>;
-  orderFilter: 'all' | 'zero' | 'has_orders';
+  orderFilter: OrderFilterGroup;
   assignedAdminFilter: string;
   onTogglePage: (id: string) => void;
   onToggleTag: (id: string) => void;
   onSelectGroup: (group: InboxGroup) => void;
-  onSelectOrderFilter: (v: 'all' | 'zero' | 'has_orders') => void;
+  onSelectOrderFilter: (v: OrderFilterGroup) => void;
   onSelectAdminFilter: (v: string) => void;
   onClear: () => void;
 }) {
@@ -636,15 +655,15 @@ function InboxFilterDialog({
         </DialogHeader>
         <div className="space-y-4">
           <FilterGroup title="ประวัติการสั่งซื้อ (ออเดอร์)">
-            <FilterChoice active={orderFilter === 'all'} onClick={() => onSelectOrderFilter('all')}>
-              ทั้งหมด
-            </FilterChoice>
-            <FilterChoice active={orderFilter === 'zero'} onClick={() => onSelectOrderFilter('zero')}>
-              ลูกค้าใหม่ (0 ออเดอร์)
-            </FilterChoice>
-            <FilterChoice active={orderFilter === 'has_orders'} onClick={() => onSelectOrderFilter('has_orders')}>
-              ลูกค้าเก่า (เคยสั่งซื้อแล้ว 1+ ออเดอร์)
-            </FilterChoice>
+            {(Object.keys(ORDER_FILTER_LABELS) as OrderFilterGroup[]).map((grp) => (
+              <FilterChoice
+                key={grp}
+                active={orderFilter === grp}
+                onClick={() => onSelectOrderFilter(grp)}
+              >
+                {ORDER_FILTER_LABELS[grp]}
+              </FilterChoice>
+            ))}
           </FilterGroup>
 
           {admins.length > 0 && (
@@ -758,7 +777,7 @@ function ConversationItem({
       >
         <div className="relative shrink-0">
           <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
-          <span className="absolute -bottom-1 -right-1 rounded-full ring-2 ring-background">
+          <span className="absolute -bottom-1 -right-1">
             <PlatformIcon platform={c.page.platform} size="xs" />
           </span>
         </div>
@@ -1394,23 +1413,33 @@ function ChatRoom({
     if ((!body && cannedImages.length === 0) || sending) return;
     setSending(true);
     try {
-      // ชุดคำตอบต้องมีรูปไปถึงลูกค้าก่อนข้อความเสมอ ถ้ารูปใดส่งไม่สำเร็จจะหยุดทันที
+      // ชุดคำตอบ: ส่งรูปภาพทั้งหมดก่อนข้อความ
+      let failedImageCount = 0;
       for (let index = 0; index < cannedImages.length; index += 1) {
         const image = cannedImages[index];
-        const mediaRes = await fetch(`/api/conversations/${c.id}/reply-image-url`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: image.url,
-            idempotency_key: `${idempotencyKey.current}-image-${index + 1}`,
-          }),
-        });
-        const mediaJson = await mediaRes.json();
-        if (!mediaRes.ok || !mediaJson.ok || !mediaJson.data?.sent) {
-          toast.error(mediaJson?.error?.message_th ?? mediaJson?.data?.reason_th ?? 'ส่งรูปของชุดคำตอบไม่สำเร็จ');
-          return;
+        try {
+          const mediaRes = await fetch(`/api/conversations/${c.id}/reply-image-url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: image.url,
+              idempotency_key: `${idempotencyKey.current}-image-${index + 1}`,
+            }),
+          });
+          const mediaJson = await mediaRes.json();
+          if (!mediaRes.ok || !mediaJson.ok || !mediaJson.data?.sent) {
+            failedImageCount += 1;
+            console.warn(`[canned-image] รูปที่ ${index + 1} ส่งไม่สำเร็จ:`, mediaJson);
+          }
+        } catch (err) {
+          failedImageCount += 1;
+          console.warn(`[canned-image] ส่งรูปที่ ${index + 1} เกิดข้อผิดพลาด:`, err);
         }
       }
+      if (failedImageCount > 0) {
+        toast.warning(`ส่งรูปสำเร็จ ${cannedImages.length - failedImageCount} จาก ${cannedImages.length} รูป`);
+      }
+
 
       if (!body) {
         setCannedImages([]);

@@ -260,6 +260,8 @@ export type OrderFilters = {
   admin_id?: string;
   search?: string;
   conversation_id?: string;
+  since?: string;
+  until?: string;
   limit?: number;
 };
 
@@ -280,6 +282,8 @@ export async function listOrders(admin: PublicAdmin, filters: OrderFilters = {})
   if (filters.shipping_method_id) query = query.eq('shipping_method_id', filters.shipping_method_id);
   if (filters.admin_id) query = query.eq('created_by_admin_id', filters.admin_id);
   if (filters.conversation_id) query = query.eq('conversation_id', filters.conversation_id);
+  if (filters.since) query = query.gte('created_at', filters.since);
+  if (filters.until) query = query.lt('created_at', filters.until);
 
   const term = filters.search?.trim();
   if (term) {

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import ImageUploadCrop from '@/components/image-upload-crop';
+import SettingsBackButton from '@/components/settings-back-button';
 
 type Readiness = 'CONFIGURED' | 'TESTED' | 'LIVE_VERIFIED';
 type Setting = {
@@ -63,6 +64,7 @@ export default function SystemSettingsClient() {
   const groups = [...new Set(settings.map((setting) => setting.group))];
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+      <SettingsBackButton title="ระบบ + ความลับ" />
       <Card>
         <CardHeader>
           <CardTitle>ระบบ + ความลับ</CardTitle>

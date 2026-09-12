@@ -357,3 +357,30 @@ export async function unreadBadgeCount(
     return 0;
   }
 }
+
+export async function unhandledCommentBadgeCount(
+  adminId: string,
+  role: 'owner' | 'admin' | 'viewer',
+  allowedPageIds: string[],
+): Promise<number> {
+  try {
+    let q = db()
+      .from('comments')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_handled', false)
+      .eq('is_from_page', false);
+
+    if (role !== 'owner') {
+      if (allowedPageIds.length === 0) return 0;
+      q = q.in('page_id', allowedPageIds);
+    }
+
+    const { count, error } = await q;
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  } catch (err) {
+    console.warn(`[notify] นับคอมเมนต์ที่ยังไม่จัดการไม่สำเร็จ (ข้ามไป) admin=${adminId}:`, err);
+    return 0;
+  }
+}
+

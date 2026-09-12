@@ -15,6 +15,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import SettingsBackButton from '@/components/settings-back-button';
 import { toast } from 'sonner';
 import type { Product, PromotionRow } from '@/server/orders/service';
 import type { ShippingMethod } from '@/server/orders/shipping';
@@ -163,6 +164,7 @@ export default function CatalogClient({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <SettingsBackButton title="สินค้า + โปรโมชัน" />
       {/* ------------------ สินค้า ------------------ */}
       <Card>
         <CardHeader>

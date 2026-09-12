@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Search, ShoppingBag, UserRound } from 'lucide-react';
+import { Search, ShoppingBag, UserRound, Filter } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { canSeePage } from '@/lib/auth/permissions';
 import { db } from '@/lib/supabase/admin';
@@ -8,15 +8,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import CustomerAvatar from '@/components/customer-avatar';
+import PlatformIcon from '@/components/platform-icon';
 
 export const dynamic = 'force-dynamic';
 
-export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; filter?: string }>;
+}) {
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
-  const { q = '' } = await searchParams;
+  const { q = '', filter = 'verified' } = await searchParams;
 
-  const { data: pages } = await db().from('pages').select('id');
+  const { data: pages } = await db().from('pages').select('id,platform');
+  const pageMap = new Map(((pages ?? []) as Array<{ id: string; platform: 'facebook' | 'instagram' }>).map((p) => [p.id, p.platform]));
   const pageIds = ((pages ?? []) as Array<{ id: string }>)
     .map((page) => page.id)
     .filter((id) => canSeePage(result.admin.role, result.admin.allowed_page_ids, id));
@@ -29,12 +35,23 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
     .in('page_id', pageIds)
     .order('updated_at', { ascending: false })
     .limit(200);
+
+  // ลูกค้าจะปรากฏก็ต่อเมื่อมีการสรุปยอด (มีออเดอร์) หรือบันทึกข้อมูล
+  if (filter === 'orders') {
+    query = query.gt('total_orders', 0);
+  } else if (filter === 'saved') {
+    query = query.or('phone.not.is.null,recipient_name.not.is.null,address.not.is.null');
+  } else if (filter === 'verified') {
+    // ค่าเริ่มต้น: มีออเดอร์ หรือมีการบันทึกข้อมูล
+    query = query.or('total_orders.gt.0,phone.not.is.null,recipient_name.not.is.null,address.not.is.null');
+  }
+
   const term = q.trim().replace(/[%,_()]/g, '');
   if (term) query = query.or(`name.ilike.%${term}%,recipient_name.ilike.%${term}%,phone.ilike.%${term}%`);
   const { data, error } = await query;
   if (error) throw new Error(`อ่านข้อมูลลูกค้าไม่สำเร็จ: ${error.message}`);
   const customers = (data ?? []) as Array<{
-    id: string; name: string | null; profile_pic_url: string | null; phone: string | null;
+    id: string; page_id: string; name: string | null; profile_pic_url: string | null; phone: string | null;
     recipient_name: string | null; address: string | null; postcode: string | null;
     total_orders: number; total_spent: number;
   }>;
@@ -47,42 +64,120 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold">ข้อมูลลูกค้า</h1>
-        <p className="text-sm text-muted-foreground">ค้นหาชื่อ เบอร์โทร และเปิดกลับไปยังห้องแชทได้ทันที</p>
+        <h1 className="text-xl font-semibold">ข้อมูลลูกค้า (Customer CRM)</h1>
+        <p className="text-sm text-muted-foreground">บันทึกรายชื่อ ที่อยู่ และประวัติการสรุปยอดคำสั่งซื้อของลูกค้า</p>
       </div>
-      <form className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input name="q" defaultValue={q} className="pl-9" placeholder="ค้นหาชื่อหรือเบอร์โทร" />
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <form className="flex flex-1 gap-2">
+          <input type="hidden" name="filter" value={filter} />
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input name="q" defaultValue={q} className="pl-9" placeholder="ค้นหาชื่อ, ผู้รับ, เบอร์โทร..." />
+          </div>
+          <Button type="submit">ค้นหา</Button>
+        </form>
+
+        {/* แท็บตัวกรองประเภทลูกค้า */}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <Button
+            asChild
+            size="sm"
+            variant={filter === 'verified' ? 'default' : 'outline'}
+            className="h-8 text-xs"
+          >
+            <Link href={`/customers?filter=verified${q ? `&q=${encodeURIComponent(q)}` : ''}`}>
+              ลูกค้าที่มีข้อมูล/ออเดอร์
+            </Link>
+          </Button>
+          <Button
+            asChild
+            size="sm"
+            variant={filter === 'orders' ? 'default' : 'outline'}
+            className="h-8 text-xs"
+          >
+            <Link href={`/customers?filter=orders${q ? `&q=${encodeURIComponent(q)}` : ''}`}>
+              มีออเดอร์แล้ว
+            </Link>
+          </Button>
+          <Button
+            asChild
+            size="sm"
+            variant={filter === 'saved' ? 'default' : 'outline'}
+            className="h-8 text-xs"
+          >
+            <Link href={`/customers?filter=saved${q ? `&q=${encodeURIComponent(q)}` : ''}`}>
+              บันทึกที่อยู่/เบอร์
+            </Link>
+          </Button>
+          <Button
+            asChild
+            size="sm"
+            variant={filter === 'all' ? 'default' : 'ghost'}
+            className="h-8 text-xs text-muted-foreground"
+          >
+            <Link href={`/customers?filter=all${q ? `&q=${encodeURIComponent(q)}` : ''}`}>
+              ทั้งหมดที่มีประวัติแชท
+            </Link>
+          </Button>
         </div>
-        <Button type="submit">ค้นหา</Button>
-      </form>
+      </div>
+
       <div className="grid gap-2 md:grid-cols-2">
         {customers.map((customer) => {
           const conversationId = conversationByCustomer.get(customer.id);
           const name = customer.name || customer.recipient_name || 'ลูกค้า';
+          const platform = pageMap.get(customer.page_id) ?? 'facebook';
           return (
-            <Card key={customer.id} className="gap-2 py-3">
+            <Card key={customer.id} className="gap-2 py-3 shadow-sm hover:border-primary/40 transition-colors">
               <CardHeader className="flex-row items-center gap-2.5 px-4">
-                <CustomerAvatar name={name} src={customer.profile_pic_url} size="md" />
+                <div className="relative shrink-0">
+                  <CustomerAvatar name={name} src={customer.profile_pic_url} size="md" />
+                  <span className="absolute -bottom-1 -right-1">
+                    <PlatformIcon platform={platform} size="xs" />
+                  </span>
+                </div>
                 <div className="min-w-0 flex-1">
-                  <CardTitle className="truncate text-base">{name}</CardTitle>
+                  <div className="flex items-center gap-1.5">
+                    <CardTitle className="truncate text-base">{name}</CardTitle>
+                    {customer.recipient_name && customer.recipient_name !== customer.name && (
+                      <span className="text-xs text-muted-foreground truncate">({customer.recipient_name})</span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">{customer.phone || 'ยังไม่มีเบอร์โทร'}</p>
                 </div>
-                {customer.total_orders > 0 && <span className="inline-flex size-7 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white">{customer.total_orders}</span>}
+                {customer.total_orders > 0 && (
+                  <span className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-bold text-white shadow-sm" title="จำนวนออเดอร์">
+                    {customer.total_orders} ออเดอร์
+                  </span>
+                )}
               </CardHeader>
               <CardContent className="space-y-1.5 px-4 text-sm">
-                <p className="truncate text-muted-foreground">{customer.address ? `${customer.address} ${customer.postcode ?? ''}` : 'ยังไม่มีที่อยู่จัดส่ง'}</p>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground"><ShoppingBag className="size-3.5" /> ยอดสะสม {Number(customer.total_spent).toLocaleString('th-TH')} บาท</span>
-                  {conversationId && <Button asChild size="sm" variant="outline"><Link href={`/inbox?c=${conversationId}`}><UserRound /> เปิดแชท</Link></Button>}
+                <p className="truncate text-xs text-muted-foreground">{customer.address ? `${customer.address} ${customer.postcode ?? ''}` : 'ยังไม่มีที่อยู่จัดส่ง'}</p>
+                <div className="flex items-center justify-between gap-2 pt-1 border-t">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <ShoppingBag className="size-3.5" /> ยอดสะสม {Number(customer.total_spent).toLocaleString('th-TH')} บาท
+                  </span>
+                  {conversationId && (
+                    <Button asChild size="sm" variant="outline" className="h-7 text-xs gap-1">
+                      <Link href={`/inbox?c=${conversationId}`}>
+                        <UserRound className="size-3.5" /> เปิดแชท
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
-      {customers.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">ไม่พบข้อมูลลูกค้า</p>}
+      {customers.length === 0 && (
+        <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
+          <p className="text-sm font-medium">ไม่พบข้อมูลลูกค้าตามเงื่อนไขที่เลือก</p>
+          <p className="text-xs mt-1 text-muted-foreground/80">ข้อมูลลูกค้าจะปรากฏขึ้นอัตโนมัติเมื่อแอดมินบันทึกข้อมูลลูกค้า หรือทำการเปิดออเดอร์สรุปยอด</p>
+        </div>
+      )}
     </div>
   );
 }
+

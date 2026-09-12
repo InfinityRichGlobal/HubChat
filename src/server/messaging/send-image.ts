@@ -139,3 +139,48 @@ export async function sendVideo(input: SendImageInput): Promise<SendResult> {
     idempotency_key: input.idempotency_key ?? null,
   });
 }
+
+export type SendImageUrlInput = {
+  conversation_id: string;
+  provenance: Provenance;
+  url: string;
+  idempotency_key?: string | null;
+};
+
+export async function sendImageUrl(input: SendImageUrlInput): Promise<SendResult> {
+  // พยายามดาวน์โหลดรูปภาพจาก URL แล้วส่งเป็น Attachment ล่วงหน้า
+  // เพื่อป้องกันกรณีที่ Meta crawler ถูกบล็อกโดย Google Drive หรือ CDN ภายนอก (Meta Error 100/2018047)
+  let attachmentId: string | null = null;
+  try {
+    const res = await fetch(input.url, { headers: { 'User-Agent': 'HubChat-Server/1.0' } });
+    if (res.ok) {
+      const contentType = res.headers.get('content-type') || 'image/jpeg';
+      const mime = contentType.split(';')[0].trim();
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength > 0 && buf.byteLength <= MAX_IMAGE_BYTES) {
+        attachmentId = await uploadImageForConversation(input.conversation_id, {
+          bytes: buf,
+          mime: ALLOWED_IMAGE_MIMES.includes(mime as (typeof ALLOWED_IMAGE_MIMES)[number]) ? mime : 'image/jpeg',
+          filename: `canned_${Date.now()}.jpg`,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[send-image-url] ไม่สามารถแปลงเป็น attachment ได้ ตกไปใช้ url ตรง:', err);
+  }
+
+  return sendMessage({
+    conversation_id: input.conversation_id,
+    message_type: 'inquiry_response',
+    provenance: input.provenance,
+    content: {
+      images: [
+        attachmentId
+          ? { meta_attachment_id: attachmentId }
+          : { url: input.url },
+      ],
+    },
+    idempotency_key: input.idempotency_key ?? null,
+  });
+}
+

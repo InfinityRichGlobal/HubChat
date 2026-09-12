@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw,
+  AlertTriangle, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw, Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -224,9 +224,33 @@ function CommentCard({
   const [mode, setMode] = useState<'none' | 'public' | 'private'>('none');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const oldForPrivate = tooOldForPrivate(c.commented_at);
+
+  async function askAi() {
+    setAiLoading(true);
+    try {
+      const res = await fetch(`/api/comments/${c.id}/ai-suggest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        throw new Error(json?.error?.message_th ?? 'AI คิดคำตอบไม่สำเร็จ');
+      }
+      if (json.data?.suggestion) {
+        setText(json.data.suggestion);
+        toast.success('AI เสนอคำตอบแล้ว — สามารถปรับแต่งก่อนกดส่งได้ค่ะ');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'เรียก AI ไม่สำเร็จ');
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   async function act(body: Record<string, unknown>) {
     setSending(true);
@@ -329,18 +353,31 @@ function CommentCard({
 
       {mode !== 'none' && (
         <div className="mt-1 flex flex-col gap-1.5 border-t pt-2">
-          <p className="text-[11px] text-muted-foreground">
-            {mode === 'public'
-              ? '⚠️ ตอบใต้โพสต์ = ทุกคนเห็น อย่าพิมพ์ข้อมูลส่วนตัวของลูกค้าลงไป'
-              : '⚠️ ทักส่วนตัวได้ครั้งเดียวต่อคอมเมนต์ ตรวจข้อความให้ดีก่อนส่ง'}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-1">
+            <p className="text-[11px] text-muted-foreground">
+              {mode === 'public'
+                ? '⚠️ ตอบใต้โพสต์ = ทุกคนเห็น อย่าพิมพ์ข้อมูลส่วนตัวของลูกค้าลงไป'
+                : '⚠️ ทักส่วนตัวได้ครั้งเดียวต่อคอมเมนต์ ตรวจข้อความให้ดีก่อนส่ง'}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={aiLoading || sending}
+              onClick={() => void askAi()}
+              className="h-6 gap-1 px-2 text-[11px] text-primary border-primary/30 hover:bg-primary/5"
+            >
+              {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3 text-amber-500" />}
+              <span>{aiLoading ? 'กำลังคิดคำตอบ...' : 'ให้ AI ช่วยคิด'}</span>
+            </Button>
+          </div>
           <div className="flex items-end gap-2">
             <Input
               ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder={mode === 'public' ? 'ตอบใต้โพสต์…' : 'ข้อความส่วนตัว…'}
-              disabled={sending}
+              disabled={sending || aiLoading}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
                   e.preventDefault();
@@ -350,13 +387,13 @@ function CommentCard({
             />
             <Button
               size="sm"
-              disabled={sending || text.trim() === ''}
+              disabled={sending || aiLoading || text.trim() === ''}
               onClick={() => void act({ action: mode === 'public' ? 'reply_public' : 'reply_private', text: text.trim() })}
             >
               {sending ? <Loader2 className="animate-spin" /> : <Send />}
               ส่ง
             </Button>
-            <Button size="sm" variant="ghost" disabled={sending} onClick={() => { setMode('none'); setText(''); }}>
+            <Button size="sm" variant="ghost" disabled={sending || aiLoading} onClick={() => { setMode('none'); setText(''); }}>
               ยกเลิก
             </Button>
           </div>
