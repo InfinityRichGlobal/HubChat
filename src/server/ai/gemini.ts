@@ -21,7 +21,7 @@ export async function getAiSettings() {
     apiKey,
     systemPrompt: systemPrompt || '',
     knowledge: knowledge || '',
-    model: model || 'gemini-2.5-flash',
+    model: model || 'gemini-3.6-flash',
     temperature: temp ? parseFloat(temp) : 0.7,
     autoReplyComments: autoReply === 'on',
     enableCommentSuggest: commentSuggest !== 'off', // default on
@@ -30,42 +30,54 @@ export async function getAiSettings() {
 }
 
 /** ทดสอบว่า Gemini API Key ใช้งานได้จริงไหม */
-export async function testGeminiApiKey(apiKeyOverride?: string): Promise<{ ok: boolean; message_th: string; model: string }> {
+export async function testGeminiApiKey(apiKeyOverride?: string, requestedModel?: string): Promise<{ ok: boolean; message_th: string; model: string }> {
   const apiKey = apiKeyOverride || (await getGeminiApiKey());
   if (!apiKey) {
     return { ok: false, message_th: 'ยังไม่ได้ใส่ Gemini API Key', model: '' };
   }
 
-  const model = 'gemini-2.5-flash';
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: 'ตอบสั้นๆ เพียง 1 คำ: สบายดี' }] }],
-          generationConfig: { maxOutputTokens: 10 },
-        }),
-        cache: 'no-store',
-      },
-    );
+  const candidateModels = [
+    requestedModel,
+    'gemini-3.6-flash',
+    'gemini-3.7-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-2.5-flash',
+  ].filter((m): m is string => Boolean(m && m.trim()));
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
-      return { ok: false, message_th: `เชื่อมต่อ Gemini ไม่สำเร็จ: ${errMsg}`, model };
-    }
+  let lastErrMsg = '';
+  for (const rawModel of candidateModels) {
+    const model = rawModel.replace(/^models\//, '');
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'ตอบสั้นๆ เพียง 1 คำ: สบายดี' }] }],
+            generationConfig: { maxOutputTokens: 10 },
+          }),
+          cache: 'no-store',
+        },
+      );
 
-    const data = await res.json();
-    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (reply) {
-      return { ok: true, message_th: `เชื่อมต่อ Google Gemini สำเร็จ! (ทดสอบผ่านโมเดล ${model})`, model };
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        lastErrMsg = errJson?.error?.message || `HTTP ${res.status}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (reply) {
+        return { ok: true, message_th: `เชื่อมต่อ Google Gemini สำเร็จ! (ทดสอบผ่านโมเดล ${model})`, model };
+      }
+    } catch (err) {
+      lastErrMsg = err instanceof Error ? err.message : String(err);
     }
-    return { ok: false, message_th: 'Gemini ตอบกลับแต่ไม่มีเนื้อหา', model };
-  } catch (err) {
-    return { ok: false, message_th: `เกิดข้อผิดพลาด: ${err instanceof Error ? err.message : String(err)}`, model };
   }
+
+  return { ok: false, message_th: `เชื่อมต่อ Gemini ไม่สำเร็จ: ${lastErrMsg}`, model: candidateModels[0] || 'gemini-3.6-flash' };
 }
 
 /** ทดสอบการตอบของบอทใน Playground */
@@ -81,7 +93,7 @@ export async function testAiPlayground(input: {
     throw new Error('กรุณาบันทึก GEMINI_API_KEY ก่อนทดสอบ');
   }
 
-  const model = input.model || 'gemini-2.5-flash';
+  const model = (input.model || 'gemini-3.6-flash').replace(/^models\//, '');
   const temperature = input.temperature ?? 0.7;
 
   let combinedInstruction = input.systemPrompt || `คุณคือแอดมินร้านค้าออนไลน์ของไทยที่สุภาพ อ่อนหวาน เป็นมิตร และมืออาชีพ
@@ -190,8 +202,8 @@ export async function generateCommentReply(
     },
   };
 
-  const models = [aiSettings.model, 'gemini-2.5-flash', 'gemini-1.5-flash'];
-  const uniqueModels = [...new Set(models.filter(Boolean))];
+  const models = [aiSettings.model, 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
+  const uniqueModels = [...new Set(models.filter(Boolean).map((m) => m.replace(/^models\//, '')))];
   let lastError: Error | null = null;
 
   for (const model of uniqueModels) {

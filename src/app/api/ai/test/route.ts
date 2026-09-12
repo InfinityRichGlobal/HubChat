@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 const testKeySchema = z.object({
   action: z.literal('test_key'),
   apiKey: z.string().trim().optional(),
+  model: z.string().trim().optional(),
 });
 
 const playgroundSchema = z.object({
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
     const body = schema.parse(await req.json());
 
     if (body.action === 'test_key') {
-      const result = await testGeminiApiKey(body.apiKey);
+      const result = await testGeminiApiKey(body.apiKey, body.model);
       return ok(result);
     }
 

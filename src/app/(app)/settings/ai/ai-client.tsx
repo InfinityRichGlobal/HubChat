@@ -55,7 +55,7 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
   const [hasApiKey, setHasApiKey] = useState(false);
   const [hintLast4, setHintLast4] = useState<string | null>(null);
 
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [model, setModel] = useState('gemini-3.6-flash');
   const [temperature, setTemperature] = useState(0.7);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [knowledge, setKnowledge] = useState('');
@@ -76,7 +76,7 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
         const d = json.data as AiSettingsData;
         setHasApiKey(d.hasApiKey);
         setHintLast4(d.hintLast4);
-        setModel(d.model || 'gemini-2.5-flash');
+        setModel(d.model || 'gemini-3.6-flash');
         setTemperature(d.temperature ?? 0.7);
         setSystemPrompt(d.systemPrompt || DEFAULT_SYSTEM_PROMPT);
         setKnowledge(d.knowledge || DEFAULT_KNOWLEDGE_BASE);
@@ -144,6 +144,7 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
         body: JSON.stringify({
           action: 'test_key',
           apiKey: apiKeyInput.trim() || undefined,
+          model,
         }),
       });
       const json = await res.json();
@@ -274,9 +275,10 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
                   <SelectValue placeholder="เลือกโมเดล" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (แนะนำ - เร็ว ฉลาด ประหยัด)</SelectItem>
-                  <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash (เสถียร รองรับงานทั่วไป)</SelectItem>
-                  <SelectItem value="gemini-1.5-pro">Gemini 1.5 Pro (ฉลาดลึกซึ้ง เหมาะกับคำถามซับซ้อน)</SelectItem>
+                  <SelectItem value="gemini-3.6-flash">Gemini 3.6 Flash (แนะนำ - โมเดลล่าสุด เร็ว ฉลาด ประหยัด)</SelectItem>
+                  <SelectItem value="gemini-3.7-flash">Gemini 3.7 Flash (ฉลาดรอบด้าน รองรับมัลติโมดัล)</SelectItem>
+                  <SelectItem value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (เร็ว ประหยัดโควต้า)</SelectItem>
+                  <SelectItem value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview (การคิดวิเคราะห์เชิงลึก)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

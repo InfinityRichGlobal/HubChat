@@ -305,11 +305,14 @@ export default function InboxClient({
   const [platformFilter, setPlatformFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  // ตรวจจับการเลื่อนจอแนวนอนบนมือถือ ป้องกันไม่ให้ปุ่มดรอปดาวน์เด้งเปิดตอนแค่ต้องการเลื่อนดู
+  // ควบคุมการเปิดปิดดรอปดาวน์ในแถบฟิลเตอร์บนมือถือ
+  const [openDropdown, setOpenDropdown] = useState<'tags' | 'admins' | 'platform' | 'order' | null>(null);
+  const isTouchRef = useRef(false);
   const isSwipingRef = useRef(false);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleFilterTouchStart = (e: React.TouchEvent) => {
+    isTouchRef.current = true;
     if (e.touches.length > 0) {
       touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       isSwipingRef.current = false;
@@ -322,6 +325,7 @@ export default function InboxClient({
     const dy = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
     if (dx > 6 || dy > 6) {
       isSwipingRef.current = true;
+      setOpenDropdown(null);
     }
   };
 
@@ -577,12 +581,29 @@ export default function InboxClient({
             </FilterChip>
 
             {/* 3. ปุ่มดรอปดาวน์: ป้ายแท็ก (วางก่อนติดตามผล) */}
-            <DropdownMenu>
+            <DropdownMenu
+              open={openDropdown === 'tags'}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setOpenDropdown(null);
+                } else if (!isTouchRef.current) {
+                  setOpenDropdown('tags');
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  onPointerDown={(e) => {
-                    if (e.pointerType === 'touch') e.preventDefault();
+                  onTouchEnd={(e) => {
+                    if (!isSwipingRef.current) {
+                      e.preventDefault();
+                      setOpenDropdown((prev) => (prev === 'tags' ? null : 'tags'));
+                    }
+                  }}
+                  onClick={() => {
+                    if (!isTouchRef.current) {
+                      setOpenDropdown((prev) => (prev === 'tags' ? null : 'tags'));
+                    }
                   }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
@@ -649,12 +670,29 @@ export default function InboxClient({
             </FilterChip>
 
             {/* 4. ปุ่มดรอปดาวน์: ผู้ดูแล / แอดมิน */}
-            <DropdownMenu>
+            <DropdownMenu
+              open={openDropdown === 'admins'}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setOpenDropdown(null);
+                } else if (!isTouchRef.current) {
+                  setOpenDropdown('admins');
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  onPointerDown={(e) => {
-                    if (e.pointerType === 'touch') e.preventDefault();
+                  onTouchEnd={(e) => {
+                    if (!isSwipingRef.current) {
+                      e.preventDefault();
+                      setOpenDropdown((prev) => (prev === 'admins' ? null : 'admins'));
+                    }
+                  }}
+                  onClick={() => {
+                    if (!isTouchRef.current) {
+                      setOpenDropdown((prev) => (prev === 'admins' ? null : 'admins'));
+                    }
                   }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
@@ -704,12 +742,29 @@ export default function InboxClient({
             </DropdownMenu>
 
             {/* 5. ปุ่มดรอปดาวน์: แพลตฟอร์ม & รายเพจ */}
-            <DropdownMenu>
+            <DropdownMenu
+              open={openDropdown === 'platform'}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setOpenDropdown(null);
+                } else if (!isTouchRef.current) {
+                  setOpenDropdown('platform');
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  onPointerDown={(e) => {
-                    if (e.pointerType === 'touch') e.preventDefault();
+                  onTouchEnd={(e) => {
+                    if (!isSwipingRef.current) {
+                      e.preventDefault();
+                      setOpenDropdown((prev) => (prev === 'platform' ? null : 'platform'));
+                    }
+                  }}
+                  onClick={() => {
+                    if (!isTouchRef.current) {
+                      setOpenDropdown((prev) => (prev === 'platform' ? null : 'platform'));
+                    }
                   }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
@@ -846,12 +901,29 @@ export default function InboxClient({
             </DropdownMenu>
 
             {/* 6. ปุ่มดรอปดาวน์: จำนวนออเดอร์ */}
-            <DropdownMenu>
+            <DropdownMenu
+              open={openDropdown === 'order'}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setOpenDropdown(null);
+                } else if (!isTouchRef.current) {
+                  setOpenDropdown('order');
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  onPointerDown={(e) => {
-                    if (e.pointerType === 'touch') e.preventDefault();
+                  onTouchEnd={(e) => {
+                    if (!isSwipingRef.current) {
+                      e.preventDefault();
+                      setOpenDropdown((prev) => (prev === 'order' ? null : 'order'));
+                    }
+                  }}
+                  onClick={() => {
+                    if (!isTouchRef.current) {
+                      setOpenDropdown((prev) => (prev === 'order' ? null : 'order'));
+                    }
                   }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
