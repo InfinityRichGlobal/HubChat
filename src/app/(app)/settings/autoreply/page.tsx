@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can } from '@/lib/auth/permissions';
 import { listRules, listAutoReplyLogs } from '@/server/autoreply/service';
+import { getCommentBotSettings } from '@/server/comments/bot';
 import { db } from '@/lib/supabase/admin';
 import AutoReplyClient from './autoreply-client';
 
@@ -17,10 +18,11 @@ export default async function AutoReplyPage() {
   if (!result.ok) redirect('/login');
   if (!can(result.admin.role, 'content.view')) redirect('/inbox');
 
-  const [rules, logs, { data: pages }] = await Promise.all([
+  const [rules, logs, { data: pages }, botSettings] = await Promise.all([
     listRules(),
     listAutoReplyLogs(30),
     db().from('pages').select('id,display_name,page_name,tag_color').order('created_at'),
+    getCommentBotSettings(),
   ]);
 
   return (
@@ -28,6 +30,7 @@ export default async function AutoReplyPage() {
       canManage={can(result.admin.role, 'content.manage')}
       initialRules={rules}
       initialLogs={logs}
+      initialCommentBotSettings={botSettings}
       pages={
         (pages ?? []) as Array<{
           id: string;

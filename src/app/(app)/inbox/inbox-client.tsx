@@ -348,6 +348,20 @@ export default function InboxClient({
     setActiveId(currentC);
   }, [searchParams]);
 
+  // ดักฟัง popstate ของเบราว์เซอร์ (เช่น ปัดขอบจอย้อนกลับบน iOS / Safari PWA หรือกดปุ่ม Back)
+  // ให้สลับ activeId ทันทีแบบ synchronous 0ms ไม่ต้องรอ transition ของ Next.js router
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        setActiveId(sp.get('c'));
+      } catch (_) {}
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   // ดักฟังข้อความจาก Service Worker เมื่อกด Push Notification ขณะเปิดแอปอยู่
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
@@ -547,7 +561,7 @@ export default function InboxClient({
   }, [conversations, orderFilter, assignedAdminFilter, platformFilter, inboxGroup, selectedTags]);
 
   return (
-    <div className="flex h-full w-full gap-3">
+    <div className="flex h-full w-full gap-3 p-[10px]">
       {/* ---------------- ลิสต์แชท ---------------- */}
       <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">

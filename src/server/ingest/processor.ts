@@ -21,6 +21,7 @@ import { captureInboundMedia } from '@/server/storage/media';
 import { claimJobs, finishJob, nextStatusAfterFailure, type QueueJob } from './queue';
 import type { EchoMessageEvent, IngestEvent, InboundMessageEvent } from './types';
 import { getFilterWords, saveIncomingComment } from '@/server/comments/service';
+import { processCommentAutoReply } from '@/server/comments/bot';
 import { dispatchNotification, flushNotifications } from '@/server/notify/dispatch';
 
 /** สรุปผลของการทำงานหนึ่งรอบ — ใช้ตอบกลับหน้าจอและใช้ในชุดทดสอบ */
@@ -373,6 +374,10 @@ async function handleComment(
     }
 
     summary.comments_saved += 1;
+
+    // รันบอทคอมเมนต์อัตโนมัติ (ไลก์ ตอบใต้โพสต์ ทักส่วนตัว ตามที่ตั้งค่าไว้)
+    await processCommentAutoReply(page, ev, saved.id);
+
     if (!saved.matched) return;
 
     summary.comments_flagged += 1;

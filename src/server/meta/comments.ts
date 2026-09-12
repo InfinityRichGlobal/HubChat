@@ -83,6 +83,48 @@ export async function setCommentHidden(
 }
 
 /**
+ * กดไลก์คอมเมนต์
+ */
+export async function likeComment(
+  page: MetaPage,
+  commentId: string,
+): Promise<CommentActionResult> {
+  const result = await metaPost(page, `${commentId}/likes`, {});
+  if (result.ok) return { ok: true, id: commentId };
+  return {
+    ok: false,
+    error_th: explainCommentError(result.error.code, result.error.message_th),
+    outcome_unknown: result.error.kind === 'ambiguous',
+  };
+}
+
+export type WebhookSubscribeResult =
+  | { ok: true; subscribed_fields: string[] }
+  | { ok: false; error_th: string };
+
+/**
+ * เชื่อมต่อ Webhook สำหรับเพจ (ทั้ง messages และ feed)
+ * 🔴 จำเป็นอย่างยิ่งสำหรับคอมเมนต์: ถ้าเพจไม่ได้เรียก POST /{page-id}/subscribed_apps
+ *    พร้อม subscribed_fields=feed ทาง Meta จะไม่มีวันยิงคอมเมนต์มาที่ webhook เลย
+ */
+export async function subscribePageWebhooks(
+  page: MetaPage,
+): Promise<WebhookSubscribeResult> {
+  const fields = ['messages', 'messaging_postbacks', 'messaging_optins', 'message_deliveries', 'message_reads', 'feed'];
+  const result = await metaPost(page, `${page.page_id}/subscribed_apps`, {
+    subscribed_fields: fields.join(','),
+  });
+
+  if (result.ok) {
+    return { ok: true, subscribed_fields: fields };
+  }
+  return {
+    ok: false,
+    error_th: explainCommentError(result.error.code, result.error.message_th),
+  };
+}
+
+/**
  * แปลข้อผิดพลาดของ Meta เป็นคำแนะนำที่ทำตามได้
  * 🔴 บทเรียนจาก D-31 : ข้อความกลาง ๆ ทำให้ไล่ปัญหาต่อไม่ได้เลย
  */

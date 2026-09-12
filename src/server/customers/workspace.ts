@@ -76,7 +76,7 @@ export async function loadWorkspace(
   // 🔴 ด่านสิทธิ์รายเพจ — ต้องมาก่อนอ่านอะไรทั้งสิ้น
   const conv = await requireConversationAccess(admin, conversationId);
 
-  const [custRes, pageRes, orderRes, noteRes] = await Promise.all([
+  const [custRes, pageRes, orderRes, noteRes, validOrdersRes] = await Promise.all([
     db()
       .from('customers')
       .select(
@@ -107,6 +107,11 @@ export async function loadWorkspace(
       .eq('customer_id', conv.customer_id)
       .order('created_at', { ascending: false })
       .limit(NOTE_LIMIT),
+    db()
+      .from('orders')
+      .select('total')
+      .eq('customer_id', conv.customer_id)
+      .not('status', 'in', '("cancelled","returned")'),
   ]);
 
   if (custRes.error) throw new Error(`อ่านข้อมูลลูกค้าไม่สำเร็จ: ${custRes.error.message}`);
@@ -115,6 +120,10 @@ export async function loadWorkspace(
 
   const customer = custRes.data as WorkspaceCustomer | null;
   if (!customer) throw new Error('ไม่พบข้อมูลลูกค้า');
+
+  const validOrders = (validOrdersRes.data ?? []) as Array<{ total: number | null }>;
+  const actualTotalOrders = validOrders.length;
+  const actualTotalSpent = validOrders.reduce((sum, o) => sum + Number(o.total ?? 0), 0);
 
   const pageRow = pageRes.data as {
     id: string; page_name: string; display_name: string | null; platform: string;
@@ -135,7 +144,8 @@ export async function loadWorkspace(
   return {
     customer: {
       ...customer,
-      total_spent: Number(customer.total_spent ?? 0),
+      total_orders: actualTotalOrders,
+      total_spent: actualTotalSpent,
     },
     page: {
       id: pageRow?.id ?? conv.page_id,

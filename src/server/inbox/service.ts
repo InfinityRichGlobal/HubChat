@@ -202,6 +202,7 @@ async function customerIdsWithOrders(pageIds: string[]): Promise<string[]> {
       .select('customer_id')
       .in('page_id', pageIds)
       .not('customer_id', 'is', null)
+      .not('status', 'in', '("cancelled","returned")')
       .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) throw new Error(`อ่านกลุ่มติดตามผลไม่สำเร็จ: ${error.message}`);
@@ -380,7 +381,11 @@ export async function listConversations(
       .in('id', customerIds),
     adminNames(rows.flatMap((r) => [r.locked_by_admin_id, r.assigned_admin_id]).filter((v): v is string => Boolean(v))),
     tagsForConversations(rows.map((r) => r.id)),
-    db().from('orders').select('customer_id').in('customer_id', customerIds),
+    db()
+      .from('orders')
+      .select('customer_id')
+      .in('customer_id', customerIds)
+      .not('status', 'in', '("cancelled","returned")'),
     countUnreadMessages(unreadConvIds),
   ]);
 
