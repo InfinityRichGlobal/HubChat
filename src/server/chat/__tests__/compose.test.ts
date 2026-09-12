@@ -114,15 +114,23 @@ describe('แทรกสินค้า', () => {
     const r = productText([
       { name: 'เสื้อยืด', variant: 'ดำ', price: 590, qty: 2 },
     ], { show_price: true, promotions: ['ซื้อ 2 แถม 1'] });
-    expect(r.text).toContain('เสื้อยืด (ดำ)');
-    expect(r.text).toContain('590 บาท');
-    expect(r.text).toContain('*2ชิ้น');
+    expect(r.text).toContain('• เสื้อยืด (ดำ) x 2 — 1,180 บาท');
     expect(r.text).toContain('ซื้อ 2 แถม 1');
+  });
+
+  it('มีสินค้าหลายรายการ → แสดงยอดรวมสินค้า', () => {
+    const r = productText([
+      { name: 'เสื้อยืด', variant: 'ดำ', price: 590, qty: 2 },
+      { name: 'กางเกง', variant: null, price: 890, qty: 1 },
+    ], { show_price: true });
+    expect(r.text).toContain('• เสื้อยืด (ดำ) x 2 — 1,180 บาท');
+    expect(r.text).toContain('• กางเกง x 1 — 890 บาท');
+    expect(r.text).toContain('ยอดรวมสินค้า: 2,070 บาท');
   });
 
   it('ไม่ติ๊กแสดงราคา → มีชื่อและจำนวนเท่านั้น', () => {
     const r = productText([{ name: 'กางเกง', variant: null, price: 890, qty: 1 }]);
-    expect(r.text).toBe('กางเกง*1ชิ้น');
+    expect(r.text).toBe('• กางเกง x 1');
   });
 
   it('ไม่เลือกสินค้าเลย → บอกว่าขาด', () => {

@@ -71,6 +71,7 @@ export type Admin = {
   last_login_ip: string | null;
   session_version: number;
   created_by: string | null;
+  avatar_url?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -435,4 +436,8 @@ export const ALL_TABLES = [
   'order_no_counters', 'tracking_import_rows', 'order_logs', 'send_attempts',
   'follow_ups', 'comments', 'push_subscriptions', 'notification_prefs',
   'activity_logs', 'app_settings', 'webhook_queue', 'login_attempts',
+  'message_sends', 'conversation_policy_state', 'auto_reply_executions',
+  'shipping_methods', 'media_assets', 'fulfillment_notifications',
+  'notification_jobs', 'customer_notes', 'worker_heartbeats',
+  'order_media_links', 'runtime_settings',
 ] as const;

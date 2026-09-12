@@ -17,6 +17,7 @@ import 'server-only';
 import { db } from '@/lib/supabase/admin';
 import { canSeePage } from '@/lib/auth/permissions';
 import { conversationIdsWithTags, tagsForConversations } from '@/server/content/service';
+import { getAllAdminAvatars } from '@/server/admins/avatar';
 import type { Platform, PublicAdmin, ReferralSource } from '@/types/db';
 
 /** ปลดล็อกอัตโนมัติเมื่อไม่มีความเคลื่อนไหวเกินเวลานี้ (สเปก 5.1 : 3 นาที) */
@@ -94,6 +95,7 @@ export type MessageRow = {
   sender_type: 'customer' | 'admin' | 'bot';
   admin_id: string | null;
   admin_name: string | null;
+  admin_avatar_url?: string | null;
   text: string | null;
   /**
    * ไฟล์แนบ
@@ -502,7 +504,10 @@ export async function listMessages(
   const truncated = Boolean(after) && allRows.length > capped;
   const hasMore = !after && allRows.length > capped;
   const rows = allRows.slice(0, capped);
-  const names = await adminNames(rows.map((m) => m.admin_id).filter((v): v is string => Boolean(v)));
+  const [names, avatarMap] = await Promise.all([
+    adminNames(rows.map((m) => m.admin_id).filter((v): v is string => Boolean(v))),
+    getAllAdminAvatars(),
+  ]);
 
   /**
    * ⭐ ดึงข้อความต้นทางของ "ตอบกลับ" มาทีเดียวทั้งชุด
@@ -535,6 +540,7 @@ export async function listMessages(
       sender_type: m.sender_type,
       admin_id: m.admin_id,
       admin_name: m.admin_id ? (names.get(m.admin_id) ?? null) : null,
+      admin_avatar_url: m.admin_id ? (avatarMap[m.admin_id] ?? null) : null,
       text: m.text,
       attachments: Array.isArray(m.attachments) ? m.attachments : [],
       sent_with_human_agent_tag: m.sent_with_human_agent_tag,

@@ -10,6 +10,8 @@ import AdminsClient, { type AdminRow, type PageOption } from './admins-client';
  */
 export const dynamic = 'force-dynamic';
 
+import { getAllAdminAvatars } from '@/server/admins/avatar';
+
 export default async function AdminsPage() {
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
@@ -18,18 +20,24 @@ export default async function AdminsPage() {
     redirect('/settings');
   }
 
-  const [{ data: admins }, { data: pages }] = await Promise.all([
+  const [{ data: admins }, { data: pages }, avatarMap] = await Promise.all([
     db()
       .from('admins')
       .select('id,name,email,role,allowed_page_ids,must_change_password,is_active,last_seen_at,last_login_ip,created_at')
       .order('created_at', { ascending: true }),
     db().from('pages').select('id,display_name,page_name,platform,tag_color').order('created_at'),
+    getAllAdminAvatars(),
   ]);
+
+  const adminsWithAvatars = (admins ?? []).map((a) => ({
+    ...a,
+    avatar_url: avatarMap[a.id] ?? null,
+  })) as AdminRow[];
 
   return (
     <AdminsClient
       meId={result.admin.id}
-      initialAdmins={(admins ?? []) as AdminRow[]}
+      initialAdmins={adminsWithAvatars}
       pages={(pages ?? []) as PageOption[]}
     />
   );

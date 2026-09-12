@@ -8,10 +8,12 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/supabase/admin';
-import { requirePermission, getClientIp } from '@/lib/auth/current-admin';
+import { requirePermission, requireAdmin, getClientIp, AuthError } from '@/lib/auth/current-admin';
+import { can } from '@/lib/auth/permissions';
 import { hashPassword, validatePasswordStrength, generateTempPassword } from '@/lib/auth/password';
 import { logActivity, ACTIONS } from '@/lib/activity-log';
 import { ok, fail, toErrorResponse } from '@/lib/api';
+import { setAdminAvatar, getAdminAvatar } from '@/server/admins/avatar';
 import type { Admin } from '@/types/db';
 
 export const runtime = 'nodejs';
@@ -25,6 +27,7 @@ const patchSchema = z.object({
   is_active: z.boolean().optional(),
   /** true = ตั้งรหัสชั่วคราวใหม่ + บังคับเปลี่ยนตอน login ถัดไป */
   reset_password: z.boolean().optional(),
+  avatar_url: z.string().nullable().optional(),
 });
 
 /** นับว่ายังเหลือเจ้าของที่ใช้งานอยู่กี่คน */
@@ -37,9 +40,25 @@ async function countActiveOwners(excludeId?: string): Promise<number> {
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
-    const me = await requirePermission('admin.manage');
+    const me = await requireAdmin();
     const { id } = await ctx.params;
     const body = patchSchema.parse(await req.json());
+
+    const isSelf = me.id === id;
+    const hasManagePerm = can(me.role, 'admin.manage');
+    if (!hasManagePerm && !isSelf) {
+      throw new AuthError('forbidden', 'บัญชีของคุณไม่มีสิทธิ์แก้ไขข้อมูลแอดมินคนอื่น', 403);
+    }
+    if (isSelf && !hasManagePerm) {
+      if (
+        body.role !== undefined ||
+        body.allowed_page_ids !== undefined ||
+        body.is_active !== undefined ||
+        body.reset_password !== undefined
+      ) {
+        throw new AuthError('forbidden', 'คุณไม่มีสิทธิ์แก้ไขบทบาทหรือการตั้งค่าความปลอดภัยของบัญชี', 403);
+      }
+    }
 
     const { data: target } = await db().from('admins').select('*').eq('id', id).maybeSingle<Admin>();
     if (!target) return fail('not_found', 'ไม่พบแอดมินคนนี้', 404);
@@ -77,17 +96,25 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       update.session_version = target.session_version + 1;
     }
 
-    if (Object.keys(update).length === 0) {
+    if (body.avatar_url !== undefined) {
+      await setAdminAvatar(id, body.avatar_url);
+    }
+
+    if (Object.keys(update).length === 0 && body.avatar_url === undefined) {
       return fail('nothing_to_update', 'ไม่มีข้อมูลที่ต้องแก้ไข', 400);
     }
 
-    const { data: updated, error } = await db()
-      .from('admins')
-      .update(update)
-      .eq('id', id)
-      .select('id,name,email,role,allowed_page_ids,must_change_password,is_active,last_seen_at,session_version,created_at,updated_at')
-      .single();
-    if (error) throw error;
+    let updated: Partial<Admin> = target;
+    if (Object.keys(update).length > 0) {
+      const { data, error } = await db()
+        .from('admins')
+        .update(update)
+        .eq('id', id)
+        .select('id,name,email,role,allowed_page_ids,must_change_password,is_active,last_seen_at,session_version,created_at,updated_at')
+        .single();
+      if (error) throw error;
+      updated = data;
+    }
 
     const ip = await getClientIp();
     await logActivity({
@@ -106,7 +133,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     return ok({
-      admin: updated,
+      admin: {
+        ...updated,
+        avatar_url: body.avatar_url !== undefined ? body.avatar_url : await getAdminAvatar(id),
+      },
       temp_password: tempPassword,
       message_th: tempPassword
         ? 'ตั้งรหัสผ่านชั่วคราวใหม่แล้ว — คัดลอกส่งให้เจ้าตัว รหัสนี้จะไม่แสดงอีก'

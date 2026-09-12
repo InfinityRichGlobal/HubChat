@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Eye, EyeOff, Loader2, LogIn, ShieldAlert } from 'lucide-react';
+import { Eye, EyeOff, Info, Loader2, LogIn, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,7 +18,23 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 export default function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const nextPath = params.get('next') || '/inbox';
+
+  // ป้องกัน redirect วนลูป: ห้าม next เป็น /login, /, หรือ URL ภายนอก
+  const rawNext = params.get('next');
+  const nextPath =
+    rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') && rawNext !== '/login' && rawNext !== '/'
+      ? rawNext
+      : '/inbox';
+
+  // ถ้ามี reason=... แปลว่าถูกเตะออกจากระบบ — แสดงข้อความแจ้งเตือน
+  const reason = params.get('reason');
+  const reasonMessages: Record<string, string> = {
+    session_invalid: 'เซสชันหมดอายุหรือถูกยกเลิก กรุณาเข้าสู่ระบบใหม่',
+    session_revoked: 'คุณถูกออกจากระบบจากอุปกรณ์อื่น กรุณาเข้าสู่ระบบใหม่',
+    account_disabled: 'บัญชีนี้ถูกปิดใช้งาน กรุณาติดต่อเจ้าของร้าน',
+    no_session: 'กรุณาเข้าสู่ระบบ',
+  };
+  const reasonNotice = reason ? reasonMessages[reason] ?? 'กรุณาเข้าสู่ระบบใหม่' : null;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -105,6 +121,13 @@ export default function LoginForm() {
               </button>
             </div>
           </div>
+
+          {reasonNotice && !error && (
+            <Alert className="border-amber-500/50 text-amber-900 dark:text-amber-200">
+              <Info className="size-4 text-amber-600 dark:text-amber-400" />
+              <AlertDescription>{reasonNotice}</AlertDescription>
+            </Alert>
+          )}
 
           {error && (
             <Alert variant="destructive">

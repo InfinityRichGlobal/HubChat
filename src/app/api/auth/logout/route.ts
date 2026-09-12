@@ -2,6 +2,7 @@
  * POST /api/auth/logout — ออกจากระบบเครื่องนี้
  * (ถ้าต้องการเตะออก "ทุกเครื่อง" ใช้ /api/admins/[id]/force-logout แทน)
  */
+import { NextResponse, type NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { SESSION_COOKIE } from '@/lib/auth/session';
 import { getCurrentAdmin, getClientIp } from '@/lib/auth/current-admin';
@@ -9,6 +10,16 @@ import { logActivity, ACTIONS } from '@/lib/activity-log';
 import { ok, toErrorResponse } from '@/lib/api';
 
 export const runtime = 'nodejs';
+
+export async function GET(req: NextRequest) {
+  try {
+    const jar = await cookies();
+    jar.delete(SESSION_COOKIE);
+    return NextResponse.redirect(new URL('/login', req.url));
+  } catch {
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
+}
 
 export async function POST() {
   try {

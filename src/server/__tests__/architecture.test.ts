@@ -829,7 +829,7 @@ describe('🔴 ที่เก็บไฟล์ต้องอยู่ฝั�
   });
 
   it('ชั้นที่เก็บไฟล์ต้องประกาศ server-only', () => {
-    for (const target of ['server/storage/r2.ts', 'server/storage/media.ts']) {
+    for (const target of ['server/storage/supabase-storage.ts', 'server/storage/media.ts']) {
       const file = CODE_FILES.find((f) => rel(f) === target);
       expect(file, `ไม่พบไฟล์ ${target}`).toBeDefined();
       expect(read(file!), `${target} ต้องมี import 'server-only'`).toContain("import 'server-only'");
@@ -837,7 +837,7 @@ describe('🔴 ที่เก็บไฟล์ต้องอยู่ฝั�
   });
 
   it('🔴 การแยก "ลิงก์หมดอายุ" ต้องใช้ชนิดของ error ไม่ใช่เดาจากข้อความ', () => {
-    // เคยเขียนแบบอ่านเลขจากข้อความแล้วพลาด : R2 ตอบ 403 → ไปจดว่าไฟล์ลูกค้าหายถาวร
+    // เคยเขียนแบบอ่านเลขจากข้อความแล้วพลาด : Storage ตอบ 403 → ไปจดว่าไฟล์ลูกค้าหายถาวร
     const media = CODE_FILES.find((f) => rel(f) === 'server/storage/media.ts');
     expect(media).toBeDefined();
     const src = read(media!);
@@ -873,12 +873,10 @@ describe('🔴 ที่เก็บไฟล์ต้องอยู่ฝั�
     expect(migrations).toMatch(/create unique index[^;]*media_assets \(message_id, attachment_index\)/);
   });
 
-  it('⭐ ระบบต้องทำงานได้แม้ยังไม่ได้ตั้งค่า R2', () => {
-    // ถ้าบังคับให้ตั้งค่าก่อน = เจ้าของร้านใช้ระบบไม่ได้จนกว่าจะเปิดบัญชี R2
-    const r2 = CODE_FILES.find((f) => rel(f) === 'server/storage/r2.ts');
-    expect(read(r2!)).toContain('isStorageConfigured');
-    const media = CODE_FILES.find((f) => rel(f) === 'server/storage/media.ts');
-    expect(read(media!)).toContain('isStorageConfigured');
+  it('⭐ ระบบใช้ Supabase Storage แบบ zero-config ไม่ต้องกรอก key เพิ่ม', () => {
+    const storage = CODE_FILES.find((f) => rel(f) === 'server/storage/supabase-storage.ts');
+    expect(storage).toBeDefined();
+    expect(read(storage!)).toContain("storage.from('media')");
   });
 });
 

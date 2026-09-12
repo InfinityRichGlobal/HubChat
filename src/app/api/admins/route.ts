@@ -16,22 +16,28 @@ export const runtime = 'nodejs';
 /** ถือว่า "ออนไลน์" ถ้ามีการใช้งานภายใน 3 นาทีที่ผ่านมา */
 const ONLINE_WINDOW_MS = 3 * 60 * 1000;
 
+import { getAllAdminAvatars } from '@/server/admins/avatar';
+
 /** GET — รายชื่อแอดมินพร้อมสถานะออนไลน์ */
 export async function GET() {
   try {
     await requirePermission('admin.manage');
 
-    const { data, error } = await db()
-      .from('admins')
-      .select(
-        'id,name,email,role,allowed_page_ids,must_change_password,is_active,last_seen_at,last_login_ip,session_version,created_by,created_at,updated_at',
-      )
-      .order('created_at', { ascending: true });
+    const [{ data, error }, avatarMap] = await Promise.all([
+      db()
+        .from('admins')
+        .select(
+          'id,name,email,role,allowed_page_ids,must_change_password,is_active,last_seen_at,last_login_ip,session_version,created_by,created_at,updated_at',
+        )
+        .order('created_at', { ascending: true }),
+      getAllAdminAvatars(),
+    ]);
     if (error) throw error;
 
     const now = Date.now();
     const admins = (data ?? []).map((a) => ({
       ...a,
+      avatar_url: avatarMap[a.id] ?? null,
       // สถานะออนไลน์ — ใครกำลังทำงานอยู่ (สเปก 5.7)
       is_online:
         !!a.last_seen_at && now - new Date(a.last_seen_at as string).getTime() < ONLINE_WINDOW_MS,

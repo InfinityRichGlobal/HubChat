@@ -20,6 +20,8 @@ function isBypassed(pathname: string): boolean {
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/health') ||
     pathname.startsWith('/api/webhooks') || // Meta ยิงเข้ามาโดยไม่มี cookie
+    pathname === '/api/notify/flush' || // ตรวจสอบ CRON_SECRET / session เองข้างใน
+    pathname === '/api/ingest/process' || // ตรวจสอบ CRON_SECRET / permission เองข้างใน
     pathname === '/favicon.ico' ||
     pathname === '/manifest.json' ||
     pathname === '/sw.js' ||
@@ -78,7 +80,15 @@ export async function proxy(req: NextRequest) {
   }
 
   // --- login แล้ว แต่ยังอยู่หน้า login → พาเข้าระบบเลย ---------------------
+  // ⚠️ ยกเว้น: ถ้ามี ?reason=... แปลว่าฝั่ง Server (AppLayout) ตรวจ DB แล้วพบว่า
+  //    session ไม่ valid → ต้องลบ cookie ทิ้งแล้วให้ล็อกอินใหม่ ไม่ใช่เด้งกลับ /inbox
   if (isPublic) {
+    const hasAuthError = req.nextUrl.searchParams.has('reason');
+    if (hasAuthError) {
+      const res = NextResponse.next();
+      res.cookies.delete(SESSION_COOKIE);
+      return res;
+    }
     const url = req.nextUrl.clone();
     url.pathname = '/inbox';
     url.search = '';

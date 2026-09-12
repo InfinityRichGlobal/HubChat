@@ -4,7 +4,7 @@
  * ทดสอบเฉพาะส่วนที่เป็นฟังก์ชันบริสุทธิ์ — ไม่ต้องมีบัญชี R2 จริง
  */
 import { describe, it, expect } from 'vitest';
-import { buildKey, extensionFor, sha256Of } from '../r2';
+import { buildKey, extensionFor, sha256Of } from '../supabase-storage';
 
 const AT = new Date('2026-08-25T10:00:00.000Z');
 

@@ -31,7 +31,7 @@ function secretMatches(given: string, expected: string): boolean {
 }
 
 async function authorize(req: Request): Promise<'cron' | 'admin'> {
-  const expected = await getRuntimeSetting('CRON_SECRET');
+  const expected = process.env.CRON_SECRET || (await getRuntimeSetting('CRON_SECRET'));
   const header = req.headers.get('authorization') ?? '';
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
 
@@ -42,7 +42,7 @@ async function authorize(req: Request): Promise<'cron' | 'admin'> {
   return 'admin';
 }
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
   try {
     const by = await authorize(req);
     await heartbeatStarted('notifications');
@@ -57,6 +57,10 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET() {
-  return fail('method_not_allowed', 'ที่อยู่นี้ต้องเรียกด้วย POST เท่านั้น', 405);
+export async function POST(req: Request) {
+  return handle(req);
+}
+
+export async function GET(req: Request) {
+  return handle(req);
 }

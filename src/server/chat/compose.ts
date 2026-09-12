@@ -182,10 +182,20 @@ export function productText(
   if (items.length === 0) return { text: '', missing_th: ['สินค้า'] };
 
   const lines: string[] = [];
+  let totalAmount = 0;
   for (const p of items) {
     const title = p.variant?.trim() ? `${p.name} (${p.variant.trim()})` : p.name;
-    const price = options.show_price ? ` — ${baht(p.price)}` : '';
-    lines.push(`${title}${price}*${Math.max(1, p.qty)}ชิ้น`);
+    const qty = Math.max(1, p.qty);
+    const itemTotal = p.price * qty;
+    totalAmount += itemTotal;
+    if (options.show_price) {
+      lines.push(`• ${title} x ${qty} — ${baht(itemTotal)}`);
+    } else {
+      lines.push(`• ${title} x ${qty}`);
+    }
+  }
+  if (options.show_price && items.length > 1) {
+    lines.push(`ยอดรวมสินค้า: ${baht(totalAmount)}`);
   }
   for (const promotion of options.promotions ?? []) lines.push(`🎁 ${promotion}`);
   return { text: lines.join('\n'), missing_th: [] };

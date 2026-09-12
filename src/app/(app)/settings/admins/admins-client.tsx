@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import type { AdminRole } from '@/types/db';
+import ImageUploadCrop from '@/components/image-upload-crop';
 import { toast } from 'sonner';
 
 export type AdminRow = {
@@ -31,6 +32,7 @@ export type AdminRow = {
   is_active: boolean;
   last_seen_at: string | null;
   last_login_ip: string | null;
+  avatar_url?: string | null;
   created_at: string;
 };
 
@@ -107,21 +109,40 @@ export default function AdminsClient({
         {admins.map((a) => (
           <Card key={a.id}>
             <CardHeader>
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={`size-2 shrink-0 rounded-full ${isOnline(a.last_seen_at) ? 'bg-[var(--success)]' : 'bg-muted-foreground/40'}`}
-                  title={isOnline(a.last_seen_at) ? 'กำลังใช้งานอยู่' : 'ออฟไลน์'}
-                />
-                <CardTitle className="text-base">{a.name}</CardTitle>
-                <Badge variant={a.role === 'owner' ? 'default' : 'secondary'}>{ROLE_LABEL_TH[a.role]}</Badge>
-                {a.id === meId && <Badge variant="outline">คุณ</Badge>}
-                {!a.is_active && <Badge variant="destructive">ปิดใช้งาน</Badge>}
-                {a.must_change_password && <Badge variant="warning">รอตั้งรหัสใหม่</Badge>}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <ImageUploadCrop
+                    value={a.avatar_url ?? null}
+                    aspect="circle"
+                    size={56}
+                    label=""
+                    onChange={(url) => {
+                      call(
+                        `/api/admins/${a.id}`,
+                        { method: 'PATCH', body: JSON.stringify({ avatar_url: url }) },
+                        'อัปเดตรูปโปรไฟล์แล้ว',
+                      );
+                    }}
+                  />
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`size-2 shrink-0 rounded-full ${isOnline(a.last_seen_at) ? 'bg-[var(--success)]' : 'bg-muted-foreground/40'}`}
+                        title={isOnline(a.last_seen_at) ? 'กำลังใช้งานอยู่' : 'ออฟไลน์'}
+                      />
+                      <CardTitle className="text-base">{a.name}</CardTitle>
+                      <Badge variant={a.role === 'owner' ? 'default' : 'secondary'}>{ROLE_LABEL_TH[a.role]}</Badge>
+                      {a.id === meId && <Badge variant="outline">คุณ</Badge>}
+                      {!a.is_active && <Badge variant="destructive">ปิดใช้งาน</Badge>}
+                      {a.must_change_password && <Badge variant="warning">รอตั้งรหัสใหม่</Badge>}
+                    </div>
+                    <CardDescription>
+                      {a.email} · ใช้งานล่าสุด {timeAgoTh(a.last_seen_at)}
+                      {a.last_login_ip ? ` · IP ${a.last_login_ip}` : ''}
+                    </CardDescription>
+                  </div>
+                </div>
               </div>
-              <CardDescription>
-                {a.email} · ใช้งานล่าสุด {timeAgoTh(a.last_seen_at)}
-                {a.last_login_ip ? ` · IP ${a.last_login_ip}` : ''}
-              </CardDescription>
             </CardHeader>
 
             <CardContent className="flex flex-col gap-4">

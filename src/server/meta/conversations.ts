@@ -108,4 +108,70 @@ export function explainSyncError(code: number | null, fallback: string): string 
   return fallback;
 }
 
+/**
+ * ดึงชื่อลูกค้าจริงจาก Meta มาอัปเดตลงตาราง customers
+ * สำหรับ Facebook: ดึงจาก participants ของ conversations API
+ * สำหรับ Instagram: ดึงจาก User Profile API (name,username,profile_pic)
+ */
+export async function syncCustomerProfilesForPage(
+  page: MetaPage,
+): Promise<{ updated: number }> {
+  let updated = 0;
+  if (page.platform === 'facebook') {
+    const result = await metaGet(page, `${page.page_id}/conversations`, {
+      fields: 'id,senders,participants',
+      limit: '100',
+    });
+    if (result.ok) {
+      const body = result.data as {
+        data?: Array<{ participants?: { data?: MetaParticipant[] } }>;
+      };
+      for (const conv of body.data ?? []) {
+        const customer = (conv.participants?.data ?? []).find(
+          (p) => p.id && p.id !== page.page_id,
+        );
+        if (customer?.id && customer.name) {
+          const { error } = await db()
+            .from('customers')
+            .update({
+              name: customer.name,
+              profile_synced_at: new Date().toISOString(),
+            })
+            .eq('page_id', page.id)
+            .eq('psid', customer.id);
+          if (!error) updated += 1;
+        }
+      }
+    }
+  } else if (page.platform === 'instagram') {
+    const { data: custs } = await db()
+      .from('customers')
+      .select('id, psid')
+      .eq('page_id', page.id)
+      .is('name', null);
+
+    for (const c of custs ?? []) {
+      const res = await metaGet(page, c.psid, { fields: 'name,username,profile_pic' });
+      if (res.ok) {
+        const d = res.data as { name?: string; username?: string; profile_pic?: string };
+        const name = d.name?.trim() || d.username?.trim() || null;
+        if (name) {
+          await db()
+            .from('customers')
+            .update({
+              name,
+              username: d.username?.replace(/^@/, '') ?? null,
+              profile_pic_url: d.profile_pic ?? null,
+              profile_synced_at: new Date().toISOString(),
+            })
+            .eq('id', c.id);
+          updated += 1;
+        }
+      }
+    }
+  }
+
+  return { updated };
+}
+
 export { MetaNotConfiguredError };

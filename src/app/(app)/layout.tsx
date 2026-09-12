@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import AppShell from '@/components/app-shell';
 import { getRuntimeSetting } from '@/server/settings/service';
+import { getAdminAvatar } from '@/server/admins/avatar';
 
 /**
  * โครงหน้าจอหลังเข้าสู่ระบบ
@@ -14,13 +15,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!result.ok) {
     if (result.reason === 'must_change_password') redirect('/change-password');
-    redirect('/login');
+    redirect(`/login?reason=${result.reason ?? 'session_invalid'}`);
   }
 
-  const [displayName, logoUrl] = await Promise.all([
+  const [displayName, logoUrl, adminAvatar] = await Promise.all([
     getRuntimeSetting('APP_DISPLAY_NAME'),
     getRuntimeSetting('APP_LOGO_URL'),
+    getAdminAvatar(result.admin.id),
   ]);
 
-  return <AppShell admin={result.admin} brand={{ name: displayName || 'HubChat', logoUrl }}>{children}</AppShell>;
+  const adminWithAvatar = {
+    ...result.admin,
+    avatar_url: adminAvatar,
+  };
+
+  return <AppShell admin={adminWithAvatar} brand={{ name: displayName || 'HubChat', logoUrl }}>{children}</AppShell>;
 }

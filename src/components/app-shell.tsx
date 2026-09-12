@@ -165,17 +165,36 @@ function AccountMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className={cn('justify-start gap-2', className)}>
-          <UserCircle2 className="size-5" />
+          {admin.avatar_url ? (
+            <img
+              src={admin.avatar_url}
+              alt={admin.name}
+              className="size-5 rounded-full object-cover border"
+            />
+          ) : (
+            <UserCircle2 className="size-5" />
+          )}
           <span className="truncate">{admin.name}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
-          <div className="flex flex-col">
-            <span>{admin.name}</span>
-            <span className="text-xs font-normal text-muted-foreground">
-              {admin.email} · {ROLE_LABEL_TH[admin.role]}
-            </span>
+          <div className="flex items-center gap-3">
+            {admin.avatar_url ? (
+              <img
+                src={admin.avatar_url}
+                alt={admin.name}
+                className="size-9 rounded-full object-cover border shrink-0"
+              />
+            ) : (
+              <UserCircle2 className="size-8 text-muted-foreground shrink-0" />
+            )}
+            <div className="flex flex-col min-w-0">
+              <span className="truncate font-medium">{admin.name}</span>
+              <span className="text-xs font-normal text-muted-foreground truncate">
+                {admin.email} · {ROLE_LABEL_TH[admin.role]}
+              </span>
+            </div>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

@@ -13,7 +13,7 @@ import { requireAdmin } from '@/lib/auth/current-admin';
 import { fail, toErrorResponse } from '@/lib/api';
 import { canSeePage } from '@/lib/auth/permissions';
 import { getMediaAsset } from '@/server/storage/media';
-import { getObject, StorageNotConfiguredError } from '@/server/storage/r2';
+import { getObject } from '@/server/storage/supabase-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,9 +56,6 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       },
     });
   } catch (err) {
-    if (err instanceof StorageNotConfiguredError) {
-      return fail('storage_not_configured', 'ยังไม่ได้ตั้งค่าที่เก็บไฟล์ (Cloudflare R2)', 503);
-    }
     return toErrorResponse(err);
   }
 }

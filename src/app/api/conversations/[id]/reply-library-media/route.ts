@@ -8,7 +8,7 @@ import {
   ImageSendError, sendImage, sendVideo,
 } from '@/server/messaging/send-image';
 import { getMediaAsset } from '@/server/storage/media';
-import { extensionFor, getObject, StorageNotConfiguredError } from '@/server/storage/r2';
+import { extensionFor, getObject } from '@/server/storage/supabase-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,7 +54,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       alternatives_th: result.decision.alternatives_th,
     });
   } catch (err) {
-    if (err instanceof StorageNotConfiguredError) return fail('storage_not_configured', 'ยังไม่ได้ตั้งค่า Cloudflare R2', 503);
     if (err instanceof ImageSendError) return fail('media_failed', err.message_th, 422);
     if (err instanceof ProvenanceDeniedError) return fail('forbidden', err.message_th, 403);
     if (err instanceof InboxAccessError) return fail('forbidden', err.message, 403);

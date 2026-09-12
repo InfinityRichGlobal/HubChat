@@ -19,6 +19,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import PlatformIcon from '@/components/platform-icon';
 
 /**
  * หน้าจัดการเพจ (ฝั่งหน้าเว็บ)
@@ -162,11 +163,7 @@ export default function PagesClient({ initialPages }: { initialPages: SafePage[]
           <Card key={p.id}>
             <CardHeader>
               <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className="size-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: p.tag_color }}
-                  aria-hidden
-                />
+                <PlatformIcon platform={p.platform} size="md" />
                 <CardTitle className="text-base">{p.display_name || p.page_name}</CardTitle>
                 <Badge variant="secondary">{PLATFORM_LABEL[p.platform]}</Badge>
                 {p.has_token ? (

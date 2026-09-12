@@ -112,6 +112,32 @@ export async function fetchCustomerProfileDetailed(
   const result = await metaGet(page, psid, { fields: FIELDS[page.platform] });
 
   if (!result.ok) {
+    // ทางรอดสำหรับ Facebook: หากดึงตรงด้วย /{psid} โดนจำกัดสิทธิ์ ให้ค้นหาจาก participants ใน conversations ของเพจ
+    if (page.platform === 'facebook') {
+      try {
+        const convRes = await metaGet(page, `${page.page_id}/conversations`, {
+          fields: 'participants,senders',
+          limit: '50',
+        });
+        if (convRes.ok) {
+          const body = convRes.data as {
+            data?: Array<{ participants?: { data?: Array<{ id?: string; name?: string }> } }>;
+          };
+          for (const conv of body.data ?? []) {
+            const match = (conv.participants?.data ?? []).find((p) => p.id === psid);
+            if (match?.name) {
+              return {
+                ok: true,
+                profile: { name: match.name, username: null, profile_pic_url: null },
+              };
+            }
+          }
+        }
+      } catch {
+        // ละเว้น fallback error แล้วรายงาน error เดิม
+      }
+    }
+
     const reason_th = explainProfileError(result.error, page.platform);
     console.warn('[meta/profile] ดึงโปรไฟล์ไม่ได้', {
       psid,

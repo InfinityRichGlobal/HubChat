@@ -64,12 +64,6 @@ const futureSchema = z.object({
   META_VERIFY_TOKEN: z.string().optional(),
   META_GRAPH_VERSION: z.string().default('v26.0'),
 
-  R2_ACCOUNT_ID: z.string().optional(),
-  R2_ACCESS_KEY_ID: z.string().optional(),
-  R2_SECRET_ACCESS_KEY: z.string().optional(),
-  R2_BUCKET: z.string().optional(),
-  R2_PUBLIC_BASE_URL: z.string().url().optional(),
-
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
 

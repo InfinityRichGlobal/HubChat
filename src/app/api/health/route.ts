@@ -41,13 +41,15 @@ export async function GET() {
   }
 
   // 3) ตารางครบตามสเปกหัวข้อ 3 ไหม
-  const missing: string[] = [];
-  for (const table of ALL_TABLES) {
-    const { error } = await db().from(table).select('*', { head: true, count: 'exact' }).limit(1);
-    if (error) missing.push(table);
-  }
+  const results = await Promise.all(
+    ALL_TABLES.map(async (table) => {
+      const { error } = await db().from(table).select('*', { head: true, count: 'exact' }).limit(1);
+      return { table, error };
+    }),
+  );
+  const missing = results.filter((r) => r.error).map((r) => `${r.table}${r.error ? ` (${r.error.message})` : ''}`);
   checks.tables = missing.length
-    ? { ok: false, message_th: `ยังไม่มีตาราง: ${missing.join(', ')} — รัน supabase/migrations/0001_init.sql ก่อน` }
+    ? { ok: false, message_th: `พบปัญหาในตาราง: ${missing.join(', ')}` }
     : { ok: true, message_th: `ตารางครบ ${ALL_TABLES.length} ตาราง` };
 
   // 4) มีบัญชีเจ้าของแล้วหรือยัง

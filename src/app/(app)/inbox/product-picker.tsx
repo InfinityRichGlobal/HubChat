@@ -125,13 +125,21 @@ export default function ProductPicker({
     }
   }
 
+  const selectedItems = Object.entries(quantities).map(([id, qty]) => {
+    const p = products.find((x) => x.id === id);
+    return { id, qty, product: p };
+  }).filter((x) => Boolean(x.product));
+
+  const totalQty = selectedItems.reduce((sum, item) => sum + item.qty, 0);
+  const totalEstimatedAmount = selectedItems.reduce((sum, item) => sum + (Number(item.product?.price ?? 0) * item.qty), 0);
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[80vh] overflow-hidden">
+      <DialogContent className="max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>ใส่สินค้าในช่องพิมพ์</DialogTitle>
           <DialogDescription>
-            เลือกสินค้าและจำนวน แล้วเลือกได้ว่าจะใส่ราคา/โปรโมชันหรือไม่ ระบบจะแยกแต่ละรายการคนละบรรทัด
+            เลือกสินค้าและจำนวน แล้วเลือกได้ว่าจะใส่ราคา/โปรโมชันหรือไม่ ระบบจะจัดรูปแบบรายการสินค้าให้อัตโนมัติ
           </DialogDescription>
         </DialogHeader>
 
@@ -146,7 +154,7 @@ export default function ProductPicker({
           />
         </div>
 
-        <div className="-mx-1 max-h-72 overflow-y-auto px-1">
+        <div className="-mx-1 max-h-56 overflow-y-auto px-1">
           {loading && (
             <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin" /></div>
           )}
@@ -162,7 +170,7 @@ export default function ProductPicker({
               <div
                 key={p.id}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md border-b px-2 py-2.5 text-left last:border-b-0',
+                  'flex w-full items-center gap-2 rounded-md border-b px-2 py-2 text-left last:border-b-0',
                   on ? 'bg-accent' : '',
                 )}
               >
@@ -170,9 +178,8 @@ export default function ProductPicker({
                   {p.name}
                   {p.variant && <span className="text-muted-foreground"> ({p.variant})</span>}
                 </span>
-                {/* ราคาที่แสดงตรงนี้เป็นแค่ตัวช่วยเลือก — ตัวที่วางจริงมาจากเซิร์ฟเวอร์ */}
                 <span className="shrink-0 text-sm text-muted-foreground">
-                  {Number(p.price).toLocaleString('th-TH')}
+                  {Number(p.price).toLocaleString('th-TH')} ฿
                 </span>
                 <div className="flex shrink-0 items-center rounded-md border bg-background">
                   <Button type="button" variant="ghost" size="icon" className="size-8" onClick={() => changeQty(p.id, -1)} disabled={!on} aria-label={`ลดจำนวน ${p.name}`}>
@@ -188,14 +195,14 @@ export default function ProductPicker({
           })}
         </div>
 
-        <div className="flex items-center gap-2 rounded-md border p-2.5">
+        <div className="flex items-center gap-2 rounded-md border p-2">
           <Checkbox id="show-product-price" checked={showPrice} onCheckedChange={(value) => setShowPrice(value === true)} />
-          <label htmlFor="show-product-price" className="text-sm">แสดงราคาด้วย</label>
+          <label htmlFor="show-product-price" className="text-sm font-medium cursor-pointer">แสดงราคาและยอดรวมด้วย</label>
         </div>
 
         {promotions.length > 0 && (
-          <div className="space-y-2 rounded-md border p-2.5">
-            <p className="flex items-center gap-1.5 text-sm font-medium"><Tag className="size-4" /> โปรโมชันที่ต้องการใส่</p>
+          <div className="space-y-1.5 rounded-md border p-2">
+            <p className="flex items-center gap-1.5 text-xs font-medium"><Tag className="size-3.5" /> โปรโมชันที่ต้องการใส่</p>
             <div className="flex flex-wrap gap-1.5">
               {promotions.map((promotion) => {
                 const on = promotionIds.includes(promotion.id);
@@ -205,6 +212,7 @@ export default function ProductPicker({
                     type="button"
                     size="sm"
                     variant={on ? 'default' : 'outline'}
+                    className="h-7 text-xs"
                     onClick={() => setPromotionIds((prev) => on ? prev.filter((id) => id !== promotion.id) : [...prev, promotion.id])}
                   >
                     {promotion.name}
@@ -215,11 +223,38 @@ export default function ProductPicker({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
+        {/* --- ตัวอย่างข้อความที่วางจริง --- */}
+        {selectedItems.length > 0 && (
+          <div className="rounded-md border bg-muted/40 p-2.5 text-xs space-y-1 max-h-28 overflow-y-auto">
+            <div className="flex items-center justify-between font-semibold text-foreground pb-1 border-b">
+              <span>ตัวอย่างข้อความที่จะวาง</span>
+              {showPrice && (
+                <span className="text-primary">
+                  รวม {totalEstimatedAmount.toLocaleString('th-TH')} บาท
+                </span>
+              )}
+            </div>
+            <div className="text-muted-foreground whitespace-pre-wrap leading-snug">
+              {selectedItems.map((item) => {
+                const title = item.product?.variant ? `${item.product.name} (${item.product.variant})` : item.product?.name;
+                const priceStr = showPrice ? ` — ${(Number(item.product?.price ?? 0) * item.qty).toLocaleString('th-TH')} บาท` : '';
+                return `• ${title} x ${item.qty}${priceStr}`;
+              }).join('\n')}
+              {showPrice && selectedItems.length > 1 && (
+                `\nยอดรวมสินค้า: ${totalEstimatedAmount.toLocaleString('th-TH')} บาท`
+              )}
+              {promotionIds.length > 0 && (
+                '\n' + promotions.filter((pr) => promotionIds.includes(pr.id)).map((pr) => `🎁 ${pr.name}`).join('\n')
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t mt-auto">
           <Button variant="ghost" onClick={onClose}>ยกเลิก</Button>
-          <Button disabled={busy || Object.keys(quantities).length === 0} onClick={() => void insert()}>
+          <Button disabled={busy || selectedItems.length === 0} onClick={() => void insert()}>
             {busy && <Loader2 className="size-4 animate-spin" />}
-            ใส่ ({Object.values(quantities).reduce((sum, qty) => sum + qty, 0)} ชิ้น)
+            ใส่ลงแชท ({totalQty} ชิ้น)
           </Button>
         </div>
       </DialogContent>

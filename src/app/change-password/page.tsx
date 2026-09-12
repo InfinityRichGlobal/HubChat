@@ -10,7 +10,7 @@ import { redirect } from 'next/navigation';
  */
 export default async function ChangePasswordPage() {
   const result = await getCurrentAdmin({ allowMustChangePassword: true });
-  if (!result.ok) redirect('/login');
+  if (!result.ok) redirect(`/login?reason=${result.reason ?? 'session_invalid'}`);
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-muted/30 px-4 py-10">

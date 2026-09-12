@@ -9,7 +9,7 @@ import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { getOrder, updateOrder, OrderAccessError } from '@/server/orders/service';
 import { storeUploadedFile } from '@/server/storage/media';
-import { StorageNotConfiguredError } from '@/server/storage/r2';
+import {  } from '@/server/storage/supabase-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,13 +48,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     return ok({ order: updated, media_id: mediaId });
   } catch (err) {
-    if (err instanceof StorageNotConfiguredError) {
-      return fail(
-        'storage_not_configured',
-        'ยังไม่ได้ตั้งค่าที่เก็บไฟล์ — ทำตามขั้นตอนใน docs/STORAGE.md ก่อน',
-        503,
-      );
-    }
     if (err instanceof OrderAccessError) return fail('forbidden', err.message, 403);
     return toErrorResponse(err);
   }

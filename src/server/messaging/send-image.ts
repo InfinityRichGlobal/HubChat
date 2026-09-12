@@ -19,7 +19,7 @@ import { uploadImageForConversation, uploadVideoForConversation, AttachmentError
 import { sendMessage, type SendResult } from './send-message';
 import type { Provenance } from './provenance';
 import { storeUploadedFile } from '@/server/storage/media';
-import { StorageNotConfiguredError } from '@/server/storage/r2';
+import {  } from '@/server/storage/supabase-storage';
 
 /** ชนิดไฟล์ที่ยอมรับ — จำกัดตามที่ Meta รองรับจริง ไม่เปิดกว้างเกินจำเป็น */
 export const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
@@ -75,9 +75,7 @@ export async function sendImage(input: SendImageInput): Promise<SendResult> {
       conversation_id: input.conversation_id,
     });
   } catch (err) {
-    if (!(err instanceof StorageNotConfiguredError)) {
-      console.warn('[send-image] เก็บสำเนารูปขาออกไม่สำเร็จ — ยังส่งผ่าน Meta ต่อ:', err);
-    }
+    console.warn('[send-image] เก็บสำเนารูปขาออกไม่สำเร็จ — ยังส่งผ่าน Meta ต่อ:', err);
   }
 
   // ---- 1) อัปโหลดไปเก็บที่ Meta ก่อน (ชั้น server/meta เป็นคนคุยกับ Meta) ----
@@ -122,7 +120,7 @@ export async function sendVideo(input: SendImageInput): Promise<SendResult> {
       conversation_id: input.conversation_id,
     });
   } catch (err) {
-    if (!(err instanceof StorageNotConfiguredError)) console.warn('[send-video] เก็บสำเนาวิดีโอไม่สำเร็จ:', err);
+    console.warn('[send-video] เก็บสำเนาวิดีโอไม่สำเร็จ:', err);
   }
 
   let attachmentId: string;

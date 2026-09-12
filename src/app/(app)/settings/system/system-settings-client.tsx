@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import ImageUploadCrop from '@/components/image-upload-crop';
 
 type Readiness = 'CONFIGURED' | 'TESTED' | 'LIVE_VERIFIED';
 type Setting = {
@@ -84,6 +85,16 @@ export default function SystemSettingsClient() {
                     {setting.readiness && <Badge variant="outline">{setting.readiness}</Badge>}
                     {setting.kind === 'secret' && setting.hint_last4 && <span className="text-xs text-muted-foreground">••••{setting.hint_last4}</span>}
                   </div>
+                  {setting.key === 'APP_LOGO_URL' && (
+                    <div className="mb-3">
+                      <ImageUploadCrop
+                        value={values[setting.key] || null}
+                        onChange={(url) => setValues((old) => ({ ...old, [setting.key]: url ?? '' }))}
+                        label="อัปโหลดโลโก้เว็บไซต์ (ครอป 1:1 จัตุรัส)"
+                        size={80}
+                      />
+                    </div>
+                  )}
                   <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
                     <Input
                       type={setting.kind === 'secret' ? 'password' : 'text'}

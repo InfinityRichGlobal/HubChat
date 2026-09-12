@@ -11,6 +11,8 @@ import InboxClient from './inbox-client';
  */
 export const dynamic = 'force-dynamic';
 
+import { db } from '@/lib/supabase/admin';
+
 export default async function InboxPage({
   searchParams,
 }: {
@@ -19,9 +21,10 @@ export default async function InboxPage({
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
 
-  const [{ conversations, pages, has_more }, sp] = await Promise.all([
+  const [{ conversations, pages, has_more }, sp, { data: adminRows }] = await Promise.all([
     listConversations(result.admin),
     searchParams,
+    db().from('admins').select('id, name').eq('is_active', true).order('name'),
   ]);
 
   return (
@@ -32,6 +35,7 @@ export default async function InboxPage({
       initialHasMore={has_more}
       initialConversationId={sp.c ?? null}
       pages={pages}
+      admins={adminRows ?? []}
     />
   );
 }

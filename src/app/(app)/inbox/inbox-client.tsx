@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import CustomerAvatar from '@/components/customer-avatar';
+import PlatformIcon from '@/components/platform-icon';
 import { displayName, hasRealName } from '@/lib/customer-name';
 import { mergeByTime } from '@/lib/inbox/merge';
 import { customerProfileUrl } from '@/lib/customer-profile';
@@ -242,6 +243,7 @@ export default function InboxClient({
   initialHasMore,
   initialConversationId,
   pages,
+  admins = [],
 }: {
   me: { id: string; name: string };
   canReply: boolean;
@@ -251,6 +253,7 @@ export default function InboxClient({
   /** เปิดห้องนี้ทันที — มาจาก /inbox?c=... ที่หน้าออเดอร์ลิงก์มา */
   initialConversationId?: string | null;
   pages: InboxPage[];
+  admins?: Array<{ id: string; name: string }>;
 }) {
   const [conversations, setConversations] = useState(initialConversations);
   /** ยังมีแชทเก่ากว่าที่โหลดมาอีกไหม (สำคัญมากหลังกดดึงแชทเก่าเข้าระบบ) */
@@ -264,6 +267,8 @@ export default function InboxClient({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [inboxGroup, setInboxGroup] = useState<InboxGroup>('all');
+  const [orderFilter, setOrderFilter] = useState<'all' | 'zero' | 'has_orders'>('all');
+  const [assignedAdminFilter, setAssignedAdminFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
   // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
@@ -410,7 +415,22 @@ export default function InboxClient({
     setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const unreadCount = conversations.filter((c) => !c.is_read).length;
-  const filterCount = selectedPages.length + selectedTags.length + Number(inboxGroup !== 'all');
+  const filterCount =
+    selectedPages.length +
+    selectedTags.length +
+    Number(inboxGroup !== 'all') +
+    Number(orderFilter !== 'all') +
+    Number(assignedAdminFilter !== 'all');
+
+  const displayedConversations = useMemo(() => {
+    return conversations.filter((c) => {
+      if (orderFilter === 'zero' && c.order_count > 0) return false;
+      if (orderFilter === 'has_orders' && c.order_count === 0) return false;
+      if (assignedAdminFilter === 'unassigned' && c.assigned_admin_id !== null) return false;
+      if (assignedAdminFilter !== 'all' && assignedAdminFilter !== 'unassigned' && c.assigned_admin_id !== assignedAdminFilter) return false;
+      return true;
+    });
+  }, [conversations, orderFilter, assignedAdminFilter]);
 
   return (
     <div className="flex h-[calc(100dvh-9rem)] w-full gap-3 md:h-[calc(100dvh-6rem)]">
@@ -452,6 +472,19 @@ export default function InboxClient({
             {inboxGroup !== 'all' && inboxGroup !== 'follow_up' && inboxGroup !== 'unread' && (
               <FilterChip active onClick={() => setInboxGroup('all')}>{GROUP_LABEL[inboxGroup]}</FilterChip>
             )}
+            {orderFilter === 'zero' && (
+              <FilterChip active onClick={() => setOrderFilter('all')}>ลูกค้าใหม่ (0 ออเดอร์)</FilterChip>
+            )}
+            {orderFilter === 'has_orders' && (
+              <FilterChip active onClick={() => setOrderFilter('all')}>ลูกค้าเก่า (1+ ออเดอร์)</FilterChip>
+            )}
+            {assignedAdminFilter !== 'all' && (
+              <FilterChip active onClick={() => setAssignedAdminFilter('all')}>
+                {assignedAdminFilter === 'unassigned'
+                  ? 'ยังไม่มอบหมาย'
+                  : `ผู้ดูแล: ${admins.find((a) => a.id === assignedAdminFilter)?.name ?? 'แอดมิน'}`}
+              </FilterChip>
+            )}
             {selectedPages.map((id) => {
               const page = pages.find((p) => p.id === id);
               return page ? <FilterChip key={id} active onClick={() => toggle(setSelectedPages)(id)} dotColor={page.tag_color}>{page.name}</FilterChip> : null;
@@ -464,11 +497,11 @@ export default function InboxClient({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
-          {conversations.length === 0 ? (
+          {displayedConversations.length === 0 ? (
             <EmptyList hasPages={pages.length > 0} />
           ) : (
             <ul className="divide-y">
-              {conversations.map((c) => (
+              {displayedConversations.map((c) => (
                 <ConversationItem
                   key={c.id}
                   conversation={c}
@@ -524,10 +557,21 @@ export default function InboxClient({
         selectedPages={selectedPages}
         selectedTags={selectedTags}
         inboxGroup={inboxGroup}
+        admins={admins}
+        orderFilter={orderFilter}
+        assignedAdminFilter={assignedAdminFilter}
         onTogglePage={toggle(setSelectedPages)}
         onToggleTag={toggle(setSelectedTags)}
         onSelectGroup={setInboxGroup}
-        onClear={() => { setSelectedPages([]); setSelectedTags([]); setInboxGroup('all'); }}
+        onSelectOrderFilter={setOrderFilter}
+        onSelectAdminFilter={setAssignedAdminFilter}
+        onClear={() => {
+          setSelectedPages([]);
+          setSelectedTags([]);
+          setInboxGroup('all');
+          setOrderFilter('all');
+          setAssignedAdminFilter('all');
+        }}
       />
     </div>
   );
@@ -563,7 +607,8 @@ function FilterChip({
 
 function InboxFilterDialog({
   open, onOpenChange, pages, tags, selectedPages, selectedTags, inboxGroup,
-  onTogglePage, onToggleTag, onSelectGroup, onClear,
+  admins, orderFilter, assignedAdminFilter,
+  onTogglePage, onToggleTag, onSelectGroup, onSelectOrderFilter, onSelectAdminFilter, onClear,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -572,9 +617,14 @@ function InboxFilterDialog({
   selectedPages: string[];
   selectedTags: string[];
   inboxGroup: InboxGroup;
+  admins: Array<{ id: string; name: string }>;
+  orderFilter: 'all' | 'zero' | 'has_orders';
+  assignedAdminFilter: string;
   onTogglePage: (id: string) => void;
   onToggleTag: (id: string) => void;
   onSelectGroup: (group: InboxGroup) => void;
+  onSelectOrderFilter: (v: 'all' | 'zero' | 'has_orders') => void;
+  onSelectAdminFilter: (v: string) => void;
   onClear: () => void;
 }) {
   return (
@@ -582,9 +632,41 @@ function InboxFilterDialog({
       <DialogContent className="bottom-0 left-0 top-auto max-h-[88dvh] w-full max-w-none translate-x-0 translate-y-0 gap-4 overflow-y-auto rounded-b-none rounded-t-3xl p-4 sm:left-1/2 sm:top-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg">
         <DialogHeader className="text-center sm:text-left">
           <DialogTitle>กรองและจัดกลุ่มแชท</DialogTitle>
-          <DialogDescription>เลือกกลุ่มงานหนึ่งกลุ่ม แล้วกรองเพจหรือป้ายเพิ่มได้</DialogDescription>
+          <DialogDescription>เลือกกลุ่มงาน ประวัติสั่งซื้อ แอดมินผู้ดูแล หรือเพจและป้ายที่ต้องการ</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <FilterGroup title="ประวัติการสั่งซื้อ (ออเดอร์)">
+            <FilterChoice active={orderFilter === 'all'} onClick={() => onSelectOrderFilter('all')}>
+              ทั้งหมด
+            </FilterChoice>
+            <FilterChoice active={orderFilter === 'zero'} onClick={() => onSelectOrderFilter('zero')}>
+              ลูกค้าใหม่ (0 ออเดอร์)
+            </FilterChoice>
+            <FilterChoice active={orderFilter === 'has_orders'} onClick={() => onSelectOrderFilter('has_orders')}>
+              ลูกค้าเก่า (เคยสั่งซื้อแล้ว 1+ ออเดอร์)
+            </FilterChoice>
+          </FilterGroup>
+
+          {admins.length > 0 && (
+            <FilterGroup title="แอดมินผู้ดูแล (มอบหมาย)">
+              <FilterChoice active={assignedAdminFilter === 'all'} onClick={() => onSelectAdminFilter('all')}>
+                ทั้งหมด
+              </FilterChoice>
+              <FilterChoice active={assignedAdminFilter === 'unassigned'} onClick={() => onSelectAdminFilter('unassigned')}>
+                ยังไม่มอบหมาย
+              </FilterChoice>
+              {admins.map((adm) => (
+                <FilterChoice
+                  key={adm.id}
+                  active={assignedAdminFilter === adm.id}
+                  onClick={() => onSelectAdminFilter(adm.id)}
+                >
+                  {adm.name}
+                </FilterChoice>
+              ))}
+            </FilterGroup>
+          )}
+
           <FilterGroup title="กลุ่มแชท">
             <FilterChoice active={inboxGroup === 'all'} onClick={() => onSelectGroup('all')} icon={<Inbox className="size-4" />}>ข้อความทั้งหมด</FilterChoice>
             <FilterChoice active={inboxGroup === 'facebook'} onClick={() => onSelectGroup('facebook')} icon={<MessageCircle className="size-4" />}>Messenger</FilterChoice>
@@ -676,11 +758,8 @@ function ConversationItem({
       >
         <div className="relative shrink-0">
           <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
-          <span
-            className="absolute -bottom-1 -right-1 rounded-full border-2 border-background bg-background px-1 text-[9px] font-bold uppercase text-muted-foreground"
-            aria-label={c.page.platform}
-          >
-            {c.page.platform === 'instagram' ? 'IG' : 'FB'}
+          <span className="absolute -bottom-1 -right-1 rounded-full ring-2 ring-background">
+            <PlatformIcon platform={c.page.platform} size="xs" />
           </span>
         </div>
 
@@ -2063,16 +2142,34 @@ function MessageBubble({
 
   return (
     <div className={cn('flex flex-col gap-0.5', outgoing ? 'items-end' : 'items-start')}>
-      <button
-        type="button"
-        onClick={onTap}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        className={cn(
-          'max-w-[85%] rounded-2xl px-3 py-2 text-left text-sm break-words',
-          outgoing ? 'bg-primary text-primary-foreground' : 'bg-muted',
+      <div className={cn('flex items-end gap-1.5 max-w-[85%]', outgoing ? 'flex-row-reverse' : 'flex-row')}>
+        {outgoing && m.sender_type === 'admin' && (
+          m.admin_avatar_url ? (
+            <img
+              src={m.admin_avatar_url}
+              alt={m.admin_name ?? 'แอดมิน'}
+              title={m.admin_name ?? 'แอดมิน'}
+              className="size-6 rounded-full object-cover border shrink-0 mb-0.5"
+            />
+          ) : (
+            <div
+              className="size-6 rounded-full bg-primary/15 text-primary border flex items-center justify-center text-[10px] font-semibold shrink-0 mb-0.5"
+              title={m.admin_name ?? 'แอดมิน'}
+            >
+              {m.admin_name ? m.admin_name.slice(0, 1).toUpperCase() : 'A'}
+            </div>
+          )
         )}
-      >
+        <button
+          type="button"
+          onClick={onTap}
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+          className={cn(
+            'rounded-2xl px-3 py-2 text-left text-sm break-words',
+            outgoing ? 'bg-primary text-primary-foreground' : 'bg-muted',
+          )}
+        >
         {/**
           * ⭐ ข้อความที่ถูกตอบกลับ — แสดงเป็นแถบเล็กในฟอง ไม่ใช่ปนกับเนื้อข้อความ
           *
@@ -2163,6 +2260,7 @@ function MessageBubble({
           );
         })}
       </button>
+      </div>
 
       <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
         <span>{clockTh(m.created_at)}</span>

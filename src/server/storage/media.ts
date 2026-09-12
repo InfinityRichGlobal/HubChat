@@ -18,8 +18,8 @@ import 'server-only';
  */
 import { db } from '@/lib/supabase/admin';
 import {
-  fetchAndStore, isStorageConfigured, SourceGoneError, StorageNotConfiguredError,
-} from './r2';
+  fetchAndStore, SourceGoneError,
+} from './supabase-storage';
 
 export type MediaCaptureInput = {
   message_id: string;
@@ -97,7 +97,7 @@ export async function captureInboundMedia(input: MediaCaptureInput): Promise<Cap
 
   if (targets.length === 0) return summary;
 
-  const configured = await isStorageConfigured();
+
   const now = new Date();
 
   for (const target of targets) {
@@ -106,14 +106,6 @@ export async function captureInboundMedia(input: MediaCaptureInput): Promise<Cap
       const claimed = await claim(input, target.index, target.url!, 'inbound');
       if (!claimed.won) continue; // มีคนจองไปแล้ว — webhook ซ้ำ
       mediaId = claimed.media_id!;
-
-      // ⭐ ยังไม่ได้ตั้งค่า R2 → จดว่าข้ามโดยตั้งใจ ไม่ใช่ความผิดพลาด
-      //    ทำแบบนี้เพื่อให้รู้ย้อนหลังได้ว่า "ช่วงไหนที่เรายังไม่ได้เก็บไฟล์"
-      if (!configured) {
-        await finish(mediaId, 'skipped', { error: 'ยังไม่ได้ตั้งค่า Cloudflare R2' });
-        summary.skipped += 1;
-        continue;
-      }
 
       const stored = await fetchAndStore(target.url!, 'inbound', now);
       await finish(mediaId, 'stored', {
@@ -134,10 +126,7 @@ export async function captureInboundMedia(input: MediaCaptureInput): Promise<Cap
        *    ระบบไปจดว่า "ไฟล์ของลูกค้าหายถาวร" ทั้งที่จริงแค่ตั้งค่าถังผิด
        *    เจ้าของร้านจะเข้าใจผิดว่าสลิปหาย แล้วไปตามหาผิดที่
        */
-      const status =
-        err instanceof StorageNotConfiguredError ? 'skipped'
-        : err instanceof SourceGoneError ? 'expired'
-        : 'failed';
+      const status = err instanceof SourceGoneError ? 'expired' : 'failed';
 
       if (mediaId) await finish(mediaId, status, { error: message });
 
@@ -190,13 +179,7 @@ export async function storeUploadedFile(
   kind: 'slip' | 'outbound' | 'library',
   context: { conversation_id?: string | null; page_id?: string | null } = {},
 ): Promise<string> {
-  if (!(await isStorageConfigured())) {
-    throw new StorageNotConfiguredError(
-      'ยังไม่ได้ตั้งค่าที่เก็บไฟล์ (Cloudflare R2) — ดูขั้นตอนที่ docs/STORAGE.md',
-    );
-  }
-
-  const { buildKey, putObject, sha256Of } = await import('./r2');
+  const { buildKey, putObject, sha256Of } = await import('./supabase-storage');
   const sha = sha256Of(bytes);
   const key = buildKey(kind, sha, mime, new Date());
   const stored = await putObject(key, bytes, mime);
