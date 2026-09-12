@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle, ArrowLeft, ArrowDown, Check, CheckCheck, ChevronDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
   Bot, CheckCircle2, Clock, Handshake, Inbox, Layers, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
@@ -335,13 +336,37 @@ export default function InboxClient({
       isSwipingRef.current = false;
     }, 120);
   };
-  // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
-  // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
-  const [activeId, setActiveId] = useState<string | null>(
-    initialConversationId && initialConversations.some((c) => c.id === initialConversationId)
-      ? initialConversationId
-      : null,
-  );
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const cParam = searchParams?.get('c') ?? initialConversationId ?? null;
+
+  const [activeId, setActiveId] = useState<string | null>(initialConversationId ?? null);
+
+  // อัปเดต activeId เมื่อ query param เปลี่ยน (เช่น กดมาจากแจ้งเตือน หรือเปิดลิงก์แชท)
+  useEffect(() => {
+    if (cParam && cParam !== activeId) {
+      setActiveId(cParam);
+    }
+  }, [cParam]);
+
+  // ดักฟังข้อความจาก Service Worker เมื่อกด Push Notification ขณะเปิดแอปอยู่
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'HUBCHAT_NAVIGATE' && event.data.link) {
+        try {
+          const url = new URL(event.data.link, window.location.origin);
+          const c = url.searchParams.get('c');
+          if (c) {
+            setActiveId(c);
+            router.replace(`/inbox?c=${c}`);
+          }
+        } catch (_) {}
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, [router]);
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -417,6 +442,13 @@ export default function InboxClient({
     const got = await fetchList();
     if (got) applyList(got);
   }, [fetchList, applyList]);
+
+  // ถ้ามี activeId แต่ยังไม่มีในลิสต์ (เช่น แชทใหม่ที่ทักมาแล้วกดเปิดจากแจ้งเตือน) ให้โหลดรายการใหม่ทันที
+  useEffect(() => {
+    if (activeId && !conversations.some((c) => c.id === activeId)) {
+      void loadList();
+    }
+  }, [activeId, conversations, loadList]);
 
   /** ปุ่ม "โหลดแชทเพิ่ม" */
   const loadMoreList = useCallback(async () => {
@@ -518,7 +550,7 @@ export default function InboxClient({
   return (
     <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] w-full gap-3 md:h-[calc(100dvh-6rem)]">
       {/* ---------------- ลิสต์แชท ---------------- */}
-      <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', active && 'hidden md:flex')}>
+      <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">
           {/* ช่องค้นหาเดสก์ท็อป */}
           <div className="relative hidden md:block">
@@ -978,7 +1010,10 @@ export default function InboxClient({
                   isActive={c.id === activeId}
                   meId={me.id}
                   tagById={tagById}
-                  onSelect={() => setActiveId(c.id)}
+                  onSelect={() => {
+                    setActiveId(c.id);
+                    router.replace(`/inbox?c=${c.id}`);
+                  }}
                 />
               ))}
             </ul>
@@ -997,7 +1032,7 @@ export default function InboxClient({
       </div>
 
       {/* ---------------- ห้องแชท ---------------- */}
-      <div className={cn('min-w-0 flex-1', !active && 'hidden md:block')}>
+      <div className={cn('min-w-0 flex-1', !active && !activeId && 'hidden md:block')}>
         {active ? (
           <ChatRoom
             key={active.id}
@@ -1005,7 +1040,10 @@ export default function InboxClient({
             canReply={canReply}
             meId={me.id}
             tags={tags}
-            onBack={() => setActiveId(null)}
+            onBack={() => {
+              setActiveId(null);
+              router.replace('/inbox');
+            }}
             onChanged={loadList}
             onStateChanged={() => {
               listInitRef.current = false;
@@ -1017,6 +1055,22 @@ export default function InboxClient({
               );
             }}
           />
+        ) : activeId ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border p-6 text-center text-muted-foreground">
+            <Loader2 className="size-8 animate-spin text-primary" />
+            <div className="text-sm font-medium">กำลังเปิดห้องแชท...</div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActiveId(null);
+                router.replace('/inbox');
+              }}
+            >
+              <ArrowLeft className="mr-1.5 size-4" />
+              กลับหน้ารวมแชท
+            </Button>
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center rounded-lg border text-sm text-muted-foreground">
             เลือกแชทจากรายการทางซ้าย

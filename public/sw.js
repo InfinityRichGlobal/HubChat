@@ -21,7 +21,7 @@
  */
 
 const OFFLINE_URL = '/offline.html';
-const CACHE_NAME = 'hubchat-shell-v1';
+const CACHE_NAME = 'hubchat-shell-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -128,6 +128,7 @@ self.addEventListener('notificationclick', (event) => {
           if ('navigate' in client) {
             try { await client.navigate(target.href); } catch (_) {}
           }
+          client.postMessage({ type: 'HUBCHAT_NAVIGATE', url: target.href, link });
           return;
         }
       }

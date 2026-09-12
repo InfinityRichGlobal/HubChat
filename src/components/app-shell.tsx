@@ -123,6 +123,18 @@ export default function AppShell({
     };
   }, []);
 
+  // ดักรับคำสั่งเปลี่ยนหน้าเมื่อแตะ Push Notification
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'HUBCHAT_NAVIGATE' && event.data.link) {
+        router.push(event.data.link);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onSwMessage);
+  }, [router]);
+
   const items = NAV.filter((item) => item.visible(admin));
 
   // เมนูล่าง 1 - 4 ปุ่มหลักตามการตั้งค่า (ส่วนที่เหลือจะไปอยู่ในปุ่ม "เพิ่มเติม (...)")
