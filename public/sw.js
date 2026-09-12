@@ -21,7 +21,7 @@
  */
 
 const OFFLINE_URL = '/offline.html';
-const CACHE_NAME = 'hubchat-shell-v2';
+const CACHE_NAME = 'hubchat-shell-v3';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -125,14 +125,16 @@ self.addEventListener('notificationclick', (event) => {
         // แท็บของแอปเราเปิดอยู่แล้ว → พาไปหน้าที่ต้องการในแท็บเดิม
         if (new URL(client.url).origin === self.location.origin) {
           await client.focus();
+          client.postMessage({ type: 'HUBCHAT_NAVIGATE', url: target.href, link });
           if ('navigate' in client) {
             try { await client.navigate(target.href); } catch (_) {}
           }
-          client.postMessage({ type: 'HUBCHAT_NAVIGATE', url: target.href, link });
           return;
         }
       }
-      await self.clients.openWindow(target.href);
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(target.href);
+      }
     })(),
   );
 });

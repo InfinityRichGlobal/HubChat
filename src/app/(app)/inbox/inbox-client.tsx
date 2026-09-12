@@ -342,12 +342,11 @@ export default function InboxClient({
 
   const [activeId, setActiveId] = useState<string | null>(initialConversationId ?? null);
 
-  // อัปเดต activeId เมื่อ query param เปลี่ยน (เช่น กดมาจากแจ้งเตือน หรือเปิดลิงก์แชท)
+  // อัปเดต activeId เมื่อ query param เปลี่ยน (เช่น กดมาจากแจ้งเตือน, กด back เบราว์เซอร์ หรือปัดขวาบนมือถือ)
   useEffect(() => {
-    if (cParam && cParam !== activeId) {
-      setActiveId(cParam);
-    }
-  }, [cParam]);
+    const currentC = searchParams?.get('c') ?? null;
+    setActiveId(currentC);
+  }, [searchParams]);
 
   // ดักฟังข้อความจาก Service Worker เมื่อกด Push Notification ขณะเปิดแอปอยู่
   useEffect(() => {
@@ -548,7 +547,7 @@ export default function InboxClient({
   }, [conversations, orderFilter, assignedAdminFilter, platformFilter, inboxGroup, selectedTags]);
 
   return (
-    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] w-full gap-3 md:h-[calc(100dvh-6rem)]">
+    <div className="flex h-full w-full gap-3">
       {/* ---------------- ลิสต์แชท ---------------- */}
       <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">
@@ -1012,7 +1011,7 @@ export default function InboxClient({
                   tagById={tagById}
                   onSelect={() => {
                     setActiveId(c.id);
-                    router.replace(`/inbox?c=${c.id}`);
+                    router.push(`/inbox?c=${c.id}`);
                   }}
                 />
               ))}
@@ -1042,7 +1041,7 @@ export default function InboxClient({
             tags={tags}
             onBack={() => {
               setActiveId(null);
-              router.replace('/inbox');
+              router.push('/inbox');
             }}
             onChanged={loadList}
             onStateChanged={() => {
@@ -1064,7 +1063,7 @@ export default function InboxClient({
               size="sm"
               onClick={() => {
                 setActiveId(null);
-                router.replace('/inbox');
+                router.push('/inbox');
               }}
             >
               <ArrowLeft className="mr-1.5 size-4" />

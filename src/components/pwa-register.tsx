@@ -13,19 +13,35 @@ import { useEffect } from 'react';
 
 export default function PwaRegister() {
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!('serviceWorker' in navigator)) return;
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    const register = () => {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((err) => {
-        // ลงทะเบียนไม่ได้ = ไม่มีแจ้งเตือน แต่แอปยังใช้งานได้ปกติทุกอย่าง
+    let registration: ServiceWorkerRegistration | null = null;
+
+    const register = async () => {
+      try {
+        registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        // สั่งอัปเดต Service Worker ทันทีเมื่อเปิดแอป
+        void registration.update();
+      } catch (err) {
         console.warn('[pwa] ลงทะเบียน service worker ไม่สำเร็จ:', err);
-      });
+      }
     };
 
     // รอให้หน้าโหลดเสร็จก่อน จะได้ไม่ไปแย่งแบนด์วิดท์ตอนเปิดแอปครั้งแรก
-    if (document.readyState === 'complete') register();
-    else window.addEventListener('load', register, { once: true });
+    if (document.readyState === 'complete') void register();
+    else window.addEventListener('load', () => void register(), { once: true });
+
+    // เมื่อสลับกลับเข้ามาในแอป ให้ตรวจหาอัปเดต Service Worker เสมอ
+    const checkUpdate = () => {
+      if (document.visibilityState === 'visible' && registration) {
+        void registration.update().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', checkUpdate);
+
+    return () => {
+      document.removeEventListener('visibilitychange', checkUpdate);
+    };
   }, []);
 
   return null;

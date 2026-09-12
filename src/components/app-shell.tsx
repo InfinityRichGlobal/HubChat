@@ -102,10 +102,20 @@ export default function AppShell({
         if (!res.ok) return;
         const json = await res.json();
         if (alive && json.ok && json.data) {
+          const unreadChats = Number(json.data.unread_chats ?? 0);
+          const unhandledComments = Number(json.data.unhandled_comments ?? 0);
           setCounts({
-            unread_chats: Number(json.data.unread_chats ?? 0),
-            unhandled_comments: Number(json.data.unhandled_comments ?? 0),
+            unread_chats: unreadChats,
+            unhandled_comments: unhandledComments,
           });
+          const totalUnread = unreadChats + unhandledComments;
+          if (typeof navigator !== 'undefined') {
+            if ('setAppBadge' in navigator && totalUnread > 0) {
+              void navigator.setAppBadge(totalUnread).catch(() => {});
+            } else if ('clearAppBadge' in navigator && totalUnread === 0) {
+              void navigator.clearAppBadge().catch(() => {});
+            }
+          }
         }
       } catch {
         // เงียบ
@@ -137,6 +147,15 @@ export default function AppShell({
 
   const items = NAV.filter((item) => item.visible(admin));
 
+  // Prefetch หน้าหลักล่วงหน้าเพื่อให้กดเปลี่ยนแท็บได้รวดเร็วทันใจ
+  useEffect(() => {
+    items.forEach((item) => {
+      try {
+        router.prefetch(item.href);
+      } catch (_) {}
+    });
+  }, [items, router]);
+
   // เมนูล่าง 1 - 4 ปุ่มหลักตามการตั้งค่า (ส่วนที่เหลือจะไปอยู่ในปุ่ม "เพิ่มเติม (...)")
   const mobilePrimary = primaryHrefs
     .map((href) => items.find((it) => it.href === href))
@@ -156,19 +175,22 @@ export default function AppShell({
     return 0;
   };
 
+  const isInbox = pathname === '/inbox' || pathname.startsWith('/inbox/');
+
   return (
-    <div className="flex min-h-svh flex-col md:flex-row">
+    <div className="flex h-dvh w-full flex-col overflow-hidden md:flex-row bg-background">
       {/* ---------- เมนูซ้าย (เดสก์ท็อป) ---------- */}
       <aside className="hidden w-56 shrink-0 flex-col border-r bg-card md:flex">
         <Link
           href="/inbox"
+          prefetch={true}
           className="flex h-14 items-center gap-2 px-4 font-semibold transition-opacity hover:opacity-80"
           title="กลับหน้าหลักอินบ็อกซ์"
         >
           {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
           <span className="truncate">{brand.name}</span>
         </Link>
-        <nav className="flex flex-1 flex-col gap-1 p-2">
+        <nav className="flex flex-1 flex-col gap-1 p-2 overflow-y-auto">
           {items.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const badge = getBadgeCount(item.href);
@@ -176,6 +198,7 @@ export default function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={true}
                 className={cn(
                   'relative flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
                   active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent',
@@ -197,11 +220,12 @@ export default function AppShell({
         <AccountMenu admin={admin} onLogout={handleLogout} className="m-2" />
       </aside>
 
-      {/* ---------- เนื้อหา ---------- */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* ---------- คอลัมน์เนื้อหาหลัก + แถบเมนูล่าง (มือถือ) ---------- */}
+      <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden">
         <header className="flex h-[calc(3.5rem+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b bg-card px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
           <Link
             href="/inbox"
+            prefetch={true}
             className="flex min-w-0 items-center gap-2 font-semibold transition-opacity hover:opacity-80"
             title="กลับหน้าหลักอินบ็อกซ์"
           >
@@ -223,84 +247,94 @@ export default function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 overflow-x-hidden p-2 pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:p-4 md:pb-4">{children}</main>
-      </div>
+        <main
+          className={cn(
+            'flex-1 min-h-0',
+            isInbox
+              ? 'overflow-hidden p-0 md:p-2'
+              : 'overflow-y-auto overflow-x-hidden p-2 md:p-4'
+          )}
+        >
+          {children}
+        </main>
 
-      {/* ---------- แถบเมนูล่าง (มือถือ) ---------- */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden shadow-lg">
-        {mobilePrimary.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const badge = getBadgeCount(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]',
-                active ? 'text-primary font-semibold' : 'text-muted-foreground',
-              )}
-            >
-              <div className="relative">
-                <item.icon className="size-5" />
-                {badge > 0 && (
-                  <span className="absolute -top-1 -right-2 inline-flex items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white shadow-sm">
-                    {badge > 99 ? '99+' : badge}
-                  </span>
-                )}
-              </div>
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-        {mobileMore.length > 0 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
+        {/* ---------- แถบเมนูล่าง (มือถือ) — ตรึงล่างจอ 100% ไม่เลื่อนตามเนื้อหา ---------- */}
+        <nav className="shrink-0 z-40 flex border-t bg-card pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-1 md:hidden shadow-lg">
+          {mobilePrimary.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const badge = getBadgeCount(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                prefetch={true}
                 className={cn(
-                  'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]',
-                  mobileMore.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
-                    ? 'font-semibold text-primary'
-                    : 'text-muted-foreground',
+                  'relative flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px]',
+                  active ? 'text-primary font-semibold' : 'text-muted-foreground',
                 )}
               >
                 <div className="relative">
-                  <MoreHorizontal className="size-5" />
-                  {mobileMore.some((m) => getBadgeCount(m.href) > 0) && (
-                    <span className="absolute -top-1 -right-1 size-2 rounded-full bg-red-500 shadow-sm" />
+                  <item.icon className="size-5" />
+                  {badge > 0 && (
+                    <span className="absolute -top-1 -right-2 inline-flex items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white shadow-sm">
+                      {badge > 99 ? '99+' : badge}
+                    </span>
                   )}
                 </div>
-                <span>เพิ่มเติม</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="top" className="mb-2 w-52">
-              {mobileMore.map((item) => {
-                const badge = getBadgeCount(item.href);
-                return (
-                  <DropdownMenuItem key={item.href} asChild>
-                    <Link href={item.href} className="flex items-center justify-between w-full">
-                      <span className="flex items-center gap-2">
-                        <item.icon className="size-4" />
-                        {item.label}
-                      </span>
-                      {badge > 0 && (
-                        <span className="inline-flex items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
-                          {badge > 99 ? '99+' : badge}
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+          {mobileMore.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'relative flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px]',
+                    mobileMore.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+                      ? 'font-semibold text-primary'
+                      : 'text-muted-foreground',
+                  )}
+                >
+                  <div className="relative">
+                    <MoreHorizontal className="size-5" />
+                    {mobileMore.some((m) => getBadgeCount(m.href) > 0) && (
+                      <span className="absolute -top-1 -right-1 size-2 rounded-full bg-red-500 shadow-sm" />
+                    )}
+                  </div>
+                  <span>เพิ่มเติม</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" className="mb-2 w-52">
+                {mobileMore.map((item) => {
+                  const badge = getBadgeCount(item.href);
+                  return (
+                    <DropdownMenuItem key={item.href} asChild>
+                      <Link href={item.href} prefetch={true} className="flex items-center justify-between w-full">
+                        <span className="flex items-center gap-2">
+                          <item.icon className="size-4" />
+                          {item.label}
                         </span>
-                      )}
-                    </Link>
-                  </DropdownMenuItem>
-                );
-              })}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setNavCustomizeOpen(true)}>
-                <SlidersHorizontal className="size-4 mr-2" />
-                ปรับแต่ง
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </nav>
+                        {badge > 0 && (
+                          <span className="inline-flex items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                            {badge > 99 ? '99+' : badge}
+                          </span>
+                        )}
+                      </Link>
+                    </DropdownMenuItem>
+                  );
+                })}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setNavCustomizeOpen(true)}>
+                  <SlidersHorizontal className="size-4 mr-2" />
+                  ปรับแต่ง
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </nav>
+      </div>
 
       {/* Dialog ปรับแต่งปุ่มล่างมือถือ */}
       <Dialog open={navCustomizeOpen} onOpenChange={setNavCustomizeOpen}>
