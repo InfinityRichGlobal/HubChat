@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Loader2, Plus, PlugZap, RefreshCw, ShieldCheck, ShieldAlert, History, Square,
+  Copy, Check, ExternalLink, Globe, Key, Webhook, HelpCircle, ChevronDown, ChevronUp, AlertCircle, Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import PlatformIcon from '@/components/platform-icon';
 import SettingsBackButton from '@/components/settings-back-button';
+import { cn } from '@/lib/utils';
 
 /**
  * หน้าจัดการเพจ (ฝั่งหน้าเว็บ)
@@ -45,13 +47,63 @@ const PLATFORM_LABEL: Record<SafePage['platform'], string> = {
   instagram: 'Instagram',
 };
 
-export default function PagesClient({ initialPages }: { initialPages: SafePage[] }) {
+export type MetaConfig = {
+  webhookUrl: string;
+  verifyToken: string | null;
+  hasVerifyToken: boolean;
+  appId: string | null;
+  hasAppSecret: boolean;
+};
+
+export default function PagesClient({
+  initialPages,
+  metaConfig,
+  isOwner = false,
+}: {
+  initialPages: SafePage[];
+  metaConfig?: MetaConfig;
+  isOwner?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
   const [tokenFor, setTokenFor] = useState<SafePage | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [webhookResult, setWebhookResult] = useState<{ ok: boolean; message_th: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+
+  async function testWebhook() {
+    setTestingWebhook(true);
+    setWebhookResult(null);
+    try {
+      const res = await fetch('/api/webhooks/meta/test', { method: 'POST' });
+      const json = await res.json();
+      if (json.ok && json.data?.ok) {
+        setWebhookResult({ ok: true, message_th: json.data.message_th });
+        toast.success('Webhook ผ่านการทดสอบเรียบร้อยแล้ว!');
+      } else {
+        const msg = json.error?.message_th || json.data?.message_th || 'ทดสอบไม่สำเร็จ';
+        setWebhookResult({ ok: false, message_th: msg });
+        toast.error(msg);
+      }
+    } catch {
+      setWebhookResult({ ok: false, message_th: 'ไม่สามารถเชื่อมต่อไปยังเซิร์ฟเวอร์เพื่อทดสอบได้' });
+      toast.error('ไม่สามารถทดสอบได้');
+    } finally {
+      setTestingWebhook(false);
+    }
+  }
+
+  function copyToClipboard(text: string, fieldName: string) {
+    void navigator.clipboard.writeText(text);
+    setCopiedField(fieldName);
+    toast.success(`คัดลอก ${fieldName} แล้ว`);
+    setTimeout(() => setCopiedField(null), 2000);
+  }
 
   async function call(url: string, init: RequestInit, successMsg?: string) {
     try {
@@ -135,6 +187,172 @@ export default function PagesClient({ initialPages }: { initialPages: SafePage[]
           </Button>
         </div>
       </div>
+
+      {/* ============================================================ */}
+      {/* 🌟 การ์ดตั้งค่า Meta Webhook & การเชื่อมต่อ (Facebook & Instagram) */}
+      {/* ============================================================ */}
+      <Card className="border-primary/30 shadow-xs">
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Webhook className="size-4" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Meta Webhook & การเชื่อมต่อ (Facebook & IG)</CardTitle>
+                <CardDescription className="text-xs">
+                  นำค่าด้านล่างไปกรอกในหน้า Meta Developer Dashboard เพื่อให้แชทและคอมเมนต์ไหลเข้าระบบ
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={testWebhook}
+                disabled={testingWebhook}
+                className="gap-1.5 text-xs h-8"
+              >
+                {testingWebhook ? <Loader2 className="size-3.5 animate-spin" /> : <PlugZap className="size-3.5 text-primary" />}
+                ทดสอบ Webhook ทันที
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setGuideOpen(!guideOpen)}
+                className="gap-1 text-xs h-8 text-muted-foreground hover:text-foreground"
+              >
+                <HelpCircle className="size-3.5" />
+                {guideOpen ? 'ซ่อนคู่มือ' : 'วิธีตั้งค่าใน Meta'}
+                {guideOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 pt-0">
+          {/* Result banner if tested */}
+          {webhookResult && (
+            <div
+              className={cn(
+                'flex items-center gap-2 rounded-lg p-3 text-xs font-medium',
+                webhookResult.ok
+                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                  : 'bg-destructive/10 text-destructive border border-destructive/20',
+              )}
+            >
+              {webhookResult.ok ? <Check className="size-4 shrink-0" /> : <AlertCircle className="size-4 shrink-0" />}
+              <span>{webhookResult.message_th}</span>
+            </div>
+          )}
+
+          {/* Webhook URLs */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/30 p-2.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                  <Globe className="size-3" /> Callback URL (Webhook URL)
+                </Label>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 text-muted-foreground hover:text-foreground"
+                  onClick={() => copyToClipboard(metaConfig?.webhookUrl ?? '', 'Callback URL')}
+                >
+                  {copiedField === 'Callback URL' ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
+                </Button>
+              </div>
+              <div className="font-mono text-xs break-all select-all font-medium text-foreground">
+                {metaConfig?.webhookUrl || 'กำลังโหลด...'}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/30 p-2.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                  <Key className="size-3" /> Verify Token
+                </Label>
+                {metaConfig?.verifyToken && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    onClick={() => copyToClipboard(metaConfig.verifyToken ?? '', 'Verify Token')}
+                  >
+                    {copiedField === 'Verify Token' ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="font-mono text-xs break-all select-all font-medium text-foreground">
+                  {metaConfig?.verifyToken ? metaConfig.verifyToken : 'ยังไม่ได้ตั้งค่า (ไปที่ ตั้งค่า → ระบบ + ความลับ)'}
+                </div>
+                <Badge variant={metaConfig?.hasVerifyToken ? 'default' : 'destructive'} className="shrink-0 text-[10px] h-4">
+                  {metaConfig?.hasVerifyToken ? 'พร้อมใช้' : 'ยังไม่ใส่'}
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick status summary */}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground pt-1 border-t">
+            <span>สถานะระบบ Meta:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-foreground">App ID:</span>
+              <Badge variant={metaConfig?.appId ? 'outline' : 'secondary'} className="text-[10px]">
+                {metaConfig?.appId || 'ยังไม่ระบุ'}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-foreground">App Secret:</span>
+              <Badge variant={metaConfig?.hasAppSecret ? 'default' : 'destructive'} className="text-[10px]">
+                {metaConfig?.hasAppSecret ? 'มีในระบบ' : 'ยังไม่มี'}
+              </Badge>
+            </div>
+          </div>
+
+          {/* Collapsible Guide */}
+          {guideOpen && (
+            <div className="rounded-lg border bg-card p-4 text-xs flex flex-col gap-3">
+              <div className="font-semibold text-sm flex items-center gap-1.5 text-foreground">
+                <Info className="size-4 text-primary" /> คู่มือการนำค่าไปใส่ใน Meta Developers (Facebook & Instagram)
+              </div>
+              <ol className="list-decimal pl-4 space-y-2 text-muted-foreground">
+                <li>
+                  เข้าที่ <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer" className="text-primary underline font-medium inline-flex items-center gap-0.5">Meta App Dashboard <ExternalLink className="size-2.5" /></a> แล้วเลือก App ของคุณ
+                </li>
+                <li>
+                  ที่เมนูด้านซ้าย เลือก <strong>Webhooks</strong> &rarr; ด้านบนเลือกวัตถุเป็น <strong>&quot;Page&quot;</strong>
+                </li>
+                <li>
+                  กดปุ่ม <strong>&quot;Edit Subscription&quot;</strong> (หรือ Add Callback URL):
+                  <ul className="list-disc pl-4 mt-1 space-y-0.5 text-foreground">
+                    <li>ช่อง <strong>Callback URL</strong>: วางค่า Callback URL ด้านบน</li>
+                    <li>ช่อง <strong>Verify Token</strong>: วางค่า Verify Token ด้านบน</li>
+                    <li>กด <strong>&quot;Verify and Save&quot;</strong> (ต้องขึ้นเครื่องหมายถูก)</li>
+                  </ul>
+                </li>
+                <li>
+                  ในรายการช่อง Subscription ด้านล่าง ให้กด <strong>Subscribe</strong> 5 ตัวนี้:
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] font-mono text-foreground font-semibold">messages</code>
+                    <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] font-mono text-foreground font-semibold">messaging_postbacks</code>
+                    <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] font-mono text-foreground font-semibold">message_deliveries</code>
+                    <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] font-mono text-foreground font-semibold">message_reads</code>
+                    <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] font-mono text-foreground font-semibold">feed</code>
+                  </div>
+                </li>
+                <li className="pt-1 text-amber-700 dark:text-amber-400 font-medium">
+                  ⭐ <strong>สำหรับ Instagram Direct (จุดตายที่สำคัญที่สุด):</strong>
+                  <div className="mt-1 text-muted-foreground font-normal space-y-1">
+                    <div>1. เชื่อมบัญชี Instagram Professional (Business) เข้ากับ Facebook Page ให้เรียบร้อย</div>
+                    <div>2. <strong>เปิดแอป Instagram บนมือถือ</strong> &rarr; ไปที่ <em>การตั้งค่าและความเป็นส่วนตัว (Settings)</em> &rarr; <em>ข้อความและการตอบกลับสตอรี่ (Messages & stories)</em> &rarr; <em>เครื่องมือเชื่อมต่อ (Connected tools)</em> &rarr; <strong>เปิดสวิตช์ &quot;อนุญาตให้เข้าถึงข้อความ&quot; (Allow Access to Messages)</strong> (หากไม่เปิด Meta จะไม่ยอมส่งแชท IG มาที่ Webhook)</div>
+                  </div>
+                </li>
+              </ol>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {initialPages.length === 0 && (
         <Alert>

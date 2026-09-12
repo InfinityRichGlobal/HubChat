@@ -12,7 +12,7 @@
  */
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { requireAdmin } from '@/lib/auth/current-admin';
+import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { InboxAccessError, markRead } from '@/server/inbox/service';
 import { sendMessage } from '@/server/messaging/send-message';
@@ -45,7 +45,7 @@ const bodySchema = z.object({
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requirePermission('chat.reply');
     const { id } = await ctx.params;
     const body = bodySchema.parse(await req.json());
 

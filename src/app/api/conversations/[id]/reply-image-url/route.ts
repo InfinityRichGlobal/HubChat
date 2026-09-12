@@ -1,7 +1,7 @@
 /** ส่งรูปจากลิงก์สาธารณะของชุดคำตอบ ผ่าน Policy Engine เส้นเดียวกับข้อความ */
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { requireAdmin } from '@/lib/auth/current-admin';
+import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { InboxAccessError, markRead } from '@/server/inbox/service';
 import { sendImageUrl } from '@/server/messaging/send-image';
@@ -17,7 +17,7 @@ const schema = z.object({
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requirePermission('chat.reply');
     const { id } = await ctx.params;
     const body = schema.parse(await req.json());
     await markRead(admin, id);

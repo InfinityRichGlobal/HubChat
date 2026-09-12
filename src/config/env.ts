@@ -35,8 +35,8 @@ const serverSchema = z.object({
   SESSION_SECRET: z
     .string()
     .min(32, 'SESSION_SECRET ต้องยาวอย่างน้อย 32 ตัวอักษร (สร้างด้วย openssl rand -base64 48)'),
-  // อายุ session เป็นชั่วโมง — แอดมินใช้มือถือ ไม่ควรบังคับ login บ่อย
-  SESSION_TTL_HOURS: z.coerce.number().int().positive().default(720),
+  // อายุ session เป็นชั่วโมง — ค่าเริ่มต้น 10 ปี (87,600 ชม.) เพื่อไม่ให้แอดมินหลุดออกจากระบบบนมือถือ PWA
+  SESSION_TTL_HOURS: z.coerce.number().int().positive().default(87600),
   // rate limit หน้า login ตามเช็คลิสต์ข้อ 9
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_LOCK_MINUTES: z.coerce.number().int().positive().default(15),

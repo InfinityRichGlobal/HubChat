@@ -304,6 +304,33 @@ export default function InboxClient({
   const [assignedAdminFilter, setAssignedAdminFilter] = useState<string>('all');
   const [platformFilter, setPlatformFilter] = useState<string>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // ตรวจจับการเลื่อนจอแนวนอนบนมือถือ ป้องกันไม่ให้ปุ่มดรอปดาวน์เด้งเปิดตอนแค่ต้องการเลื่อนดู
+  const isSwipingRef = useRef(false);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleFilterTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length > 0) {
+      touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      isSwipingRef.current = false;
+    }
+  };
+
+  const handleFilterTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartPosRef.current || e.touches.length === 0) return;
+    const dx = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
+    const dy = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
+    if (dx > 6 || dy > 6) {
+      isSwipingRef.current = true;
+    }
+  };
+
+  const handleFilterTouchEnd = () => {
+    touchStartPosRef.current = null;
+    setTimeout(() => {
+      isSwipingRef.current = false;
+    }, 120);
+  };
   // เปิดห้องที่ลิงก์มาได้ก็ต่อเมื่อห้องนั้นอยู่ในลิสต์จริง
   // (ถ้าไม่เช็ก แล้วส่ง id มั่ว ๆ มา จะได้จอว่างที่กดอะไรไม่ได้)
   const [activeId, setActiveId] = useState<string | null>(
@@ -515,7 +542,18 @@ export default function InboxClient({
             </div>
           )}
 
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          <div
+            className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none touch-pan-x select-none"
+            onTouchStart={handleFilterTouchStart}
+            onTouchMove={handleFilterTouchMove}
+            onTouchEnd={handleFilterTouchEnd}
+            onClickCapture={(e) => {
+              if (isSwipingRef.current) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+          >
             {/* 1. ปุ่มตัวกรองหลัก */}
             <Button
               variant={filterCount > 0 ? 'secondary' : 'outline'}
@@ -543,6 +581,9 @@ export default function InboxClient({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
+                  onPointerDown={(e) => {
+                    if (e.pointerType === 'touch') e.preventDefault();
+                  }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
                     selectedTags.length > 0 ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -570,6 +611,7 @@ export default function InboxClient({
                     return (
                       <DropdownMenuItem
                         key={t.id}
+                        onSelect={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.preventDefault();
                           toggle(setSelectedTags)(t.id);
@@ -589,6 +631,7 @@ export default function InboxClient({
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
+                      onSelect={(e) => e.preventDefault()}
                       onClick={() => setSelectedTags([])}
                       className="text-xs text-destructive justify-center cursor-pointer font-medium"
                     >
@@ -610,6 +653,9 @@ export default function InboxClient({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
+                  onPointerDown={(e) => {
+                    if (e.pointerType === 'touch') e.preventDefault();
+                  }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
                     assignedAdminFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -662,6 +708,9 @@ export default function InboxClient({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
+                  onPointerDown={(e) => {
+                    if (e.pointerType === 'touch') e.preventDefault();
+                  }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
                     platformFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -801,6 +850,9 @@ export default function InboxClient({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
+                  onPointerDown={(e) => {
+                    if (e.pointerType === 'touch') e.preventDefault();
+                  }}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
                     orderFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -1337,7 +1389,17 @@ function ChatRoom({
   const applyLatest = useCallback((got: { rows: MessageRow[]; has_more: boolean; truncated: boolean }) => {
     const newest = got.rows[got.rows.length - 1]?.created_at;
     if (newest && (!newestMessageAtRef.current || newest > newestMessageAtRef.current)) newestMessageAtRef.current = newest;
-    setMessages((prev) => (prev === null ? got.rows : mergeMessages(prev, got.rows, true)));
+    // ตรวจว่ามีข้อความใหม่จากลูกค้าไหม — ถ้ามี = กรอบ 24 ชม. อาจเปิดใหม่ ต้อง refresh policy
+    const hasNewInbound = got.rows.some((r) => r.direction === 'in');
+    setMessages((prev) => {
+      if (prev === null) return got.rows;
+      const prevIds = new Set(prev.map((m) => m.id));
+      const actuallyNew = got.rows.some((r) => r.direction === 'in' && !prevIds.has(r.id));
+      if (actuallyNew) {
+        void fetchPolicy().then((p) => { if (p) setPolicy(p); });
+      }
+      return mergeMessages(prev, got.rows, true);
+    });
     // ⚠️ ตั้ง "ยังมีของเก่าอีกไหม" เฉพาะรอบแรก
     //    รอบหลัง ๆ ของเก่าที่กดโหลดมาแล้วยังอยู่ในมือ ค่าจาก API จึงไม่ใช่ความจริงอีกต่อไป
     if (!initializedRef.current) {
@@ -1345,7 +1407,7 @@ function ChatRoom({
       setHasOlder(got.has_more);
     }
     if (got.truncated) toast.warning('มีข้อความใหม่เกินเพดานหนึ่งรอบ ระบบกำลังดึงต่อและไม่ได้ทิ้งข้อความ');
-  }, []);
+  }, [fetchPolicy]);
 
   const loadMessages = useCallback(async () => {
     const got = await fetchMessages();
@@ -1761,11 +1823,15 @@ function ChatRoom({
     const body = text.trim();
     if ((!body && cannedImages.length === 0) || sending) return;
     setSending(true);
+    // ⭐ คัดลอกรูปไว้ในตัวแปร local แล้วเคลียร์ state ทันที
+    //    กันรูปถูกส่งซ้ำหากข้อความ text ส่งไม่สำเร็จแล้วผู้ใช้กดส่งอีกครั้ง
+    const imagesToSend = [...cannedImages];
+    if (imagesToSend.length > 0) setCannedImages([]);
     try {
       // ชุดคำตอบ: ส่งรูปภาพทั้งหมดก่อนข้อความ
       let failedImageCount = 0;
-      for (let index = 0; index < cannedImages.length; index += 1) {
-        const image = cannedImages[index];
+      for (let index = 0; index < imagesToSend.length; index += 1) {
+        const image = imagesToSend[index];
         try {
           const mediaRes = await fetch(`/api/conversations/${c.id}/reply-image-url`, {
             method: 'POST',
@@ -1786,12 +1852,11 @@ function ChatRoom({
         }
       }
       if (failedImageCount > 0) {
-        toast.warning(`ส่งรูปสำเร็จ ${cannedImages.length - failedImageCount} จาก ${cannedImages.length} รูป`);
+        toast.warning(`ส่งรูปสำเร็จ ${imagesToSend.length - failedImageCount} จาก ${imagesToSend.length} รูป`);
       }
 
 
       if (!body) {
-        setCannedImages([]);
         idempotencyKey.current = newIdempotencyKey();
         stickBottomRef.current = true;
         await loadMessages();

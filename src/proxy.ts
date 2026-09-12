@@ -49,7 +49,7 @@ export async function proxy(req: NextRequest) {
 
   // --- ยังไม่ได้ login -----------------------------------------------------
   if (!session) {
-    if (isPublic || pathname.startsWith('/api/auth/login')) return NextResponse.next();
+    if (isPublic || pathname.startsWith('/api/auth/login') || pathname.startsWith('/api/auth/logout')) return NextResponse.next();
     if (isApi) {
       return NextResponse.json(
         { ok: false, error: { code: 'no_session', message_th: 'กรุณาเข้าสู่ระบบ' } },
@@ -58,8 +58,8 @@ export async function proxy(req: NextRequest) {
     }
     const url = req.nextUrl.clone();
     url.pathname = '/login';
-    // จำหน้าที่ตั้งใจจะไป เพื่อพากลับมาหลัง login สำเร็จ
-    url.searchParams.set('next', pathname);
+    // จำหน้าที่ตั้งใจจะไป (pathname + query) เพื่อพากลับมาหลัง login สำเร็จ
+    url.searchParams.set('next', pathname + (req.nextUrl.search || ''));
     return NextResponse.redirect(url);
   }
 

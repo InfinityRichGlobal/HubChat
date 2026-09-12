@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot, ShieldCheck, Send, Database } from 'lucide-react';
+import { ChevronRight, Users, ScrollText, Store, MessageSquareText, Bell, Package, Bot, ShieldCheck, Send, Database, Sparkles } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can, ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -67,6 +67,13 @@ export default async function SettingsPage() {
       title: 'ตอบอัตโนมัติ (คีย์เวิร์ด)',
       description: '🔴 ส่วนเดียวที่ระบบพิมพ์หาลูกค้าเอง — ตั้งกฎ ดูประวัติ เปิด/ปิดได้ทันที',
       show: can(admin.role, 'content.view'),
+    },
+    {
+      href: '/settings/ai',
+      icon: Sparkles,
+      title: 'AI & บอทเทรน (Gemini)',
+      description: 'กำหนดบุคลิก กฎของร้าน คลังความรู้สินค้า และทดลองคุยกับ AI แอดมิน',
+      show: true,
     },
     {
       href: '/settings/notifications',

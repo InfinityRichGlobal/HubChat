@@ -96,6 +96,7 @@ export default function AppShell({
   useEffect(() => {
     let alive = true;
     const fetchCounts = async () => {
+      if (document.hidden) return;
       try {
         const res = await fetch('/api/notify/counts');
         if (!res.ok) return;
@@ -113,9 +114,12 @@ export default function AppShell({
 
     void fetchCounts();
     const timer = setInterval(() => void fetchCounts(), 15000);
+    const onVisibility = () => { if (!document.hidden) void fetchCounts(); };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       alive = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
