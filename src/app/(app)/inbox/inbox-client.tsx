@@ -444,7 +444,13 @@ export default function InboxClient({
 
   const displayedConversations = useMemo(() => {
     return conversations.filter((c) => {
-      if (platformFilter !== 'all' && c.page.platform !== platformFilter) return false;
+      if (platformFilter !== 'all') {
+        if (platformFilter.startsWith('page:')) {
+          if (c.page.id !== platformFilter.slice(5)) return false;
+        } else if (c.page.platform !== platformFilter) {
+          return false;
+        }
+      }
       if (orderFilter !== 'all') {
         if (orderFilter === '0' && c.order_count !== 0) return false;
         if (orderFilter === '1' && c.order_count !== 1) return false;
@@ -476,10 +482,11 @@ export default function InboxClient({
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {/* 1. ปุ่มตัวกรองหลัก */}
             <Button
               variant={filterCount > 0 ? 'secondary' : 'outline'}
               size="sm"
-              className="h-8 rounded-full px-3 text-xs shrink-0"
+              className="h-8 rounded-full px-3 text-xs shrink-0 whitespace-nowrap"
               onClick={() => setFiltersOpen(true)}
             >
               <SlidersHorizontal className="size-3.5" />
@@ -491,44 +498,25 @@ export default function InboxClient({
               )}
             </Button>
 
-            {/* ปุ่มดรอปดาวน์: ตะกร้าออเดอร์ */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors',
-                    orderFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                  )}
-                  title="กรองตามประวัติการสั่งซื้อ"
-                >
-                  <ShoppingBag className="size-3.5" />
-                  <span>{orderFilter === 'all' ? 'ออเดอร์' : ORDER_FILTER_LABELS[orderFilter]}</span>
-                  <ChevronDown className="size-3 opacity-60" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-52">
-                <DropdownMenuLabel className="text-xs text-muted-foreground">จำนวนประวัติการสั่งซื้อ</DropdownMenuLabel>
-                {(Object.keys(ORDER_FILTER_LABELS) as OrderFilterGroup[]).map((grp) => (
-                  <DropdownMenuItem
-                    key={grp}
-                    className={cn('cursor-pointer text-xs flex items-center justify-between', orderFilter === grp && 'font-semibold bg-accent')}
-                    onClick={() => setOrderFilter(grp)}
-                  >
-                    <span>{ORDER_FILTER_LABELS[grp]}</span>
-                    {orderFilter === grp && <Check className="size-3 text-primary" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* 2. ชิป: ยังไม่ได้อ่าน */}
+            <FilterChip active={inboxGroup === 'unread'} onClick={() => setInboxGroup(inboxGroup === 'unread' ? 'all' : 'unread')}>
+              <MessageSquareOff className="size-3.5" />
+              ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount})` : ''}
+            </FilterChip>
 
-            {/* ปุ่มดรอปดาวน์: ผู้ดูแล / แอดมิน */}
+            {/* 3. ชิป: ติดตามผล */}
+            <FilterChip active={inboxGroup === 'follow_up'} onClick={() => setInboxGroup(inboxGroup === 'follow_up' ? 'all' : 'follow_up')}>
+              <Star className={cn('size-3.5', inboxGroup === 'follow_up' && 'fill-current text-amber-500')} />
+              ติดตามผล
+            </FilterChip>
+
+            {/* 4. ปุ่มดรอปดาวน์: ผู้ดูแล / แอดมิน */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
                   className={cn(
-                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors',
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
                     assignedAdminFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                   )}
                   title="กรองตามแอดมินผู้ดูแล"
@@ -541,7 +529,7 @@ export default function InboxClient({
                         ? 'ยังไม่มอบหมาย'
                         : (admins.find((a) => a.id === assignedAdminFilter)?.name ?? 'ผู้ดูแล')}
                   </span>
-                  <ChevronDown className="size-3 opacity-60" />
+                  <ChevronDown className="size-3 opacity-60 shrink-0" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-48">
@@ -574,76 +562,177 @@ export default function InboxClient({
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* ปุ่มดรอปดาวน์: แพลตฟอร์ม */}
+            {/* 5. ปุ่มดรอปดาวน์: แพลตฟอร์ม & รายเพจ */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
                   className={cn(
-                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors',
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
                     platformFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                   )}
-                  title="กรองตามแพลตฟอร์ม"
+                  title="กรองตามแพลตฟอร์มหรือเพจ"
                 >
-                  {platformFilter === 'all' ? (
-                    <Layers className="size-3.5" />
+                  {platformFilter.startsWith('page:') ? (
+                    (() => {
+                      const p = pages.find((pg) => pg.id === platformFilter.slice(5));
+                      return (
+                        <>
+                          <PlatformIcon platform={p?.platform ?? 'facebook'} size="xs" />
+                          <span className="max-w-[90px] truncate">{p?.name ?? 'เพจ'}</span>
+                        </>
+                      );
+                    })()
+                  ) : platformFilter === 'facebook' ? (
+                    <>
+                      <PlatformIcon platform="facebook" size="xs" />
+                      <span>Facebook</span>
+                    </>
+                  ) : platformFilter === 'instagram' ? (
+                    <>
+                      <PlatformIcon platform="instagram" size="xs" />
+                      <span>Instagram</span>
+                    </>
+                  ) : platformFilter === 'line' ? (
+                    <>
+                      <PlatformIcon platform="line" size="xs" />
+                      <span>LINE</span>
+                    </>
                   ) : (
-                    <PlatformIcon platform={platformFilter} size="xs" />
+                    <>
+                      <Layers className="size-3.5" />
+                      <span>แพลตฟอร์ม</span>
+                    </>
                   )}
-                  <span>
-                    {platformFilter === 'all'
-                      ? 'แพลตฟอร์ม'
-                      : platformFilter === 'facebook'
-                        ? 'Facebook'
-                        : platformFilter === 'instagram'
-                          ? 'Instagram'
-                          : platformFilter === 'line'
-                            ? 'LINE'
-                            : platformFilter}
-                  </span>
-                  <ChevronDown className="size-3 opacity-60" />
+                  <ChevronDown className="size-3 opacity-60 shrink-0" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-44">
-                <DropdownMenuLabel className="text-xs text-muted-foreground">ช่องทาง / แพลตฟอร์ม</DropdownMenuLabel>
+              <DropdownMenuContent align="start" className="w-56 max-h-80 overflow-y-auto">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">ช่องทาง / เพจ</DropdownMenuLabel>
                 <DropdownMenuItem
                   className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'all' && 'font-semibold bg-accent')}
                   onClick={() => setPlatformFilter('all')}
                 >
-                  <span className="flex items-center gap-2"><Layers className="size-3.5 text-muted-foreground" /> ทั้งหมด</span>
+                  <span className="flex items-center gap-2"><Layers className="size-3.5 text-muted-foreground" /> ทุกช่องทาง</span>
                   {platformFilter === 'all' && <Check className="size-3 text-primary" />}
                 </DropdownMenuItem>
+
+                {/* Facebook Group */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[11px] font-semibold flex items-center gap-1.5 py-1 text-foreground">
+                  <PlatformIcon platform="facebook" size="xs" /> Facebook
+                </DropdownMenuLabel>
                 <DropdownMenuItem
-                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'facebook' && 'font-semibold bg-accent')}
+                  className={cn('cursor-pointer text-xs flex items-center justify-between pl-6', platformFilter === 'facebook' && 'font-semibold bg-accent')}
                   onClick={() => setPlatformFilter('facebook')}
                 >
-                  <span className="flex items-center gap-2"><PlatformIcon platform="facebook" size="xs" /> Facebook</span>
+                  <span>ทุกเพจ Facebook</span>
                   {platformFilter === 'facebook' && <Check className="size-3 text-primary" />}
                 </DropdownMenuItem>
+                {pages.filter((p) => p.platform === 'facebook').map((page) => (
+                  <DropdownMenuItem
+                    key={page.id}
+                    className={cn('cursor-pointer text-xs flex items-center justify-between pl-6', platformFilter === `page:${page.id}` && 'font-semibold bg-accent')}
+                    onClick={() => setPlatformFilter(`page:${page.id}`)}
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+                      <span className="truncate">{page.name}</span>
+                    </span>
+                    {platformFilter === `page:${page.id}` && <Check className="size-3 text-primary shrink-0" />}
+                  </DropdownMenuItem>
+                ))}
+
+                {/* Instagram Group */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[11px] font-semibold flex items-center gap-1.5 py-1 text-foreground">
+                  <PlatformIcon platform="instagram" size="xs" /> Instagram
+                </DropdownMenuLabel>
                 <DropdownMenuItem
-                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'instagram' && 'font-semibold bg-accent')}
+                  className={cn('cursor-pointer text-xs flex items-center justify-between pl-6', platformFilter === 'instagram' && 'font-semibold bg-accent')}
                   onClick={() => setPlatformFilter('instagram')}
                 >
-                  <span className="flex items-center gap-2"><PlatformIcon platform="instagram" size="xs" /> Instagram</span>
+                  <span>ทุกบัญชี Instagram</span>
                   {platformFilter === 'instagram' && <Check className="size-3 text-primary" />}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  className={cn('cursor-pointer text-xs flex items-center justify-between', platformFilter === 'line' && 'font-semibold bg-accent')}
-                  onClick={() => setPlatformFilter('line')}
-                >
-                  <span className="flex items-center gap-2"><PlatformIcon platform="line" size="xs" /> LINE</span>
-                  {platformFilter === 'line' && <Check className="size-3 text-primary" />}
-                </DropdownMenuItem>
+                {pages.filter((p) => p.platform === 'instagram').map((page) => (
+                  <DropdownMenuItem
+                    key={page.id}
+                    className={cn('cursor-pointer text-xs flex items-center justify-between pl-6', platformFilter === `page:${page.id}` && 'font-semibold bg-accent')}
+                    onClick={() => setPlatformFilter(`page:${page.id}`)}
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+                      <span className="truncate">{page.name}</span>
+                    </span>
+                    {platformFilter === `page:${page.id}` && <Check className="size-3 text-primary shrink-0" />}
+                  </DropdownMenuItem>
+                ))}
+
+                {/* LINE Group */}
+                {pages.some((p) => (p.platform as string) === 'line') && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-[11px] font-semibold flex items-center gap-1.5 py-1 text-foreground">
+                      <PlatformIcon platform="line" size="xs" /> LINE
+                    </DropdownMenuLabel>
+                    <DropdownMenuItem
+                      className={cn('cursor-pointer text-xs flex items-center justify-between pl-6', platformFilter === 'line' && 'font-semibold bg-accent')}
+                      onClick={() => setPlatformFilter('line')}
+                    >
+                      <span>ทุกบัญชี LINE</span>
+                      {platformFilter === 'line' && <Check className="size-3 text-primary" />}
+                    </DropdownMenuItem>
+                    {pages.filter((p) => (p.platform as string) === 'line').map((page) => (
+                      <DropdownMenuItem
+                        key={page.id}
+                        className={cn('cursor-pointer text-xs flex items-center justify-between pl-6', platformFilter === `page:${page.id}` && 'font-semibold bg-accent')}
+                        onClick={() => setPlatformFilter(`page:${page.id}`)}
+                      >
+                        <span className="flex items-center gap-1.5 truncate">
+                          <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+                          <span className="truncate">{page.name}</span>
+                        </span>
+                        {platformFilter === `page:${page.id}` && <Check className="size-3 text-primary shrink-0" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <FilterChip active={inboxGroup === 'follow_up'} onClick={() => setInboxGroup(inboxGroup === 'follow_up' ? 'all' : 'follow_up')}>
-              <Star className={cn('size-3.5', inboxGroup === 'follow_up' && 'fill-current')} />
-              ติดตามผล
-            </FilterChip>
-            <FilterChip active={inboxGroup === 'unread'} onClick={() => setInboxGroup(inboxGroup === 'unread' ? 'all' : 'unread')}>
-              ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount})` : ''}
-            </FilterChip>
+            {/* 6. ปุ่มดรอปดาวน์: จำนวนออเดอร์ */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 whitespace-nowrap transition-colors',
+                    orderFilter !== 'all' ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  )}
+                  title="กรองตามประวัติการสั่งซื้อ"
+                >
+                  <ShoppingBag className="size-3.5" />
+                  <span>{orderFilter === 'all' ? 'ออเดอร์' : ORDER_FILTER_LABELS[orderFilter]}</span>
+                  <ChevronDown className="size-3 opacity-60 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">จำนวนประวัติการสั่งซื้อ</DropdownMenuLabel>
+                {(Object.keys(ORDER_FILTER_LABELS) as OrderFilterGroup[]).map((grp) => (
+                  <DropdownMenuItem
+                    key={grp}
+                    className={cn('cursor-pointer text-xs flex items-center justify-between', orderFilter === grp && 'font-semibold bg-accent')}
+                    onClick={() => setOrderFilter(grp)}
+                  >
+                    <span>{ORDER_FILTER_LABELS[grp]}</span>
+                    {orderFilter === grp && <Check className="size-3 text-primary" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* 7. ชิปรอง: กลุ่มสถานะอื่นๆ เมื่อเลือกผ่าน dialog */}
             {inboxGroup !== 'all' && inboxGroup !== 'follow_up' && inboxGroup !== 'unread' && (
               <FilterChip active onClick={() => setInboxGroup('all')}>{GROUP_LABEL[inboxGroup]}</FilterChip>
             )}
@@ -758,11 +847,11 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
-        active ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground',
+        'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs whitespace-nowrap shrink-0 transition-colors',
+        active ? 'border-primary bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
       )}
     >
-      {dotColor && <span className="size-2 rounded-full" style={{ backgroundColor: dotColor }} />}
+      {dotColor && <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />}
       {children}
     </button>
   );
@@ -798,15 +887,34 @@ function InboxFilterDialog({
           <DialogDescription>เลือกกลุ่มงาน ประวัติสั่งซื้อ แอดมินผู้ดูแล หรือเพจและป้ายที่ต้องการ</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <FilterGroup title="ประวัติการสั่งซื้อ (ออเดอร์)">
-            {(Object.keys(ORDER_FILTER_LABELS) as OrderFilterGroup[]).map((grp) => (
-              <FilterChoice
-                key={grp}
-                active={orderFilter === grp}
-                onClick={() => onSelectOrderFilter(grp)}
-              >
-                {ORDER_FILTER_LABELS[grp]}
+          <FilterGroup title="กลุ่มแชท">
+            <FilterChoice active={inboxGroup === 'all'} onClick={() => onSelectGroup('all')} icon={<Inbox className="size-4" />}>ข้อความทั้งหมด</FilterChoice>
+            <FilterChoice active={inboxGroup === 'facebook'} onClick={() => onSelectGroup('facebook')} icon={<MessageCircle className="size-4" />}>Messenger</FilterChoice>
+            <FilterChoice active={inboxGroup === 'instagram'} onClick={() => onSelectGroup('instagram')} icon={<Send className="size-4" />}>Instagram</FilterChoice>
+            <FilterChoice active={inboxGroup === 'ai_handoff'} onClick={() => onSelectGroup('ai_handoff')} icon={<Handshake className="size-4" />}>ส่งต่อโดย AI</FilterChoice>
+            <FilterChoice active={inboxGroup === 'ai_reply'} onClick={() => onSelectGroup('ai_reply')} icon={<Sparkles className="size-4" />}>การตอบกลับของ AI</FilterChoice>
+            <FilterChoice active={inboxGroup === 'important'} onClick={() => onSelectGroup('important')} icon={<AlertCircle className="size-4" />}>สำคัญ</FilterChoice>
+            <FilterChoice active={inboxGroup === 'unread'} onClick={() => onSelectGroup('unread')} icon={<MessageSquareOff className="size-4" />}>ยังไม่ได้อ่าน</FilterChoice>
+            <FilterChoice active={inboxGroup === 'follow_up'} onClick={() => onSelectGroup('follow_up')} icon={<Star className={cn('size-4', inboxGroup === 'follow_up' && 'fill-current text-amber-500')} />}>ติดตามผล · มีออเดอร์</FilterChoice>
+            <FilterChoice active={inboxGroup === 'done'} onClick={() => onSelectGroup('done')} icon={<CheckCircle2 className="size-4" />}>เรียบร้อย</FilterChoice>
+            <FilterChoice active={inboxGroup === 'spam'} onClick={() => onSelectGroup('spam')} icon={<ShieldAlert className="size-4" />}>สแปม · ซิงก์ Meta</FilterChoice>
+            <FilterChoice active={inboxGroup === 'assigned'} onClick={() => onSelectGroup('assigned')} icon={<UserCheck className="size-4" />}>กำหนดแล้ว</FilterChoice>
+          </FilterGroup>
+
+          <FilterGroup title="ช่องทาง / เพจ">
+            {pages.map((page) => (
+              <FilterChoice key={page.id} active={selectedPages.includes(page.id)} onClick={() => onTogglePage(page.id)} dotColor={page.tag_color}>
+                <span className="inline-flex items-center gap-1.5">
+                  <PlatformIcon platform={page.platform} size="xs" />
+                  {page.platform === 'instagram' ? 'Instagram · ' : 'Messenger · '}{page.name}
+                </span>
               </FilterChoice>
+            ))}
+          </FilterGroup>
+
+          <FilterGroup title="ป้าย / กลุ่มแชท">
+            {tags.length === 0 ? <p className="text-xs text-muted-foreground">ยังไม่มีป้าย — เพิ่มได้ที่ ตั้งค่า → เนื้อหา</p> : tags.map((tag) => (
+              <FilterChoice key={tag.id} active={selectedTags.includes(tag.id)} onClick={() => onToggleTag(tag.id)} dotColor={tag.color}>{tag.name}</FilterChoice>
             ))}
           </FilterGroup>
 
@@ -830,29 +938,15 @@ function InboxFilterDialog({
             </FilterGroup>
           )}
 
-          <FilterGroup title="กลุ่มแชท">
-            <FilterChoice active={inboxGroup === 'all'} onClick={() => onSelectGroup('all')} icon={<Inbox className="size-4" />}>ข้อความทั้งหมด</FilterChoice>
-            <FilterChoice active={inboxGroup === 'facebook'} onClick={() => onSelectGroup('facebook')} icon={<MessageCircle className="size-4" />}>Messenger</FilterChoice>
-            <FilterChoice active={inboxGroup === 'instagram'} onClick={() => onSelectGroup('instagram')} icon={<Send className="size-4" />}>Instagram</FilterChoice>
-            <FilterChoice active={inboxGroup === 'ai_handoff'} onClick={() => onSelectGroup('ai_handoff')} icon={<Handshake className="size-4" />}>ส่งต่อโดย AI</FilterChoice>
-            <FilterChoice active={inboxGroup === 'ai_reply'} onClick={() => onSelectGroup('ai_reply')} icon={<Sparkles className="size-4" />}>การตอบกลับของ AI</FilterChoice>
-            <FilterChoice active={inboxGroup === 'important'} onClick={() => onSelectGroup('important')} icon={<AlertCircle className="size-4" />}>สำคัญ</FilterChoice>
-            <FilterChoice active={inboxGroup === 'unread'} onClick={() => onSelectGroup('unread')} icon={<MessageSquareOff className="size-4" />}>ยังไม่ได้อ่าน</FilterChoice>
-            <FilterChoice active={inboxGroup === 'follow_up'} onClick={() => onSelectGroup('follow_up')} icon={<Star className={cn('size-4', inboxGroup === 'follow_up' && 'fill-current text-amber-500')} />}>ติดตามผล · มีออเดอร์</FilterChoice>
-            <FilterChoice active={inboxGroup === 'done'} onClick={() => onSelectGroup('done')} icon={<CheckCircle2 className="size-4" />}>เรียบร้อย</FilterChoice>
-            <FilterChoice active={inboxGroup === 'spam'} onClick={() => onSelectGroup('spam')} icon={<ShieldAlert className="size-4" />}>สแปม · ซิงก์ Meta</FilterChoice>
-            <FilterChoice active={inboxGroup === 'assigned'} onClick={() => onSelectGroup('assigned')} icon={<UserCheck className="size-4" />}>กำหนดแล้ว</FilterChoice>
-          </FilterGroup>
-          <FilterGroup title="ช่องทาง / เพจ">
-            {pages.map((page) => (
-              <FilterChoice key={page.id} active={selectedPages.includes(page.id)} onClick={() => onTogglePage(page.id)} dotColor={page.tag_color}>
-                {page.platform === 'instagram' ? 'Instagram · ' : 'Messenger · '}{page.name}
+          <FilterGroup title="ประวัติการสั่งซื้อ (ออเดอร์)">
+            {(Object.keys(ORDER_FILTER_LABELS) as OrderFilterGroup[]).map((grp) => (
+              <FilterChoice
+                key={grp}
+                active={orderFilter === grp}
+                onClick={() => onSelectOrderFilter(grp)}
+              >
+                {ORDER_FILTER_LABELS[grp]}
               </FilterChoice>
-            ))}
-          </FilterGroup>
-          <FilterGroup title="ป้าย / กลุ่มแชท">
-            {tags.length === 0 ? <p className="text-xs text-muted-foreground">ยังไม่มีป้าย — เพิ่มได้ที่ ตั้งค่า → เนื้อหา</p> : tags.map((tag) => (
-              <FilterChoice key={tag.id} active={selectedTags.includes(tag.id)} onClick={() => onToggleTag(tag.id)} dotColor={tag.color}>{tag.name}</FilterChoice>
             ))}
           </FilterGroup>
         </div>
@@ -1711,7 +1805,11 @@ function ChatRoom({
               {c.order_count > 0 && <Star className="mt-0.5 size-4 shrink-0 fill-amber-500 text-amber-500" aria-label="ติดตามผล" />}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full" style={{ backgroundColor: c.page.tag_color }} />{c.page.platform === 'instagram' ? 'Instagram' : 'Messenger'} · {c.page.name}</span>
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <PlatformIcon platform={c.page.platform} size="xs" />
+                <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: c.page.tag_color }} />
+                {(c.page.platform as string) === 'instagram' ? 'Instagram' : (c.page.platform as string) === 'line' ? 'LINE' : 'Messenger'} · {c.page.name}
+              </span>
               {c.username && <span>@{c.username}</span>}
               {c.phone && <button type="button" className="inline-flex items-center gap-1 underline decoration-dotted" onClick={() => void copyText(c.phone!).then((done) => done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'))}><Phone className="size-3" />{c.phone}</button>}
               {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
@@ -2259,9 +2357,10 @@ function MediaLibraryPicker({
 
   const allItems = useMemo(() => {
     if (!loaded || !kind) return [];
-    return loaded.items.filter((item) =>
-      kind === 'video' ? item.mime.startsWith('video/') : item.mime.startsWith('image/'),
-    );
+    return loaded.items.filter((item) => {
+      if (kind === 'video') return item.mime.startsWith('video/');
+      return item.mime.startsWith('image/') && !item.categories?.includes('ระบบ');
+    });
   }, [loaded, kind]);
 
   const filteredItems = useMemo(() => {
@@ -2290,8 +2389,10 @@ function MediaLibraryPicker({
 
   const albumsList = useMemo(() => {
     if (!loaded?.albums) return ['ทั้งหมด'];
-    return ['ทั้งหมด', ...loaded.albums.filter((a) => a !== 'ทั้งหมด')];
-  }, [loaded?.albums]);
+    if (kind === 'video') return [];
+    const filtered = loaded.albums.filter((a) => a !== 'ทั้งหมด' && a !== 'วิดีโอ' && a !== 'ระบบ');
+    return ['ทั้งหมด', ...filtered];
+  }, [loaded?.albums, kind]);
 
   return (
     <Dialog open={kind !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -2301,12 +2402,14 @@ function MediaLibraryPicker({
             {kind === 'video' ? 'เลือกจากคลังวิดีโอ' : 'เลือกจากคลังรูปภาพ'}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            แตะที่รูปเพื่อเลือกหลายรายการพร้อมกัน แล้วกดปุ่ม “นำไปใส่ในแชท” ด้านล่าง
+            {kind === 'video'
+              ? 'แตะเลือกวิดีโอเพื่อส่งในแชท'
+              : 'แตะที่รูปเพื่อเลือกหลายรายการพร้อมกัน แล้วกดปุ่ม “นำไปใส่ในแชท” ด้านล่าง'}
           </DialogDescription>
         </DialogHeader>
 
-        {/* --- แถบเลือกอัลบั้ม --- */}
-        {loaded && albumsList.length > 1 && (
+        {/* --- แถบเลือกอัลบั้ม (เฉพาะรูปภาพ และซ่อนวิดีโอ/ระบบ) --- */}
+        {loaded && kind === 'image' && albumsList.length > 1 && (
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
             {albumsList.map((alb) => {
               const active = selectedAlbum === alb;

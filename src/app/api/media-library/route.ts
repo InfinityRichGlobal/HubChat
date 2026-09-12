@@ -88,6 +88,21 @@ export async function POST(req: NextRequest) {
     if (!ALLOWED.includes(file.type)) return fail('unsupported', 'รองรับรูป JPG/PNG/GIF/WEBP และวิดีโอ MP4/MOV/WEBM', 422);
     if (file.size > MAX_BYTES) return fail('too_large', 'ไฟล์ใหญ่เกิน 25 MB', 413);
     const id = await storeUploadedFile(await file.arrayBuffer(), file.type, 'library');
+    const category = typeof form.get('category') === 'string' ? (form.get('category') as string).trim() : null;
+    if (category) {
+      const { data: existing } = await db()
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'media_categories')
+        .maybeSingle();
+      const currentMap = ((existing?.value as Record<string, string[]>) || {});
+      currentMap[id] = [category];
+      await db().from('app_settings').upsert({
+        key: 'media_categories',
+        value: currentMap,
+      });
+    }
+
     const asset = await db().from('media_assets').select('storage_key').eq('id', id).maybeSingle();
     const url = asset?.data?.storage_key ? getPublicUrl(asset.data.storage_key) : `/api/media/${id}`;
     return ok({ id, url }, { status: 201 });

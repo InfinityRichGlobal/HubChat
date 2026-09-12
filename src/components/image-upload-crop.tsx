@@ -85,6 +85,7 @@ export default function ImageUploadCrop({
 
       const form = new FormData();
       form.append('file', croppedFile);
+      form.append('category', 'ระบบ');
 
       const res = await fetch('/api/media-library', { method: 'POST', body: form });
       const json = await res.json();

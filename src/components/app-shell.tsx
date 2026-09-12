@@ -146,10 +146,14 @@ export default function AppShell({
     <div className="flex min-h-svh flex-col md:flex-row">
       {/* ---------- เมนูซ้าย (เดสก์ท็อป) ---------- */}
       <aside className="hidden w-56 shrink-0 flex-col border-r bg-card md:flex">
-        <div className="flex h-14 items-center gap-2 px-4 font-semibold">
+        <Link
+          href="/inbox"
+          className="flex h-14 items-center gap-2 px-4 font-semibold transition-opacity hover:opacity-80"
+          title="กลับหน้าหลักอินบ็อกซ์"
+        >
           {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
           <span className="truncate">{brand.name}</span>
-        </div>
+        </Link>
         <nav className="flex flex-1 flex-col gap-1 p-2">
           {items.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -182,10 +186,14 @@ export default function AppShell({
       {/* ---------- เนื้อหา ---------- */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4 md:hidden">
-          <span className="flex min-w-0 items-center gap-2 font-semibold">
+          <Link
+            href="/inbox"
+            className="flex min-w-0 items-center gap-2 font-semibold transition-opacity hover:opacity-80"
+            title="กลับหน้าหลักอินบ็อกซ์"
+          >
             {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
             <span className="truncate">{brand.name}</span>
-          </span>
+          </Link>
           <AccountMenu admin={admin} onLogout={handleLogout} />
         </header>
 

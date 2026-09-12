@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw, Sparkles,
+  ChevronDown, Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,9 +13,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PlatformIcon from '@/components/platform-icon';
 import type { CommentRow } from '@/server/comments/service';
+import type { SafePage } from '@/server/pages/service';
 
 /**
  * ฟีดคอมเมนต์ (ฝั่งหน้าเว็บ) — สเปกหัวข้อ 5.5
@@ -72,14 +78,17 @@ async function api<T>(url: string, init?: RequestInit): Promise<T | null> {
 export default function CommentsClient({
   initial,
   initialWords,
+  pages = [],
   canManageWords,
 }: {
   initial: Feed;
   initialWords: string[];
+  pages?: SafePage[];
   canManageWords: boolean;
 }) {
   const [feed, setFeed] = useState(initial);
   const [words, setWords] = useState(initialWords);
+  const [selectedPageId, setSelectedPageId] = useState<string>('all');
   const [unhandledOnly, setUnhandledOnly] = useState(false);
   const [keywordOnly, setKeywordOnly] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -89,12 +98,13 @@ export default function CommentsClient({
     const params = new URLSearchParams();
     if (unhandledOnly) params.set('unhandled', '1');
     if (keywordOnly) params.set('keyword', '1');
+    if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
     const d = await api<Feed & { filter_words: string[] }>(`/api/comments?${params.toString()}`);
     if (d) {
       setFeed({ comments: d.comments, has_more: d.has_more, unhandled_count: d.unhandled_count });
       setWords(d.filter_words);
     }
-  }, [unhandledOnly, keywordOnly]);
+  }, [unhandledOnly, keywordOnly, selectedPageId]);
 
   /* ---- ดึงซ้ำเป็นระยะ ---- */
   useEffect(() => {
@@ -119,6 +129,8 @@ export default function CommentsClient({
   }, []);
 
   const visible = useMemo(() => feed.comments, [feed.comments]);
+
+  const selectedPage = useMemo(() => pages.find((p) => p.id === selectedPageId), [pages, selectedPageId]);
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
@@ -152,7 +164,57 @@ export default function CommentsClient({
       </Alert>
 
       {/* ---- ตัวกรอง ---- */}
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {/* ดรอปดาวน์เลือกเพจ */}
+        {pages.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={selectedPageId !== 'all' ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 gap-1.5 text-xs font-medium shrink-0"
+              >
+                {selectedPage ? (
+                  <>
+                    <PlatformIcon platform={selectedPage.platform} size="xs" />
+                    <span className="max-w-[120px] truncate">{selectedPage.display_name || selectedPage.page_name}</span>
+                  </>
+                ) : (
+                  <>
+                    <Layers className="size-3.5" />
+                    <span>ทุกเพจ ({pages.length})</span>
+                  </>
+                )}
+                <ChevronDown className="size-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">เลือกเพจที่ต้องการดู</DropdownMenuLabel>
+              <DropdownMenuItem
+                className={cn('cursor-pointer text-xs flex items-center justify-between', selectedPageId === 'all' && 'font-semibold bg-accent')}
+                onClick={() => setSelectedPageId('all')}
+              >
+                <span className="flex items-center gap-2"><Layers className="size-3.5" /> ทุกเพจ</span>
+                {selectedPageId === 'all' && <Check className="size-3 text-primary" />}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {pages.map((p) => (
+                <DropdownMenuItem
+                  key={p.id}
+                  className={cn('cursor-pointer text-xs flex items-center justify-between', selectedPageId === p.id && 'font-semibold bg-accent')}
+                  onClick={() => setSelectedPageId(p.id)}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <PlatformIcon platform={p.platform} size="xs" />
+                    <span className="truncate">{p.display_name || p.page_name}</span>
+                  </span>
+                  {selectedPageId === p.id && <Check className="size-3 text-primary shrink-0" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         <Button
           size="sm"
           variant={!unhandledOnly && !keywordOnly ? 'default' : 'outline'}
@@ -189,7 +251,13 @@ export default function CommentsClient({
       ) : (
         <div className="flex flex-col gap-2">
           {visible.map((c) => (
-            <CommentCard key={c.id} comment={c} onChanged={replaceComment} setBusy={setLoading} />
+            <CommentCard
+              key={c.id}
+              comment={c}
+              page={pages.find((p) => p.id === c.page_id)}
+              onChanged={replaceComment}
+              setBusy={setLoading}
+            />
           ))}
         </div>
       )}
@@ -214,10 +282,12 @@ export default function CommentsClient({
 
 function CommentCard({
   comment: c,
+  page,
   onChanged,
   setBusy,
 }: {
   comment: CommentRow;
+  page?: SafePage;
   onChanged: (c: CommentRow) => void;
   setBusy: (v: boolean) => void;
 }) {
@@ -282,7 +352,14 @@ function CommentCard({
   return (
     <div className={cn('flex flex-col gap-1.5 rounded-md border p-3', c.is_handled && 'opacity-60')}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">{c.from_name || 'ไม่ทราบชื่อ'}</span>
+        {page && (
+          <span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+            <PlatformIcon platform={page.platform} size="xs" />
+            <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+            <span className="max-w-[120px] truncate">{page.display_name || page.page_name}</span>
+          </span>
+        )}
+        <span className="text-sm font-semibold">{c.from_name || 'ไม่ทราบชื่อ'}</span>
         <span className="text-[11px] text-muted-foreground">{timeAgo(c.commented_at ?? c.created_at)}</span>
         {c.matched_keyword && (
           <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500">

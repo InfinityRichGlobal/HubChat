@@ -29,41 +29,48 @@ import type { OrderStatus, PaymentStatus, Platform } from '@/types/db';
  * ลิสต์ + กรอง / รายละเอียดแก้ได้ / ปุ่มไปแชทต้นทาง / ปุ่มคัดลอกที่อยู่
  */
 
-export type PeriodFilter = 'all' | 'today' | 'yesterday' | '7days' | 'month';
+export type PeriodFilter = 'today' | '7days' | '30days' | 'all' | 'custom';
 
 const PERIOD_LABELS: Record<PeriodFilter, string> = {
-  all: 'ทั้งหมด',
   today: 'วันนี้',
-  yesterday: 'เมื่อวาน',
-  '7days': '7 วันล่าสุด',
-  month: 'เดือนนี้',
+  '7days': '7 วัน',
+  '30days': '30 วัน',
+  all: 'ทั้งหมด',
+  custom: 'กำหนดเอง',
 };
 
-function getPeriodRange(period: PeriodFilter): { since?: string; until?: string } {
+function getPeriodRange(
+  period: PeriodFilter,
+  customStart?: string,
+  customEnd?: string,
+): { since?: string; until?: string } {
   if (period === 'all') return {};
   const now = new Date();
   const bkkStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
-  const [y, m] = bkkStr.split('-').map(Number);
   const todayStart = new Date(`${bkkStr}T00:00:00+07:00`);
 
   if (period === 'today') {
     return { since: todayStart.toISOString() };
-  }
-  if (period === 'yesterday') {
-    const yestDate = new Date(todayStart);
-    yestDate.setDate(yestDate.getDate() - 1);
-    const yestStr = yestDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
-    const yestStart = new Date(`${yestStr}T00:00:00+07:00`);
-    return { since: yestStart.toISOString(), until: todayStart.toISOString() };
   }
   if (period === '7days') {
     const d7 = new Date(todayStart);
     d7.setDate(d7.getDate() - 6);
     return { since: d7.toISOString() };
   }
-  if (period === 'month') {
-    const monthStart = new Date(`${y}-${String(m).padStart(2, '0')}-01T00:00:00+07:00`);
-    return { since: monthStart.toISOString() };
+  if (period === '30days') {
+    const d30 = new Date(todayStart);
+    d30.setDate(d30.getDate() - 29);
+    return { since: d30.toISOString() };
+  }
+  if (period === 'custom') {
+    const range: { since?: string; until?: string } = {};
+    if (customStart) {
+      range.since = new Date(`${customStart}T00:00:00+07:00`).toISOString();
+    }
+    if (customEnd) {
+      range.until = new Date(`${customEnd}T23:59:59+07:00`).toISOString();
+    }
+    return range;
   }
   return {};
 }
@@ -154,6 +161,8 @@ export default function OrdersClient({
   const [orders, setOrders] = useState(initialOrders);
   const [search, setSearch] = useState('');
   const [period, setPeriod] = useState<PeriodFilter>('all');
+  const [customStart, setCustomStart] = useState<string>('');
+  const [customEnd, setCustomEnd] = useState<string>('');
   const [status, setStatus] = useState<string>('all');
   const [payment, setPayment] = useState<string>('all');
   const [pageId, setPageId] = useState<string>('all');
@@ -167,7 +176,7 @@ export default function OrdersClient({
     if (status !== 'all') params.set('status', status);
     if (payment !== 'all') params.set('payment_status', payment);
     if (pageId !== 'all') params.set('page_id', pageId);
-    const range = getPeriodRange(period);
+    const range = getPeriodRange(period, customStart, customEnd);
     if (range.since) params.set('since', range.since);
     if (range.until) params.set('until', range.until);
     try {
@@ -177,7 +186,7 @@ export default function OrdersClient({
     } catch {
       return null;
     }
-  }, [search, status, payment, pageId, period]);
+  }, [search, status, payment, pageId, period, customStart, customEnd]);
 
   const reload = useCallback(async () => {
     const rows = await fetchOrders();
@@ -264,22 +273,60 @@ export default function OrdersClient({
       </div>
 
       {/* ---------- ตัวเลือกช่วงเวลา ---------- */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-        {(Object.keys(PERIOD_LABELS) as PeriodFilter[]).map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => setPeriod(p)}
-            className={cn(
-              'whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-              period === p
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-background text-muted-foreground hover:bg-accent/60',
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          {(Object.keys(PERIOD_LABELS) as PeriodFilter[]).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPeriod(p)}
+              className={cn(
+                'whitespace-nowrap shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                period === p
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-background text-muted-foreground hover:bg-accent/60',
+              )}
+            >
+              {PERIOD_LABELS[p]}
+            </button>
+          ))}
+        </div>
+
+        {/* ช่องระบุช่วงวันที่เมื่อเลือก "กำหนดเอง" */}
+        {period === 'custom' && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-2 text-xs">
+            <span className="font-medium text-foreground">กำหนดช่วงวันที่:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">จาก</span>
+              <Input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="h-8 w-36 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">ถึง</span>
+              <Input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="h-8 w-36 text-xs"
+              />
+            </div>
+            {(customStart || customEnd) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => { setCustomStart(''); setCustomEnd(''); }}
+              >
+                ล้างวันที่
+              </Button>
             )}
-          >
-            {PERIOD_LABELS[p]}
-          </button>
-        ))}
+          </div>
+        )}
       </div>
 
       {/* ---------- ตัวกรอง ---------- */}

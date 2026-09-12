@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/current-admin';
 import { fail, ok, toErrorResponse } from '@/lib/api';
+import { db } from '@/lib/supabase/admin';
 import { assertConversationAccess, InboxAccessError } from '@/server/inbox/service';
 import { humanAdminReply, ProvenanceDeniedError } from '@/server/messaging/provenance';
 import {
@@ -31,7 +32,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
 
     const stored = await getObject(asset.storage_key);
-    if (!stored) return fail('media_missing', 'ไฟล์ในคลังหายจากที่เก็บ กรุณาอัปโหลดใหม่', 410);
+    if (!stored) {
+      await db().from('media_assets').delete().eq('id', asset.id);
+      return fail('media_missing', 'ไฟล์ในคลังนี้ไม่มีอยู่ในที่เก็บ ระบบได้นำออกจากรายการให้แล้ว กรุณาอัปโหลดใหม่', 410);
+    }
     const mime = asset.mime || stored.mime;
     const file = {
       bytes: stored.body,
