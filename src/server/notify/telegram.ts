@@ -250,15 +250,15 @@ export async function sendTelegramTest(chatIdOverride?: string | null): Promise<
 export async function discoverChatIds(): Promise<
   { ok: true; chats: Array<{ id: string; title: string }> } | { ok: false; error_th: string }
 > {
-  const cfg = await telegramConfig();
-  if (!cfg) return { ok: false, error_th: 'ยังไม่ได้ใส่ bot token ในไฟล์ตั้งค่า (.env.local)' };
+  const token = await getRuntimeSetting('TELEGRAM_BOT_TOKEN');
+  if (!token) return { ok: false, error_th: 'ยังไม่ได้ใส่ bot token ในไฟล์ตั้งค่า (.env.local หรือหน้าตั้งค่าระบบ)' };
 
   /**
    * ⚠️ getUpdates คืน result เป็น "อาเรย์" ไม่ใช่ object
    *    callTelegram พิมพ์ไว้เป็น Record จึงต้องแปลงอย่างระวังตรงนี้
    *    (เขียนผิดตรงนี้จะได้รายการว่างเปล่าเงียบ ๆ แล้วผู้ใช้จะงงว่าทำไมหาไม่เจอ)
    */
-  const raw = await callTelegramRaw(cfg, 'getUpdates', { limit: 50 });
+  const raw = await callTelegramRaw({ bot_token: token, chat_id: '' }, 'getUpdates', { limit: 50 });
   if (!raw.ok) return { ok: false, error_th: raw.error_th };
 
   const updates = Array.isArray(raw.result) ? (raw.result as Array<Record<string, unknown>>) : [];

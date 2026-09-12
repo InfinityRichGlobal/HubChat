@@ -77,9 +77,16 @@ export async function getRuntimeSetting(key: SettingKey): Promise<string | null>
   const row = (await rows([key]))[0];
   // ช่วงเปลี่ยนผ่าน: อ่าน env ได้ แต่ไม่คัดลอกเข้า DB และค่าใน DB ชนะเสมอ
   if (!row) return process.env[key]?.trim() || null;
-  const value = definition.kind === 'secret'
-    ? decryptSecret(row.encrypted_value ?? '')
-    : (typeof row.plain_value === 'string' ? row.plain_value : null);
+  let value: string | null = null;
+  if (definition.kind === 'secret') {
+    try {
+      value = decryptSecret(row.encrypted_value ?? '');
+    } catch {
+      value = process.env[key]?.trim() || null;
+    }
+  } else {
+    value = typeof row.plain_value === 'string' ? row.plain_value : null;
+  }
   if (value !== null) cache.set(key, { value, expires: Date.now() + 5_000 });
   return value;
 }
