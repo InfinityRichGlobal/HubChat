@@ -1296,6 +1296,14 @@ function ConversationItem({
           <span className="absolute -bottom-1 -right-1">
             <PlatformIcon platform={c.page.platform} size="xs" />
           </span>
+          {!c.is_read && (
+            <span
+              className="absolute -top-1 -right-1 z-10 flex min-w-4.5 h-4.5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white shadow-xs ring-2 ring-background animate-in fade-in zoom-in-75 duration-200"
+              title={`${c.unread_count || 1} ข้อความที่ยังไม่อ่าน`}
+            >
+              {(c.unread_count || 1) > 99 ? '99+' : (c.unread_count || 1)}
+            </span>
+          )}
         </div>
 
         <div className="min-w-0 flex-1">
@@ -1341,7 +1349,11 @@ function ConversationItem({
                   {hint.text}
                 </span>
               )}
-              {!c.is_read && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive"><span className="size-1.5 rounded-full bg-destructive" /> ใหม่</span>}
+              {!c.is_read && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
+                  <span className="size-1.5 rounded-full bg-destructive" /> {(c.unread_count || 1) > 1 ? `${c.unread_count} ข้อความใหม่` : 'ใหม่'}
+                </span>
+              )}
               {c.tag_ids.slice(0, 1).map((id) => {
                 const t = tagById.get(id);
                 if (!t) return null;
@@ -1583,6 +1595,9 @@ function ChatRoom({
     let messageController: AbortController | null = null;
     let messagesRunning = false;
     let lockRunning = false;
+    if (!c.is_read) {
+      onUpdateConversation?.({ is_read: true, unread_count: 0 });
+    }
     void fetch(`/api/conversations/${c.id}/read`, { method: 'POST' }).then(onChanged).catch(() => {});
 
     const pullMessages = () => {

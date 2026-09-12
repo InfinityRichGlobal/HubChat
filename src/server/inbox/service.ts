@@ -56,6 +56,8 @@ export type ConversationRow = {
   last_message_preview: string | null;
   last_customer_message_at: string | null;
   is_read: boolean;
+  /** จำนวนข้อความที่ยังไม่ได้อ่าน (บอลลูนแชทค้างตอบ) */
+  unread_count?: number;
   inbox_status: 'active' | 'done' | 'spam';
   is_important: boolean;
   /** สแปมถูกส่งไป Meta สำเร็จเมื่อใด — null = เป็นเพียงสถานะใน HubChat */
@@ -212,6 +214,36 @@ async function customerIdsWithOrders(pageIds: string[]): Promise<string[]> {
   return [...ids];
 }
 
+/**
+ * นับจำนวนข้อความขาเข้าที่ยังไม่ได้ตอบ (บอลลูนค้างตอบ) ของแต่ละห้องที่ยังไม่ได้อ่าน
+ */
+async function countUnreadMessages(unreadConvIds: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (unreadConvIds.length === 0) return result;
+
+  const { data, error } = await db()
+    .from('messages')
+    .select('conversation_id, direction')
+    .in('conversation_id', unreadConvIds)
+    .order('created_at', { ascending: false })
+    .limit(unreadConvIds.length * 30);
+
+  if (error || !data) return result;
+
+  const stopped = new Set<string>();
+  for (const m of (data as Array<{ conversation_id: string; direction: string }>)) {
+    const cid = m.conversation_id;
+    if (stopped.has(cid)) continue;
+    if (m.direction === 'in') {
+      result.set(cid, (result.get(cid) ?? 0) + 1);
+    } else {
+      stopped.add(cid);
+    }
+  }
+
+  return result;
+}
+
 /* ------------------------------------------------------------------------ */
 /* 1) ลิสต์แชท                                                                */
 /* ------------------------------------------------------------------------ */
@@ -335,7 +367,8 @@ export async function listConversations(
   if (rows.length === 0) return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
 
   const customerIds = [...new Set(rows.map((r) => r.customer_id))];
-  const [customers, names, tagMap, orders] = await Promise.all([
+  const unreadConvIds = rows.filter((r) => !r.is_read).map((r) => r.id);
+  const [customers, names, tagMap, orders, unreadCounts] = await Promise.all([
     db()
       .from('customers')
       /**
@@ -348,6 +381,7 @@ export async function listConversations(
     adminNames(rows.flatMap((r) => [r.locked_by_admin_id, r.assigned_admin_id]).filter((v): v is string => Boolean(v))),
     tagsForConversations(rows.map((r) => r.id)),
     db().from('orders').select('customer_id').in('customer_id', customerIds),
+    countUnreadMessages(unreadConvIds),
   ]);
 
   const customerMap = new Map(
@@ -396,6 +430,7 @@ export async function listConversations(
         last_message_preview: r.last_message_preview,
         last_customer_message_at: r.last_customer_message_at,
         is_read: r.is_read,
+        unread_count: r.is_read ? 0 : Math.max(1, unreadCounts.get(r.id) ?? 1),
         inbox_status: r.inbox_status,
         is_important: r.is_important,
         meta_spam_synced_at: r.meta_spam_synced_at,
