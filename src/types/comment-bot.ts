@@ -12,6 +12,7 @@ export const CommentBotRuleSchema = z.object({
 export type CommentBotRule = z.infer<typeof CommentBotRuleSchema>;
 
 export const CommentBotSettingsSchema = z.object({
+  reply_mode: z.enum(['ai', 'template']).default('ai'),
   auto_like: z.boolean().default(false),
   auto_reply_public: z.boolean().default(false),
   public_reply_template: z.string().max(1000).default('ขอบคุณที่สนใจนะคะ {name} ทักแชทไปเรียบร้อยแล้วค่า 🥰'),
@@ -26,6 +27,7 @@ export const CommentBotSettingsSchema = z.object({
 export type CommentBotSettings = z.infer<typeof CommentBotSettingsSchema>;
 
 export const DEFAULT_COMMENT_BOT_SETTINGS: CommentBotSettings = {
+  reply_mode: 'ai',
   auto_like: false,
   auto_reply_public: false,
   public_reply_template: 'ขอบคุณที่สนใจนะคะ {name} ทักแชทไปเรียบร้อยแล้วค่า 🥰',

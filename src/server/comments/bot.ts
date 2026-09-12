@@ -14,6 +14,8 @@ import { db } from '@/lib/supabase/admin';
 import type { PublicAdmin } from '@/types/db';
 import type { MetaPage } from '@/server/meta/client';
 import { likeComment, replyToCommentPublicly, sendPrivateReply, subscribePageWebhooks } from '@/server/meta/comments';
+import { generateCommentReply } from '@/server/ai/gemini';
+import { listProducts, listPromotions } from '@/server/orders/service';
 import {
   CommentBotSettingsSchema,
   type CommentBotSettings,
@@ -84,6 +86,41 @@ function formatMessage(template: string, name: string | null): string {
   return template.replace(/\{name\}/g, customerName).trim();
 }
 
+/** จัดรูปแบบเมนูสินค้าและโปรโมชั่นสำหรับส่งในแชทเมื่อดึงเข้าแชท */
+export async function formatCatalogText(): Promise<string | null> {
+  try {
+    const [products, promotions] = await Promise.all([
+      listProducts(true),
+      listPromotions(true),
+    ]);
+    if (products.length === 0 && promotions.length === 0) return null;
+
+    const lines: string[] = ['🛍️ เมนูสินค้าและโปรโมชั่นแนะนำ:'];
+    if (promotions.length > 0) {
+      lines.push('');
+      lines.push('🔥 โปรโมชั่นพิเศษ:');
+      for (const promo of promotions.slice(0, 5)) {
+        lines.push(`• 🎁 ${promo.name}`);
+      }
+    }
+    if (products.length > 0) {
+      lines.push('');
+      lines.push('📦 รายการสินค้า:');
+      for (const p of products.slice(0, 8)) {
+        const priceStr = p.price > 0 ? ` — ${p.price.toLocaleString('th-TH')} บาท` : '';
+        const variantStr = p.variant ? ` (${p.variant})` : '';
+        lines.push(`• ${p.name}${variantStr}${priceStr}`);
+      }
+    }
+    lines.push('');
+    lines.push('👉 พิมพ์ชื่อสินค้าหรือจำนวนที่สนใจเพื่อสอบถามหรือสั่งซื้อได้เลยนะคะ');
+    return lines.join('\n');
+  } catch (err) {
+    console.warn('[comment-bot] ดึงข้อมูลสินค้า/โปรโมชั่นไม่สำเร็จ:', err);
+    return null;
+  }
+}
+
 /**
  * ทำงานบอทคอมเมนต์อัตโนมัติเมื่อมีคอมเมนต์ใหม่เข้ามา
  */
@@ -135,6 +172,8 @@ export async function processCommentAutoReply(
     return;
   }
 
+  const replyMode = settings.reply_mode || 'ai';
+
   // 1. กดไลก์อัตโนมัติ
   if (settings.auto_like) {
     try {
@@ -151,15 +190,36 @@ export async function processCommentAutoReply(
 
   // 2. ตอบคอมเมนต์สาธารณะใต้โพสต์
   if (settings.auto_reply_public) {
-    const rawTemplate =
-      matchedRule?.public_reply?.trim() || settings.public_reply_template?.trim();
+    let replyText: string | null = null;
 
-    if (rawTemplate) {
-      const replyText = formatMessage(rawTemplate, ev.from_name);
+    // หากมีกฎเฉพาะคำที่ระบุคำตอบสาธารณะไว้ ให้ใช้กฎนั้นก่อน
+    if (matchedRule?.public_reply?.trim()) {
+      replyText = formatMessage(matchedRule.public_reply.trim(), ev.from_name);
+    } else if (replyMode === 'ai') {
+      // โหมด AI: ให้ Gemini นำคลังความรู้ร้านค้าและคำถามลูกค้ามาคิดคำตอบอัจฉริยะ
+      try {
+        const aiReply = await generateCommentReply(msg || '(ส่งรูปหรือสติกเกอร์)', {
+          fromName: ev.from_name,
+          mode: 'public',
+        });
+        if (aiReply?.trim()) {
+          replyText = aiReply.trim();
+        }
+      } catch (aiErr) {
+        console.warn('[comment-bot] AI ตอบคอมเมนต์ไม่สำเร็จ ตกไปใช้ Template สำรอง:', aiErr);
+      }
+    }
+
+    // Fallback: ใช้ Template หาก AI ตอบไม่ได้ หรือผู้ใช้เลือกโหมด Template
+    if (!replyText && settings.public_reply_template?.trim()) {
+      replyText = formatMessage(settings.public_reply_template.trim(), ev.from_name);
+    }
+
+    if (replyText) {
       try {
         const publicRes = await replyToCommentPublicly(page, ev.comment_id, replyText);
         if (publicRes.ok) {
-          console.log(`[comment-bot] ↩️ ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} สำเร็จ`);
+          console.log(`[comment-bot] ↩️ ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} สำเร็จ (${replyMode})`);
           if (savedCommentRowId) {
             await db().rpc('finish_public_reply', {
               p_comment_row_id: savedCommentRowId,
@@ -184,13 +244,44 @@ export async function processCommentAutoReply(
 
   // 3. ทักแชทส่วนตัว (Private Reply / DM)
   if (settings.auto_reply_private && savedCommentRowId) {
-    const rawPrivateTemplate =
-      matchedRule?.private_reply?.trim() ||
-      settings.private_reply_template?.trim() ||
-      settings.public_reply_template?.trim();
+    let dmText: string | null = null;
 
-    if (rawPrivateTemplate) {
-      const dmText = formatMessage(rawPrivateTemplate, ev.from_name);
+    // หากมีกฎเฉพาะคำที่ระบุคำตอบส่วนตัวไว้ ให้ใช้กฎนั้น
+    if (matchedRule?.private_reply?.trim()) {
+      dmText = formatMessage(matchedRule.private_reply.trim(), ev.from_name);
+    } else if (replyMode === 'ai') {
+      // โหมด AI: ให้ Gemini เขียนข้อความทักทายต้อนรับเข้าแชทอย่างสุภาพและตรงคำถาม
+      try {
+        const aiDm = await generateCommentReply(msg || '(ส่งรูปหรือสติกเกอร์)', {
+          fromName: ev.from_name,
+          mode: 'private',
+        });
+        if (aiDm?.trim()) {
+          dmText = aiDm.trim();
+        }
+      } catch (aiErr) {
+        console.warn('[comment-bot] AI สร้างข้อความทักแชทไม่สำเร็จ ตกไปใช้ Template สำรอง:', aiErr);
+      }
+    }
+
+    // Fallback: ใช้ Template ทักส่วนตัว
+    if (!dmText) {
+      const rawPrivateTemplate =
+        settings.private_reply_template?.trim() || settings.public_reply_template?.trim();
+      if (rawPrivateTemplate) {
+        dmText = formatMessage(rawPrivateTemplate, ev.from_name);
+      }
+    }
+
+    // หากเปิด auto_send_catalog (ส่งเมนูสินค้า+โปรฯ หลังดึงเข้าแชท): แนบเมนูและโปรโมชั่นเข้ากับข้อความ
+    if (settings.auto_send_catalog) {
+      const catalog = await formatCatalogText();
+      if (catalog) {
+        dmText = dmText ? `${dmText}\n\n${catalog}` : catalog;
+      }
+    }
+
+    if (dmText) {
       try {
         // จองสิทธิ์ตอบส่วนตัวกับฐานข้อมูล
         const { data: claimData, error: claimErr } = await db().rpc('claim_private_reply', {

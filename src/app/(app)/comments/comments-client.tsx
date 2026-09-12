@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw, Sparkles,
+  AlertTriangle, Bot, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw, Sparkles,
   ChevronDown, Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import PlatformIcon from '@/components/platform-icon';
 import type { CommentRow } from '@/server/comments/service';
 import type { SafePage } from '@/server/pages/service';
+import type { CommentBotSettings } from '@/types/comment-bot';
 
 /**
  * ฟีดคอมเมนต์ (ฝั่งหน้าเว็บ) — สเปกหัวข้อ 5.5
@@ -93,6 +94,13 @@ export default function CommentsClient({
   const [keywordOnly, setKeywordOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [wordsOpen, setWordsOpen] = useState(false);
+  const [botSettings, setBotSettings] = useState<CommentBotSettings | null>(null);
+
+  useEffect(() => {
+    void api<CommentBotSettings>('/api/comments/bot').then((d) => {
+      if (d) setBotSettings(d);
+    });
+  }, []);
 
   const load = useCallback(async (): Promise<void> => {
     const params = new URLSearchParams();
@@ -154,14 +162,51 @@ export default function CommentsClient({
         </div>
       </div>
 
-      <Alert>
-        <AlertTriangle className="size-4" />
-        <AlertTitle>ระบบไม่ตอบคอมเมนต์อัตโนมัติ</AlertTitle>
-        <AlertDescription>
-          ทุกการตอบต้องกดเองเสมอ · <strong>&quot;ทักส่วนตัว&quot; ทำได้ครั้งเดียวต่อคอมเมนต์</strong>
-          {' '}และต้องภายใน 7 วัน — เป็นกฎของ Meta ที่แก้ไม่ได้
-        </AlertDescription>
-      </Alert>
+      {/* สถานะบอทคอมเมนต์ & ทางลัดตั้งค่า */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 rounded-xl border bg-card p-3 shadow-xs text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400 font-semibold text-base">
+            {botSettings?.auto_reply_public || botSettings?.auto_reply_private ? '🤖' : '💬'}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex flex-wrap items-center gap-1.5 font-medium">
+              <span className="font-semibold text-foreground">บอทคอมเมนต์อัตโนมัติ:</span>
+              {botSettings?.auto_reply_public || botSettings?.auto_reply_private ? (
+                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600 text-[10px] h-4">
+                  เปิดทำงาน ({botSettings.reply_mode === 'ai' ? 'สมอง AI Gemini' : 'Template'})
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="text-[10px] h-4">ปิดอยู่</Badge>
+              )}
+              {botSettings?.auto_like && (
+                <span className="text-[11px] text-muted-foreground hidden sm:inline">· 👍 ไลก์อัตโนมัติ</span>
+              )}
+              {botSettings?.auto_send_catalog && (
+                <span className="text-[11px] text-muted-foreground hidden sm:inline">· 🛍️ ส่งเมนูสินค้า</span>
+              )}
+            </div>
+            <p className="text-muted-foreground text-[11px]">
+              {botSettings?.auto_reply_public || botSettings?.auto_reply_private
+                ? 'ระบบจะตอบคอมเมนต์และดึงเข้าแชทให้อัตโนมัติตามกฎที่ตั้งไว้'
+                : 'คุณสามารถเปิดให้ AI หรือบอทตอบคำถามลูกค้าใต้คอมเมนต์และทักแชทให้อัตโนมัติ'}
+              {' · '}
+              <strong>ทักส่วนตัวทำได้ 1 ครั้งต่อคอมเมนต์ (กฎ Meta 7 วัน)</strong>
+            </p>
+          </div>
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          asChild
+          className="h-7 text-xs shrink-0 gap-1 text-orange-600 border-orange-300 hover:bg-orange-50 dark:border-orange-800 dark:text-orange-400"
+        >
+          <Link href="/settings/autoreply?tab=comments">
+            <Bot className="size-3.5" />
+            ตั้งค่าบอท
+          </Link>
+        </Button>
+      </div>
 
       {/* ---- ตัวกรอง ---- */}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -524,8 +569,10 @@ function FilterWordsDialog({
         <div className="flex flex-col gap-2 py-2">
           <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="ราคา, สนใจ, cf" />
           <p className="text-[11px] text-muted-foreground">
-            ⚠️ คำกรองเป็นแค่ตัวชูขึ้นมาให้เห็น — คอมเมนต์ที่ไม่เข้าคำกรองยังอยู่ในฟีดครบ
-            และ<strong>ไม่มีการตอบอัตโนมัติไม่ว่ากรณีใด</strong>
+            💡 คอมเมนต์ที่มีคำเหล่านี้จะถูกไฮไลต์ให้เห็นก่อนในฟีด และสามารถตั้งเงื่อนไขให้บอทคอมเมนต์ตอบเฉพาะคำเหล่านี้ได้ที่หน้า{' '}
+            <Link href="/settings/autoreply?tab=comments" className="text-primary underline underline-offset-2">
+              ตั้งค่าแชทบอท
+            </Link>
           </p>
         </div>
 

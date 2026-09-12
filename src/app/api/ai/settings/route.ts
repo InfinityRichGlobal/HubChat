@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAdmin, requireOwner } from '@/lib/auth/current-admin';
 import { ok, toErrorResponse } from '@/lib/api';
 import { getAiSettings } from '@/server/ai/gemini';
+import { getCommentBotSettings, saveCommentBotSettings } from '@/server/comments/bot';
 import { saveRuntimeSetting } from '@/server/settings/service';
 
 export const runtime = 'nodejs';
@@ -22,7 +23,12 @@ const updateSchema = z.object({
 export async function GET() {
   try {
     await requireAdmin();
-    const settings = await getAiSettings();
+    const [settings, botSettings] = await Promise.all([
+      getAiSettings(),
+      getCommentBotSettings().catch(() => null),
+    ]);
+    const isAutoReplyOn = botSettings ? botSettings.auto_reply_public : settings.autoReplyComments;
+
     return ok({
       hasApiKey: Boolean(settings.apiKey),
       hintLast4: settings.apiKey ? settings.apiKey.slice(-4) : null,
@@ -30,7 +36,7 @@ export async function GET() {
       knowledge: settings.knowledge,
       model: settings.model,
       temperature: settings.temperature,
-      autoReplyComments: settings.autoReplyComments,
+      autoReplyComments: isAutoReplyOn,
       enableCommentSuggest: settings.enableCommentSuggest,
       enableChatAssist: settings.enableChatAssist,
     });
@@ -61,6 +67,16 @@ export async function POST(req: NextRequest) {
     }
     if (body.autoReplyComments !== undefined) {
       await saveRuntimeSetting(admin, 'AI_AUTO_REPLY_COMMENTS', body.autoReplyComments ? 'on' : 'off');
+      try {
+        const botSettings = await getCommentBotSettings();
+        botSettings.auto_reply_public = body.autoReplyComments;
+        if (body.autoReplyComments) {
+          botSettings.reply_mode = 'ai';
+        }
+        await saveCommentBotSettings(admin, botSettings);
+      } catch (botErr) {
+        console.warn('[ai-settings] ซิงค์กับ comment_bot_settings ไม่สำเร็จ:', botErr);
+      }
     }
     if (body.enableCommentSuggest !== undefined) {
       await saveRuntimeSetting(admin, 'AI_ENABLE_COMMENT_SUGGEST', body.enableCommentSuggest ? 'on' : 'off');

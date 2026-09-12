@@ -8,6 +8,7 @@ import {
 describe('CommentBotSettingsSchema', () => {
   it('มีค่าเริ่มต้นที่ถูกต้องและปลอดภัย', () => {
     const parsed = CommentBotSettingsSchema.parse({});
+    expect(parsed.reply_mode).toBe('ai');
     expect(parsed.auto_like).toBe(false);
     expect(parsed.auto_reply_public).toBe(false);
     expect(parsed.auto_reply_private).toBe(false);
@@ -19,6 +20,7 @@ describe('CommentBotSettingsSchema', () => {
 
   it('ยอมรับการตั้งค่าที่ถูกต้อง', () => {
     const custom: CommentBotSettings = {
+      reply_mode: 'ai',
       auto_like: true,
       auto_reply_public: true,
       public_reply_template: 'สวัสดีค่ะคุณ {name}',
@@ -39,6 +41,7 @@ describe('CommentBotSettingsSchema', () => {
       ],
     };
     const parsed = CommentBotSettingsSchema.parse(custom);
+    expect(parsed.reply_mode).toBe('ai');
     expect(parsed.auto_like).toBe(true);
     expect(parsed.rules).toHaveLength(1);
     expect(parsed.rules[0].keyword).toBe('ราคา');

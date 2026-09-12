@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Sparkles, Key, Bot, BookOpen, Sliders, Play, Save, Check,
   ExternalLink, Loader2, RefreshCw, AlertCircle, MessageSquare,
@@ -390,11 +391,18 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
           </div>
 
           <div className="flex items-center justify-between py-3">
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-1">
               <span className="text-sm font-medium">ตอบคอมเมนต์อัตโนมัติ (AI Auto-Reply)</span>
               <span className="text-xs text-muted-foreground">
-                เมื่อมีคอมเมนต์ใหม่เข้ามา ให้ AI คิดคำตอบและตอบกลับใต้โพสต์ทันทีโดยไม่ต้องรอแอดมิน
+                เมื่อมีคอมเมนต์ใหม่เข้ามา ให้ AI นำคลังความรู้มาคิดคำตอบและตอบกลับใต้โพสต์ทันที (เชื่อมโยงกับบอทคอมเมนต์)
               </span>
+              <Link
+                href="/settings/autoreply?tab=comments"
+                className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-2 hover:opacity-80 mt-0.5"
+              >
+                <Sliders className="size-3" />
+                ตั้งค่าเงื่อนไขบอทคอมเมนต์เพิ่มเติม (กดไลก์ / ดึงเข้าแชท / กรองคำ)
+              </Link>
             </div>
             <Switch checked={autoReplyComments} onCheckedChange={setAutoReplyComments} />
           </div>

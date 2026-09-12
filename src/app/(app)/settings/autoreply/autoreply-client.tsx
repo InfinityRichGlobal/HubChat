@@ -7,11 +7,15 @@
  * แท็บ 2: 📝 บอทคอมเมนต์ — ไลฟ์คอมเมนต์ ตอบใต้โพสต์ ดึงเข้าแชทส่วนตัว พร้อมตัวกรองคำ
  */
 
-import { useCallback, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState, useTransition } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Archive,
+  ArrowRight,
   Bot,
+  Brain,
+  Check,
   CornerDownRight,
   Edit2,
   Filter,
@@ -100,10 +104,34 @@ export default function AutoReplyClient({
   pages: PageInfo[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
 
   // แท็บหลัก: 'chat' (บอทแชท) หรือ 'comments' (บอทคอมเมนต์)
-  const [activeTab, setActiveTab] = useState<'chat' | 'comments'>('chat');
+  const initialTab = searchParams.get('tab') === 'comments' ? 'comments' : 'chat';
+  const [activeTab, setActiveTab] = useState<'chat' | 'comments'>(initialTab);
+
+  // ข้อมูล AI สำหรับแสดงผลในหน้าบอทคอมเมนต์
+  const [aiInfo, setAiInfo] = useState<{
+    hasApiKey: boolean;
+    model: string;
+    hasKnowledge: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/ai/settings', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.ok && json.data) {
+          setAiInfo({
+            hasApiKey: json.data.hasApiKey,
+            model: json.data.model || 'gemini-3.6-flash',
+            hasKnowledge: Boolean(json.data.knowledge?.trim()),
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // ---------- ข้อมูลบอทแชท ----------
   const [rules, setRules] = useState(initialRules);
@@ -482,6 +510,94 @@ export default function AutoReplyClient({
               </Button>
             </div>
 
+            {/* โหมดสมองการตอบ (AI vs Template) */}
+            <div className="mt-4 rounded-xl border bg-muted/20 p-3.5 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-4 text-orange-500" />
+                  <span className="text-sm font-semibold text-foreground">สมองในการคิดคำตอบ:</span>
+                </div>
+                {aiInfo && (
+                  <Badge variant={aiInfo.hasApiKey ? 'default' : 'destructive'} className="text-[10px] gap-1 h-5">
+                    {aiInfo.hasApiKey ? (
+                      <>
+                        <Check className="size-2.5" />
+                        เชื่อมต่อ {aiInfo.model}
+                      </>
+                    ) : (
+                      'ยังไม่ตั้ง Gemini API Key'
+                    )}
+                  </Badge>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBotSettings((prev) => ({ ...prev, reply_mode: 'ai' }))}
+                  disabled={!canManage}
+                  className={cn(
+                    'flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all',
+                    botSettings.reply_mode === 'ai'
+                      ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/20 text-foreground ring-1 ring-orange-500'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                    <span>🤖</span>
+                    <span>ใช้สมอง AI (Gemini) อัจฉริยะ</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-orange-400 text-orange-600 dark:text-orange-400">แนะนำ</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    ตอบคำถามลูกค้าตามคลังความรู้สินค้าและนโยบายร้านจริงอย่างสุภาพ ไม่ตอบซ้ำเป็นหุ่นยนต์
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBotSettings((prev) => ({ ...prev, reply_mode: 'template' }))}
+                  disabled={!canManage}
+                  className={cn(
+                    'flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all',
+                    botSettings.reply_mode === 'template'
+                      ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/20 text-foreground ring-1 ring-orange-500'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                    <span>📝</span>
+                    <span>ใช้ข้อความตายตัว (Template)</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    ตอบด้วยข้อความตายตัวเดิมทุกคอมเมนต์ตามแม่แบบที่ระบุด้านล่าง
+                  </p>
+                </button>
+              </div>
+
+              {botSettings.reply_mode === 'ai' && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200/60 bg-background p-2.5 text-xs text-muted-foreground">
+                  <span className="text-[11px]">
+                    {aiInfo?.hasKnowledge
+                      ? '✨ AI พร้อมใช้งาน: อ้างอิงคำตอบจากคลังความรู้สินค้าของร้าน'
+                      : '⚠️ ยังไม่มีข้อมูลในคลังความรู้: AI จะตอบทั่วไปอย่างสุภาพ'}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    asChild
+                    className="h-6 text-[11px] text-primary hover:text-primary gap-1"
+                  >
+                    <Link href="/settings/ai">
+                      <Brain className="size-3" />
+                      ปรับแต่งคลังความรู้ AI
+                      <ArrowRight className="size-3" />
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {/* กลุ่มสวิตช์ควบคุม */}
             <div className="mt-3 flex flex-col divide-y divide-border">
               {/* 1. กดไลก์อัตโนมัติ */}
@@ -513,15 +629,26 @@ export default function AutoReplyClient({
                   />
                 </div>
                 {botSettings.auto_reply_public && (
-                  <Textarea
-                    value={botSettings.public_reply_template}
-                    onChange={(e) =>
-                      setBotSettings((prev) => ({ ...prev, public_reply_template: e.target.value }))
-                    }
-                    placeholder="ข้อความตอบคอมเมนต์ (สาธารณะ) — ใช้ {name} แทนชื่อผู้คอมเมนต์ได้ · ถ้ามีกติกา keyword ตรงกัน จะใช้ข้อความจากกติกาแทน"
-                    className="min-h-[76px] resize-none text-xs leading-relaxed"
-                    disabled={!canManage}
-                  />
+                  <div className="flex flex-col gap-1.5">
+                    <Textarea
+                      value={botSettings.public_reply_template}
+                      onChange={(e) =>
+                        setBotSettings((prev) => ({ ...prev, public_reply_template: e.target.value }))
+                      }
+                      placeholder={
+                        botSettings.reply_mode === 'ai'
+                          ? 'ข้อความสำรอง (Fallback) กรณี AI ขัดข้อง — ใช้ {name} แทนชื่อผู้คอมเมนต์ได้'
+                          : 'ข้อความตอบคอมเมนต์ (สาธารณะ) — ใช้ {name} แทนชื่อผู้คอมเมนต์ได้ · ถ้ามีกติกา keyword ตรงกัน จะใช้ข้อความจากกติกาแทน'
+                      }
+                      className="min-h-[76px] resize-none text-xs leading-relaxed"
+                      disabled={!canManage}
+                    />
+                    {botSettings.reply_mode === 'ai' && (
+                      <p className="text-[11px] text-muted-foreground">
+                        💡 ในโหมด AI: ระบบจะให้ Gemini คิดคำตอบตามคำถามจริงของลูกค้าใต้โพสต์ก่อนเสมอ หาก AI ขัดข้องหรือเกินโควต้าจึงจะส่งข้อความสำรองนี้
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -540,15 +667,26 @@ export default function AutoReplyClient({
                   />
                 </div>
                 {botSettings.auto_reply_private && (
-                  <Textarea
-                    value={botSettings.private_reply_template}
-                    onChange={(e) =>
-                      setBotSettings((prev) => ({ ...prev, private_reply_template: e.target.value }))
-                    }
-                    placeholder="ข้อความส่งเข้าแชทส่วนตัว (ว่าง = ใช้ข้อความตอบคอมเมนต์)"
-                    className="min-h-[76px] resize-none text-xs leading-relaxed"
-                    disabled={!canManage}
-                  />
+                  <div className="flex flex-col gap-1.5">
+                    <Textarea
+                      value={botSettings.private_reply_template}
+                      onChange={(e) =>
+                        setBotSettings((prev) => ({ ...prev, private_reply_template: e.target.value }))
+                      }
+                      placeholder={
+                        botSettings.reply_mode === 'ai'
+                          ? 'ข้อความสำรอง (Fallback) สำหรับส่งเข้าแชทส่วนตัว กรณี AI ขัดข้อง'
+                          : 'ข้อความส่งเข้าแชทส่วนตัว (ว่าง = ใช้ข้อความตอบคอมเมนต์)'
+                      }
+                      className="min-h-[76px] resize-none text-xs leading-relaxed"
+                      disabled={!canManage}
+                    />
+                    {botSettings.reply_mode === 'ai' && (
+                      <p className="text-[11px] text-muted-foreground">
+                        💡 ในโหมด AI: ระบบจะให้ Gemini สร้างข้อความทักทายต้อนรับเข้าแชทที่สุภาพ เป็นมิตร และให้ข้อมูลสินค้าแก่ลูกค้า
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
