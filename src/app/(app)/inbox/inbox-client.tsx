@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, ArrowDown, Check, CheckCheck, ChevronDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
-  Bot, CheckCircle2, Handshake, Inbox, Layers, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
+  Bot, CheckCircle2, Clock, Handshake, Inbox, Layers, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
   Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShieldAlert, ShoppingBag, ShoppingCart,
   SlidersHorizontal, Sparkles, Star, User, UserCheck, Tag as TagIcon, Video, X,
 } from 'lucide-react';
@@ -284,6 +284,20 @@ export default function InboxClient({
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const q = sp.get('search');
+      if (q) setSearch(q);
+    }
+    const handleCustomSearch = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      setSearch(customEvent.detail ?? '');
+    };
+    window.addEventListener('hubchat:search', handleCustomSearch);
+    return () => window.removeEventListener('hubchat:search', handleCustomSearch);
+  }, []);
   const [inboxGroup, setInboxGroup] = useState<InboxGroup>('all');
   const [orderFilter, setOrderFilter] = useState<OrderFilterGroup>('all');
   const [assignedAdminFilter, setAssignedAdminFilter] = useState<string>('all');
@@ -467,11 +481,12 @@ export default function InboxClient({
   }, [conversations, orderFilter, assignedAdminFilter, platformFilter]);
 
   return (
-    <div className="flex h-[calc(100dvh-9rem)] w-full gap-3 md:h-[calc(100dvh-6rem)]">
+    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] w-full gap-3 md:h-[calc(100dvh-6rem)]">
       {/* ---------------- ลิสต์แชท ---------------- */}
       <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', active && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">
-          <div className="relative">
+          {/* ช่องค้นหาเดสก์ท็อป */}
+          <div className="relative hidden md:block">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
@@ -480,6 +495,21 @@ export default function InboxClient({
               className="pl-8"
             />
           </div>
+
+          {/* ป้ายแสดงผลการค้นหาบนมือถือ */}
+          {search && (
+            <div className="flex items-center justify-between rounded-md bg-primary/10 px-2.5 py-1 text-xs text-primary md:hidden">
+              <span className="truncate">ค้นหา: &quot;{search}&quot;</span>
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="ml-2 shrink-0 rounded p-0.5 hover:bg-primary/20"
+                aria-label="ล้างคำค้นหา"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             {/* 1. ปุ่มตัวกรองหลัก */}
@@ -1804,20 +1834,37 @@ function ChatRoom({
               {c.order_count > 0 && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white"><ShoppingCart className="size-3" />{c.order_count}</span>}
               {c.order_count > 0 && <Star className="mt-0.5 size-4 shrink-0 fill-amber-500 text-amber-500" aria-label="ติดตามผล" />}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5 font-medium">
-                <PlatformIcon platform={c.page.platform} size="xs" />
-                <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: c.page.tag_color }} />
-                {(c.page.platform as string) === 'instagram' ? 'Instagram' : (c.page.platform as string) === 'line' ? 'LINE' : 'Messenger'} · {c.page.name}
-              </span>
-              {c.username && <span>@{c.username}</span>}
-              {c.phone && <button type="button" className="inline-flex items-center gap-1 underline decoration-dotted" onClick={() => void copyText(c.phone!).then((done) => done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'))}><Phone className="size-3" />{c.phone}</button>}
-              {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <PlatformIcon platform={c.page.platform} size="xs" />
+                  <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: c.page.tag_color }} />
+                  {(c.page.platform as string) === 'instagram' ? 'Instagram' : (c.page.platform as string) === 'line' ? 'LINE' : 'Messenger'} · {c.page.name}
+                </span>
+                {c.username && <span>@{c.username}</span>}
+                {c.phone && <button type="button" className="inline-flex items-center gap-1 underline decoration-dotted" onClick={() => void copyText(c.phone!).then((done) => done ? toast.success('คัดลอกเบอร์แล้ว') : toast.error('คัดลอกไม่สำเร็จ'))}><Phone className="size-3" />{c.phone}</button>}
+                {!hasRealName(c) && <RefreshNameButton conversationId={c.id} reason={c.profile_error_th} />}
+              </div>
+
+              {/* ย้ายป้าย "ตอบได้อีก XX ชม." มาไว้มุมขวา บรรทัดเดียวกันข้างชื่อเพจ */}
+              {replyHint && (!policy || policy.can_send) && (
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 shadow-2xs',
+                    replyHint.tone === 'warn' && 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300',
+                    replyHint.tone === 'over' && 'bg-destructive/15 text-destructive',
+                    replyHint.tone === 'ok' && 'bg-muted text-muted-foreground',
+                  )}
+                >
+                  <Clock className="size-3" />
+                  {replyHint.text}
+                </span>
+              )}
             </div>
           </div>
         </div>
 
-        {policy && !policy.can_send ? (
+        {policy && !policy.can_send && (
           <button
             type="button"
             onClick={() => toast.error(policy.detail_th ?? policy.label_th, {
@@ -1832,16 +1879,7 @@ function ChatRoom({
               {replyHint && <span className="block text-[11px] opacity-80">{replyHint.text}</span>}
             </span>
           </button>
-        ) : replyHint ? (
-          <div className={cn(
-            'mt-2 flex items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs',
-            replyHint.tone === 'warn' && 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
-            replyHint.tone === 'over' && 'bg-destructive/10 text-destructive',
-          )}>
-            <MessageSquareOff className="size-4 shrink-0" />
-            <span>{replyHint.text}</span>
-          </div>
-        ) : null}
+        )}
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-0 md:pl-12" aria-label="การทำงานของห้องแชท">
           {canReply && <Button variant={c.is_important ? 'secondary' : 'outline'} size="icon" className="size-9" disabled={stateBusy} aria-label={c.is_important ? 'ยกเลิกสำคัญ' : 'ทำเครื่องหมายว่าสำคัญ'} title={c.is_important ? 'ยกเลิกสำคัญ' : 'สำคัญ'} onClick={() => void changeInboxState({ action: 'important', value: !c.is_important }, c.is_important ? 'นำออกจากกลุ่มสำคัญแล้ว' : 'เพิ่มในกลุ่มสำคัญแล้ว')}><Star className={cn('size-4', c.is_important && 'fill-amber-500 text-amber-500')} /></Button>}

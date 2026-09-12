@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ImageIcon, Loader2, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
+import { Check, ImageIcon, Images, Loader2, Plus, Tag as TagIcon, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +12,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import SettingsBackButton from '@/components/settings-back-button';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { CannedResponse, Tag } from '@/server/content/service';
 
@@ -36,6 +37,43 @@ export default function ContentClient({
   const [tagColor, setTagColor] = useState('#64748b');
   const [busy, setBusy] = useState(false);
   const [imageUrls, setImageUrls] = useState('');
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [libraryItems, setLibraryItems] = useState<Array<{ id: string; preview_url: string; public_url: string | null; mime?: string }>>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
+
+  async function openMediaPicker() {
+    setMediaPickerOpen(true);
+    if (libraryItems.length === 0) {
+      setLoadingLibrary(true);
+      try {
+        const res = await fetch('/api/media-library?for_picker=1');
+        const json = await res.json();
+        if (json.ok && json.data?.items) {
+          const imgs = json.data.items.filter((it: { mime: string }) => !it.mime.startsWith('video/'));
+          setLibraryItems(imgs);
+        }
+      } catch {
+        toast.error('โหลดคลังรูปภาพไม่สำเร็จ');
+      } finally {
+        setLoadingLibrary(false);
+      }
+    }
+  }
+
+  function handleSelectFromLibrary(item: { id: string; preview_url: string; public_url: string | null }) {
+    const url = item.public_url || (typeof window !== 'undefined' ? `${window.location.origin}/api/media/${item.id}` : item.preview_url);
+    setImageUrls((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return url;
+      const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.includes(url)) {
+        toast.info('รูปนี้อยู่ในรายการแล้ว');
+        return prev;
+      }
+      return `${trimmed}\n${url}`;
+    });
+    toast.success('เพิ่มรูปลงในชุดคำตอบแล้ว');
+  }
 
   async function call(url: string, init: RequestInit, successMsg?: string) {
     try {
@@ -289,7 +327,21 @@ export default function ContentClient({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="image_urls" className="flex items-center gap-1.5"><ImageIcon className="size-4" /> รูปประกอบ (อย่างน้อย 1 รูป)</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="image_urls" className="flex items-center gap-1.5">
+                    <ImageIcon className="size-4" /> รูปประกอบ (อย่างน้อย 1 รูป)
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    onClick={() => void openMediaPicker()}
+                  >
+                    <Images className="size-3.5" />
+                    เลือกจากคลังสื่อ
+                  </Button>
+                </div>
                 <textarea
                   id="image_urls"
                   rows={3}
@@ -297,10 +349,9 @@ export default function ContentClient({
                   value={imageUrls}
                   onChange={(event) => setImageUrls(event.target.value)}
                   className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  placeholder={'วางลิงก์รูปสาธารณะ รูปละ 1 บรรทัด\nhttps://.../product.jpg'}
+                  placeholder={'วางลิงก์รูป หรือกดปุ่ม "เลือกจากคลังสื่อ" ด้านบน\nhttps://.../product.jpg'}
                 />
-                <p className="text-xs text-muted-foreground">หลังตั้งค่า R2 แล้ว หน้าคลังสื่อจะช่วยอัปโหลดและเลือกซ้ำได้ง่ายขึ้น</p>
-                <div className="flex gap-2 overflow-x-auto">
+                <div className="flex gap-2 overflow-x-auto pt-1">
                   {imageUrls.split('\n').map((url) => url.trim()).filter(Boolean).slice(0, 10).map((url) => (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img key={url} src={url} alt="ภาพพรีวิว" className="size-20 shrink-0 rounded-md border object-cover" />
@@ -345,6 +396,61 @@ export default function ContentClient({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ------------------ กล่องเลือกภาพจากคลังสื่อ ------------------ */}
+      <Dialog open={mediaPickerOpen} onOpenChange={setMediaPickerOpen}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>เลือกภาพจากคลังสื่อ</DialogTitle>
+            <DialogDescription>แตะรูปที่ต้องการนำมาใส่ในชุดคำตอบ (แตะเลือกได้หลายรูป)</DialogDescription>
+          </DialogHeader>
+
+          {loadingLibrary ? (
+            <div className="flex justify-center p-8">
+              <Loader2 className="size-6 animate-spin text-primary" />
+            </div>
+          ) : libraryItems.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              ยังไม่มีรูปภาพในคลังสื่อ (สามารถไปเพิ่มรูปได้ที่เมนูคลังสื่อ)
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5 py-2">
+              {libraryItems.map((item) => {
+                const targetUrl = item.public_url || (typeof window !== 'undefined' ? `${window.location.origin}/api/media/${item.id}` : item.preview_url);
+                const isAlreadySelected = imageUrls.split('\n').map((l) => l.trim()).includes(targetUrl);
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectFromLibrary(item)}
+                    className={cn(
+                      'group relative aspect-square rounded-lg border overflow-hidden hover:opacity-90 transition-all focus-visible:ring-2 focus-visible:ring-ring',
+                      isAlreadySelected ? 'ring-2 ring-primary border-primary' : '',
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.preview_url} alt="" className="size-full object-cover" />
+                    {isAlreadySelected && (
+                      <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                        <div className="rounded-full bg-primary p-1 text-primary-foreground shadow-sm">
+                          <Check className="size-4" />
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button type="button" onClick={() => setMediaPickerOpen(false)}>
+              เสร็จสิ้น
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

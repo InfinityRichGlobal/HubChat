@@ -14,6 +14,8 @@ import {
   Plus,
   Trash2,
   Video,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -49,6 +51,16 @@ type Item = {
 
 const DEFAULT_ALBUMS = ['โปรโมชั่น', 'สินค้า', 'รีวิว / สลิป', 'วิดีโอ', 'ระบบ', 'ทั่วไป'] as const;
 
+type UploadTask = {
+  id: string;
+  name: string;
+  size: number;
+  previewUrl: string;
+  isVideo: boolean;
+  status: 'uploading' | 'done' | 'error';
+  error?: string;
+};
+
 export default function MediaClient({
   initialItems,
   canManage,
@@ -58,6 +70,7 @@ export default function MediaClient({
 }) {
   const [items, setItems] = useState(initialItems);
   const [busy, setBusy] = useState(false);
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [albums, setAlbums] = useState<string[]>([...DEFAULT_ALBUMS]);
   const [activeTab, setActiveTab] = useState<string>('ทั้งหมด');
   const [itemCategories, setItemCategories] = useState<Record<string, string[]>>({});
@@ -183,25 +196,17 @@ export default function MediaClient({
     toast.success(`ลบอัลบั้ม "${albumName}" เรียบร้อย`);
   }
 
-  function toggleCategoryForItem(id: string, cat: string) {
+  function setCategoryForItem(id: string, cat: string) {
     setItemCategories((prev) => {
       const item = items.find((x) => x.id === id);
       const isVideo = item?.mime.startsWith('video/');
-      const current = prev[id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
+      const currentCats = prev[id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
+      const current = currentCats[0] ?? (isVideo ? 'วิดีโอ' : 'ทั่วไป');
 
-      let nextCats: string[];
-      if (current.includes(cat)) {
-        // หากคลิกอัลบั้มที่มีอยู่แล้ว ให้ถอดออก (แต่ถ้าเหลือ 0 ให้ใส่ 'ทั่วไป' หรือ 'วิดีโอ')
-        nextCats = current.filter((c) => c !== cat);
-        if (nextCats.length === 0) nextCats = isVideo ? ['วิดีโอ'] : ['ทั่วไป'];
-      } else {
-        // เพิ่มเข้าไป (รูปอยู่ได้หลายอัลบั้ม)
-        nextCats = [...current, cat];
-      }
-
-      const next = { ...prev, [id]: nextCats };
+      const nextCat = current === cat ? (isVideo ? 'วิดีโอ' : 'ทั่วไป') : cat;
+      const next = { ...prev, [id]: [nextCat] };
       void syncSettings(undefined, next);
-      toast.success(nextCats.includes(cat) ? `เพิ่มเข้าอัลบั้ม "${cat}" แล้ว` : `นำออกจากอัลบั้ม "${cat}" แล้ว`);
+      toast.success(`ย้ายรูปไปอัลบั้ม "${nextCat}" เรียบร้อย`);
       return next;
     });
   }
@@ -277,14 +282,13 @@ export default function MediaClient({
 
     const newId = compJson.data?.id;
 
-    // 4. จัดหมวดหมู่อัตโนมัติ: วิดีโอจับลง "วิดีโอ" เสมอ, อื่นๆ ลง activeTab หรือ "ทั่วไป"
+    // 4. จัดหมวดหมู่อัตโนมัติ: ภาพ 1 ภาพอยู่ได้ 1 อัลบั้ม
     if (newId) {
-      let initialCats = isVideo ? ['วิดีโอ'] : ['ทั่วไป'];
-      if (activeTab !== 'ทั้งหมด' && !initialCats.includes(activeTab)) {
-        initialCats = [...initialCats, activeTab];
-      }
+      const initialCat = isVideo && activeTab === 'ทั้งหมด'
+        ? 'วิดีโอ'
+        : (activeTab !== 'ทั้งหมด' ? activeTab : (isVideo ? 'วิดีโอ' : 'ทั่วไป'));
       setItemCategories((prev) => {
-        const next = { ...prev, [newId]: initialCats };
+        const next = { ...prev, [newId]: [initialCat] };
         void syncSettings(undefined, next);
         return next;
       });
@@ -297,16 +301,31 @@ export default function MediaClient({
     if (!files || files.length === 0) return;
     const fileList = Array.from(files);
     setBusy(true);
+
+    const initialTasks: UploadTask[] = fileList.map((file, i) => ({
+      id: `${Date.now()}-${i}-${file.name}`,
+      name: file.name,
+      size: file.size,
+      previewUrl: URL.createObjectURL(file),
+      isVideo: file.type.startsWith('video/'),
+      status: 'uploading',
+    }));
+    setUploadTasks((prev) => [...initialTasks, ...prev]);
+
     let successCount = 0;
     try {
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
+        const taskId = initialTasks[i].id;
         try {
           await uploadDirect(file);
           successCount++;
+          setUploadTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'done' } : t));
         } catch (err) {
           console.error(`[upload error] ${file.name}:`, err);
-          toast.error(`${file.name}: ${err instanceof Error ? err.message : 'อัปโหลดล้มเหลว'}`);
+          const msg = err instanceof Error ? err.message : 'อัปโหลดล้มเหลว';
+          setUploadTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'error', error: msg } : t));
+          toast.error(`${file.name}: ${msg}`);
         }
       }
       if (successCount > 0) {
@@ -355,6 +374,27 @@ export default function MediaClient({
     return cats.includes(activeTab);
   });
 
+  const previewIndex = previewItem ? displayedItems.findIndex((it) => it.id === previewItem.id) : -1;
+  const hasPrev = previewIndex > 0;
+  const hasNext = previewIndex >= 0 && previewIndex < displayedItems.length - 1;
+
+  const goToPrev = () => {
+    if (hasPrev) setPreviewItem(displayedItems[previewIndex - 1]);
+  };
+  const goToNext = () => {
+    if (hasNext) setPreviewItem(displayedItems[previewIndex + 1]);
+  };
+
+  useEffect(() => {
+    if (!previewItem) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') goToPrev();
+      else if (e.key === 'ArrowRight') goToNext();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewItem, previewIndex, displayedItems]);
+
   return (
     <Card className="flex flex-col gap-4">
       <CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-2">
@@ -402,6 +442,55 @@ export default function MediaClient({
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {/* --- แสดงรายการกำลังอัปโหลดพร้อม Thumbnail --- */}
+        {uploadTasks.length > 0 && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-foreground flex items-center gap-1.5">
+                {busy ? <Loader2 className="size-3.5 animate-spin text-primary" /> : <Check className="size-3.5 text-green-600" />}
+                {busy ? `กำลังอัปโหลด ${uploadTasks.filter((t) => t.status === 'uploading').length} รายการ...` : 'การอัปโหลดเสร็จสิ้น'}
+              </span>
+              {!busy && (
+                <Button variant="ghost" size="sm" className="h-6 text-[11px] px-2" onClick={() => setUploadTasks([])}>
+                  ปิดแถบนี้
+                </Button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              {uploadTasks.map((task) => (
+                <div key={task.id} className="relative flex flex-col rounded-md border bg-background overflow-hidden p-1.5 text-xs">
+                  <div className="relative aspect-square w-full rounded bg-muted overflow-hidden flex items-center justify-center">
+                    {task.isVideo ? (
+                      <video src={task.previewUrl} className="size-full object-cover" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={task.previewUrl} alt="" className="size-full object-cover" />
+                    )}
+                    {task.status === 'uploading' && (
+                      <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-1 text-white">
+                        <Loader2 className="size-5 animate-spin" />
+                        <span className="text-[10px]">กำลังส่ง...</span>
+                      </div>
+                    )}
+                    {task.status === 'done' && (
+                      <div className="absolute bottom-1 right-1 rounded-full bg-green-500 text-white p-0.5 shadow-sm">
+                        <Check className="size-3" />
+                      </div>
+                    )}
+                    {task.status === 'error' && (
+                      <div className="absolute inset-0 bg-red-500/50 flex items-center justify-center text-white font-bold text-xs p-1 text-center">
+                        ล้มเหลว
+                      </div>
+                    )}
+                  </div>
+                  <span className="truncate mt-1 font-medium text-[11px]">{task.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{(task.size / 1024 / 1024).toFixed(1)} MB</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* --- แถบอัลบั้ม / หมวดหมู่ --- */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b">
           <button
@@ -682,21 +771,55 @@ export default function MediaClient({
       <Dialog open={!!previewItem} onOpenChange={(o) => !o && setPreviewItem(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>พรีวิวไฟล์สื่อ</DialogTitle>
+            <DialogTitle className="flex items-center justify-between text-base">
+              <span>พรีวิวไฟล์สื่อ</span>
+              {previewIndex >= 0 && (
+                <span className="text-xs font-normal text-muted-foreground mr-6">
+                  รูปที่ {previewIndex + 1} จาก {displayedItems.length}
+                </span>
+              )}
+            </DialogTitle>
           </DialogHeader>
 
           {previewItem && (
             <div className="space-y-4">
-              <div className="flex justify-center bg-black/5 rounded-lg overflow-hidden max-h-[55vh]">
+              <div className="relative flex items-center justify-center bg-black/5 rounded-lg overflow-hidden max-h-[55vh]">
+                {hasPrev && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="absolute left-2 z-10 size-9 rounded-full bg-background/80 hover:bg-background shadow-md backdrop-blur-xs"
+                    onClick={goToPrev}
+                    title="รูปก่อนหน้า (ปุ่มลูกศรซ้าย)"
+                  >
+                    <ChevronLeft className="size-5" />
+                  </Button>
+                )}
+
                 {previewItem.mime.startsWith('video/') ? (
-                  <video src={previewItem.preview_url} controls autoPlay className="max-h-[55vh] max-w-full" />
+                  <video key={previewItem.id} src={previewItem.preview_url} controls autoPlay className="max-h-[55vh] max-w-full" />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
+                    key={previewItem.id}
                     src={previewItem.preview_url}
                     alt="พรีวิวขนาดใหญ่"
                     className="max-h-[55vh] w-auto object-contain rounded"
                   />
+                )}
+
+                {hasNext && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="absolute right-2 z-10 size-9 rounded-full bg-background/80 hover:bg-background shadow-md backdrop-blur-xs"
+                    onClick={goToNext}
+                    title="รูปถัดไป (ปุ่มลูกศรขวา)"
+                  >
+                    <ChevronRight className="size-5" />
+                  </Button>
                 )}
               </div>
 
@@ -708,16 +831,17 @@ export default function MediaClient({
                   </p>
                 </div>
 
-                {/* จัดการอัลบั้ม (อยู่ได้มากกว่า 1 อัลบั้ม) */}
+                {/* จัดการอัลบั้ม (ภาพ 1 ภาพอยู่ได้ 1 อัลบั้ม) */}
                 <div className="space-y-1.5">
                   <div className="text-xs font-medium text-foreground">
-                    เลือกอัลบั้ม (คลิกเพื่อเพิ่ม/ถอด — รูปอยู่ได้หลายอัลบั้ม):
+                    อัลบั้ม (ภาพ 1 ภาพอยู่ได้ 1 อัลบั้ม):
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {albums.map((cat) => {
                       const isVideo = previewItem.mime.startsWith('video/');
                       const currentCats = itemCategories[previewItem.id] ?? (isVideo ? ['วิดีโอ'] : ['ทั่วไป']);
-                      const isSelected = currentCats.includes(cat);
+                      const currentCat = currentCats[0] ?? (isVideo ? 'วิดีโอ' : 'ทั่วไป');
+                      const isSelected = currentCat === cat;
 
                       return (
                         <Button
@@ -725,8 +849,8 @@ export default function MediaClient({
                           type="button"
                           size="sm"
                           variant={isSelected ? 'default' : 'outline'}
-                          className="h-7 text-xs px-2.5 gap-1"
-                          onClick={() => toggleCategoryForItem(previewItem.id, cat)}
+                          className={cn('h-7 text-xs px-2.5 gap-1', isSelected && 'font-semibold')}
+                          onClick={() => setCategoryForItem(previewItem.id, cat)}
                         >
                           {isSelected && <Check className="size-3" />}
                           <span>{cat}</span>
