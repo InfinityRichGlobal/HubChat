@@ -114,6 +114,7 @@ export default function CommentsClient({
   const [selectedPageId, setSelectedPageId] = useState<string>('all');
   const [unhandledOnly, setUnhandledOnly] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [botSettings, setBotSettings] = useState<CommentBotSettings | null>(null);
 
   useEffect(() => {
@@ -122,10 +123,11 @@ export default function CommentsClient({
     });
   }, []);
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (sync = false): Promise<void> => {
     const params = new URLSearchParams();
     if (unhandledOnly) params.set('unhandled', '1');
     if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
+    if (sync) params.set('sync', '1');
     const d = await api<Feed & { filter_words: string[] }>(`/api/comments?${params.toString()}`);
     if (d) {
       setFeed({ comments: d.comments, has_more: d.has_more, unhandled_count: d.unhandled_count });
@@ -133,13 +135,17 @@ export default function CommentsClient({
     }
   }, [unhandledOnly, selectedPageId]);
 
-  /* ---- ดึงซ้ำเป็นระยะ ---- */
+  /* ---- ดึงซ้ำเป็นระยะ พร้อมซิงค์สดจาก Meta ทุก 30 วินาที ---- */
   useEffect(() => {
     let alive = true;
+    let pollCount = 0;
     const apply = () => {
-      if (alive) void load();
+      if (!alive) return;
+      pollCount++;
+      const shouldSync = pollCount % 5 === 0;
+      void load(shouldSync);
     };
-    const first = setTimeout(apply, 0);
+    const first = setTimeout(() => void load(true), 0);
     const timer = setInterval(apply, POLL_MS);
     return () => {
       alive = false;
@@ -147,6 +153,18 @@ export default function CommentsClient({
       clearInterval(timer);
     };
   }, [load]);
+
+  const handleManualRefresh = async () => {
+    setSyncing(true);
+    try {
+      await load(true);
+      toast.success('ดึงและซิงค์คอมเมนต์ล่าสุดจาก Facebook / Instagram แล้ว');
+    } catch {
+      toast.error('รีเฟรชข้อมูลไม่สำเร็จ');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const replaceComment = useCallback((c: CommentRow) => {
     setFeed((prev) => ({
@@ -168,9 +186,16 @@ export default function CommentsClient({
             รวบรวมคอมเมนต์จาก Facebook และ Instagram ในที่เดียว · รอจัดการ {feed.unhandled_count} รายการ
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="gap-1.5 h-8 text-xs">
-          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-          รีเฟรช
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleManualRefresh()}
+          disabled={loading || syncing}
+          className="gap-1.5 h-8 text-xs font-medium rounded-lg"
+          title="กดเพื่อดึงคอมเมนต์ใหม่ล่าสุดจาก Facebook และ Instagram"
+        >
+          <RefreshCw className={cn('size-3.5', (loading || syncing) && 'animate-spin')} />
+          {syncing ? 'กำลังดึง...' : 'รีเฟรช'}
         </Button>
       </div>
 

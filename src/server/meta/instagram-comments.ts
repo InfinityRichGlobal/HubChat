@@ -5,8 +5,8 @@ import 'server-only';
  * ฟังก์ชันเฉพาะสำหรับจัดการคอมเมนต์บน Instagram Professional Account
  * เรียกใช้งานผ่าน client กลาง (server/meta/client.ts) เท่านั้น
  */
-import { metaPost, metaDelete, type MetaPage } from './client';
-import { explainCommentError, type CommentActionResult, type WebhookSubscribeResult } from './comments-types';
+import { metaPost, metaDelete, metaGet, type MetaPage } from './client';
+import { explainCommentError, type CommentActionResult, type WebhookSubscribeResult, type FetchedComment } from './comments-types';
 
 export const IG_SUBSCRIBED_FIELDS = [
   'messages',
@@ -169,4 +169,58 @@ export async function subscribeInstagramPageWebhooks(
     ok: false,
     error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
   };
+}
+
+/**
+ * ดึงโพสต์และคอมเมนต์ล่าสุดจาก Instagram Professional Account โดยตรง
+ */
+export async function fetchInstagramRecentComments(
+  page: MetaPage,
+  limitMedia = 5,
+): Promise<{ ok: boolean; comments: FetchedComment[]; error_th?: string }> {
+  const res = await metaGet(page, `${page.page_id}/media`, {
+    fields: 'id,caption,timestamp,comments.limit(25){id,text,from,timestamp}',
+    limit: String(limitMedia),
+  });
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      comments: [],
+      error_th: explainCommentError(res.error.code, res.error.message_th, 'instagram', res.error.message),
+    };
+  }
+
+  const mediaList = ((res.data.data as Array<{
+    id: string;
+    comments?: {
+      data?: Array<{
+        id?: string;
+        text?: string;
+        from?: { id?: string; username?: string };
+        timestamp?: string;
+      }>;
+    };
+  }>) || []);
+
+  const comments: FetchedComment[] = [];
+  for (const m of mediaList) {
+    const rawComments = m.comments?.data || [];
+    for (const c of rawComments) {
+      if (!c.id) continue;
+      comments.push({
+        id: c.id,
+        post_id: m.id,
+        message: c.text ?? '',
+        from_id: c.from?.id ?? null,
+        from_name: c.from?.username ?? null,
+        from_username: c.from?.username ?? null,
+        created_time: c.timestamp ?? new Date().toISOString(),
+        permalink_url: undefined,
+        parent_id: null,
+      });
+    }
+  }
+
+  return { ok: true, comments };
 }

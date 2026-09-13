@@ -23,6 +23,7 @@ import {
   likeFacebookComment,
   deleteFacebookComment,
   subscribeFacebookPageWebhooks,
+  fetchFacebookRecentComments,
   FB_SUBSCRIBED_FIELDS,
 } from './facebook-comments';
 import {
@@ -33,6 +34,7 @@ import {
   unlikeInstagramComment,
   deleteInstagramComment,
   subscribeInstagramPageWebhooks,
+  fetchInstagramRecentComments,
   IG_SUBSCRIBED_FIELDS,
 } from './instagram-comments';
 
@@ -148,4 +150,17 @@ export async function subscribePageWebhooks(
     return subscribeInstagramPageWebhooks(page);
   }
   return subscribeFacebookPageWebhooks(page);
+}
+
+/**
+ * ดึงคอมเมนต์ล่าสุดจากหน้าเพจโดยตรง (แยกตาม platform)
+ */
+export async function fetchPageRecentComments(
+  page: MetaPage,
+  limit = 5,
+) {
+  if (page.platform === 'instagram') {
+    return fetchInstagramRecentComments(page, limit);
+  }
+  return fetchFacebookRecentComments(page, limit);
 }

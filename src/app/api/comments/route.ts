@@ -23,6 +23,15 @@ export async function GET(req: NextRequest) {
 
     const sp = req.nextUrl.searchParams;
 
+    if (sp.get('sync') === '1') {
+      try {
+        const { syncPageComments } = await import('@/server/comments/sync');
+        await syncPageComments(sp.get('page_id') ?? undefined);
+      } catch (syncErr) {
+        console.warn('[comments-api] ซิงค์คอมเมนต์ล้มเหลว:', syncErr);
+      }
+    }
+
     const result = await listComments(admin, {
       unhandled_only: sp.get('unhandled') === '1',
       keyword_only: sp.get('keyword') === '1',

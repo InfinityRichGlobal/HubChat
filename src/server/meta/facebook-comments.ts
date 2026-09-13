@@ -5,8 +5,8 @@ import 'server-only';
  * ฟังก์ชันเฉพาะสำหรับจัดการคอมเมนต์บน Facebook Page
  * เรียกใช้งานผ่าน client กลาง (server/meta/client.ts) เท่านั้น
  */
-import { metaPost, metaDelete, type MetaPage } from './client';
-import { explainCommentError, type CommentActionResult, type WebhookSubscribeResult } from './comments-types';
+import { metaPost, metaDelete, metaGet, type MetaPage } from './client';
+import { explainCommentError, type CommentActionResult, type WebhookSubscribeResult, type FetchedComment } from './comments-types';
 
 export const FB_SUBSCRIBED_FIELDS = [
   'messages',
@@ -151,4 +151,60 @@ export async function subscribeFacebookPageWebhooks(
     ok: false,
     error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
   };
+}
+
+/**
+ * ดึงโพสต์และคอมเมนต์ล่าสุดจาก Facebook Page โดยตรง
+ */
+export async function fetchFacebookRecentComments(
+  page: MetaPage,
+  limitPosts = 5,
+): Promise<{ ok: boolean; comments: FetchedComment[]; error_th?: string }> {
+  const res = await metaGet(page, `${page.page_id}/feed`, {
+    fields: 'id,message,permalink_url,comments.order(reverse_chronological).limit(25){id,message,from,created_time,permalink_url,parent}',
+    limit: String(limitPosts),
+  });
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      comments: [],
+      error_th: explainCommentError(res.error.code, res.error.message_th, 'facebook', res.error.message),
+    };
+  }
+
+  const posts = ((res.data.data as Array<{
+    id: string;
+    permalink_url?: string;
+    comments?: {
+      data?: Array<{
+        id?: string;
+        message?: string;
+        from?: { id?: string; name?: string };
+        created_time?: string;
+        permalink_url?: string;
+        parent?: { id?: string };
+      }>;
+    };
+  }>) || []);
+
+  const comments: FetchedComment[] = [];
+  for (const post of posts) {
+    const rawComments = post.comments?.data || [];
+    for (const c of rawComments) {
+      if (!c.id) continue;
+      comments.push({
+        id: c.id,
+        post_id: post.id,
+        message: c.message ?? '',
+        from_id: c.from?.id ?? null,
+        from_name: c.from?.name ?? null,
+        created_time: c.created_time ?? new Date().toISOString(),
+        permalink_url: c.permalink_url ?? post.permalink_url,
+        parent_id: c.parent?.id ?? null,
+      });
+    }
+  }
+
+  return { ok: true, comments };
 }

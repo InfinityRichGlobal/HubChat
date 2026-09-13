@@ -11,6 +11,18 @@ export type WebhookSubscribeResult =
   | { ok: true; subscribed_fields: string[] }
   | { ok: false; error_th: string };
 
+export type FetchedComment = {
+  id: string;
+  post_id: string;
+  message: string;
+  from_id: string | null;
+  from_name: string | null;
+  from_username?: string | null;
+  created_time: string;
+  permalink_url?: string;
+  parent_id?: string | null;
+};
+
 export type CommentPlatformCapabilities = {
   like: boolean;
   unlike: boolean;
