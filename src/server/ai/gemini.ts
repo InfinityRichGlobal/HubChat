@@ -141,6 +141,7 @@ export type CommentReplyContext = {
   fromName?: string | null;
   postTitle?: string | null;
   mode?: 'public' | 'private';
+  instruction?: string | null;
 };
 
 /**
@@ -156,7 +157,7 @@ export async function generateCommentReply(
     throw new Error('ยังไม่ได้ตั้งค่า GEMINI_API_KEY — ไปที่ ตั้งค่า → AI & บอทเทรน เพื่อใส่คีย์');
   }
 
-  const { fromName, postTitle, mode = 'public' } = context;
+  const { fromName, postTitle, mode = 'public', instruction } = context;
 
   let systemInstruction = aiSettings.systemPrompt;
   if (!systemInstruction) {
@@ -176,6 +177,10 @@ export async function generateCommentReply(
 2. ขอบคุณที่ลูกค้าให้ความสนใจในโพสต์/สินค้า
 3. แจ้งว่าแอดมินพร้อมให้ข้อมูลโปรโมชั่นหรือรายละเอียดสินค้าที่ลูกค้าสอบถาม
 4. ไม่ยาวเกินไป ประมาณ 2-3 ประโยค กระชับ ชัดเจน`;
+  }
+
+  if (instruction?.trim()) {
+    systemInstruction += `\n\n[สไตล์และคำสั่งพิเศษในการตอบ]:\n${instruction.trim()}`;
   }
 
   if (aiSettings.knowledge) {

@@ -20,6 +20,7 @@ import {
   CornerDownRight,
   Edit2,
   Filter,
+  ImageIcon,
   Link2,
   Loader2,
   Mail,
@@ -256,6 +257,9 @@ export default function AutoReplyClient({
   const [newKeywordInput, setNewKeywordInput] = useState('');
   const [commentRuleEditing, setCommentRuleEditing] = useState<CommentBotRule | null>(null);
   const [commentRuleCreating, setCommentRuleCreating] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [showManualUrlInput, setShowManualUrlInput] = useState(false);
+  const [manualUrlText, setManualUrlText] = useState('');
 
   const reloadRules = useCallback(async () => {
     try {
@@ -487,12 +491,15 @@ export default function AutoReplyClient({
                         <ArrowRight className="size-3" />
                       </Link>
                     </div>
-                    <ul className="list-disc list-inside space-y-1 text-muted-foreground pl-1">
+                    <ul className="list-disc list-inside space-y-1.5 text-muted-foreground pl-1">
                       <li>
                         <strong className="text-foreground">โหมดร่างข้อความแนะนำ (Recommend Draft):</strong> AI จะนำข้อความล่าสุดของลูกค้า + ข้อมูลสินค้าในคลังความรู้ มาร่างคำตอบแนะนำในกล่องพิมพ์ให้แอดมินตรวจดู
                       </li>
                       <li>
-                        <strong className="text-foreground">ปลอดภัย 100%:</strong> ข้อความจะไม่ถูกส่งหาลูกค้าอัตโนมัติ แอดมินสามารถกดส่ง หรือปรับแต่งข้อความก่อนส่งได้ทันที
+                        <strong className="text-foreground">ควบคุมบอทรายห้อง (1:1 Bot Toggle):</strong> มีปุ่ม <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-medium text-foreground"><Bot className="size-3" /> บอท: เปิด/ปิด</span> ในแถบเครื่องมือข้างไอคอนวิดีโอในทุกห้องแชท
+                      </li>
+                      <li>
+                        <strong className="text-foreground">ค่าเริ่มต้นปลอดภัย (Default Off):</strong> แชทใหม่ที่เข้ามาจะปิดบอทตอบอัตโนมัติไว้ก่อนเสมอ เพื่อให้แอดมินคุยเอง ป้องกันบอทตอบผิดพลาด และแอดมินสามารถกดเปิดบอทได้ทุกเมื่อที่ต้องการ
                       </li>
                       <li>
                         <strong className="text-foreground">สมองที่ใช้:</strong> {aiInfo?.model ?? 'gemini-3.6-flash'} {aiInfo?.hasKnowledge ? '(มีคลังความรู้สินค้าแล้ว)' : '(ยังไม่มีคลังความรู้สินค้า)'}
@@ -843,10 +850,15 @@ export default function AutoReplyClient({
               </div>
 
               {/* 2. ตอบคอมเมนต์อัตโนมัติ */}
-              <div className="flex flex-col gap-2.5 py-3.5">
+              <div className="flex flex-col gap-3 py-4 border-b">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <span>↩️</span> ตอบคอมเมนต์อัตโนมัติ
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <span>↩️</span> ตอบคอมเมนต์อัตโนมัติ (Public Reply)
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      โพสต์ตอบกลับใต้คอมเมนต์ของลูกค้าหน้าโพสต์เพจ
+                    </p>
                   </div>
                   <Switch
                     checked={botSettings.auto_reply_public}
@@ -856,35 +868,171 @@ export default function AutoReplyClient({
                     disabled={!canManage}
                   />
                 </div>
+
                 {botSettings.auto_reply_public && (
-                  <div className="flex flex-col gap-1.5">
-                    <Textarea
-                      value={botSettings.public_reply_template}
-                      onChange={(e) =>
-                        setBotSettings((prev) => ({ ...prev, public_reply_template: e.target.value }))
-                      }
-                      placeholder={
-                        botSettings.reply_mode === 'ai'
-                          ? 'ข้อความสำรอง (Fallback) กรณี AI ขัดข้อง — ใช้ {name} แทนชื่อผู้คอมเมนต์ได้'
-                          : 'ข้อความตอบคอมเมนต์ (สาธารณะ) — ใช้ {name} แทนชื่อผู้คอมเมนต์ได้ · ถ้ามีกติกา keyword ตรงกัน จะใช้ข้อความจากกติกาแทน'
-                      }
-                      className="min-h-[76px] resize-none text-xs leading-relaxed"
-                      disabled={!canManage}
-                    />
-                    {botSettings.reply_mode === 'ai' && (
+                  <div className="mt-1 flex flex-col gap-3.5 rounded-xl border bg-muted/20 p-3.5">
+                    {/* สไตล์การตอบใต้โพสต์ */}
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-xs font-semibold text-foreground">
+                        🎯 สไตล์การตอบคอมเมนต์ใต้โพสต์:
+                      </Label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              public_reply_style: 'short',
+                              public_reply_instruction:
+                                'ตอบสั้นกระชับ 1-2 ประโยค ชวนคุย ไม่บอกราคาหน้าโพสต์และเชิญชวนทักแชท',
+                            }))
+                          }
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left text-xs transition',
+                            botSettings.public_reply_style === 'short'
+                              ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span className="font-semibold text-foreground">⚡ สั้นกระชับ 1-2 ประโยค</span>
+                          <span className="text-[11px] text-muted-foreground">ชวนคุย ไม่บอกราคาหน้าโพสต์ ชวนทักแชท</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              public_reply_style: 'friendly',
+                              public_reply_instruction:
+                                'ตอบด้วยความสุภาพ อ่อนหวาน ใช้คำว่า ค่ะ/นะคะ ขอบคุณที่สนใจและชวนลูกค้าทักแชทเพื่อดูข้อมูลเพิ่มเติม',
+                            }))
+                          }
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left text-xs transition',
+                            botSettings.public_reply_style === 'friendly'
+                              ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span className="font-semibold text-foreground">🥰 สุภาพอ่อนหวาน ชวนคุย</span>
+                          <span className="text-[11px] text-muted-foreground">ตอบสุภาพ อบอุ่น ขอบคุณลูกค้าอย่างจริงใจ</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              public_reply_style: 'custom',
+                            }))
+                          }
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left text-xs transition',
+                            botSettings.public_reply_style === 'custom'
+                              ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span className="font-semibold text-foreground">⚙️ กำหนดเอง (Custom)</span>
+                          <span className="text-[11px] text-muted-foreground">พิมพ์คำสั่งสอน AI ตอบคอมเมนต์ตามต้องการ</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* คำสั่งสอน AI เฉพาะตอบคอมเมนต์ */}
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                          <Sparkles className="size-3 text-orange-500" />
+                          คำสั่งสอน AI เฉพาะตอบคอมเมนต์ (Public Training Instruction):
+                        </Label>
+                      </div>
+                      <Textarea
+                        value={botSettings.public_reply_instruction}
+                        onChange={(e) =>
+                          setBotSettings((prev) => ({
+                            ...prev,
+                            public_reply_instruction: e.target.value,
+                            public_reply_style: 'custom',
+                          }))
+                        }
+                        placeholder="พิมพ์คำสั่งเฉพาะ เช่น ตอบสั้นกระชับ 1-2 ประโยค ชวนคุย ไม่บอกราคาหน้าโพสต์และเชิญชวนทักแชท..."
+                        className="min-h-[70px] text-xs leading-relaxed bg-background"
+                        disabled={!canManage}
+                      />
+                      <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                        <span>💡 ตัวอย่างด่วน:</span>
+                        <button
+                          type="button"
+                          className="underline hover:text-foreground"
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              public_reply_instruction:
+                                'ตอบสั้นกระชับ 1-2 ประโยค ชวนคุย ไม่บอกราคาหน้าโพสต์และเชิญชวนทักแชท',
+                              public_reply_style: 'short',
+                            }))
+                          }
+                        >
+                          [สั้นกระชับไม่บอกราคา]
+                        </button>
+                        <span>·</span>
+                        <button
+                          type="button"
+                          className="underline hover:text-foreground"
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              public_reply_instruction:
+                                'แจ้งลูกค้าว่าส่งรายละเอียดและโปรโมชั่นพิเศษเข้าไปในข้อความส่วนตัวแล้ว ให้กดเช็คดูได้เลยค่ะ',
+                              public_reply_style: 'custom',
+                            }))
+                          }
+                        >
+                          [แจ้งว่าส่งข้อความส่วนตัวแล้ว]
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ข้อความแม่แบบสำรอง (Template / Fallback) */}
+                    <div className="flex flex-col gap-1.5 border-t pt-3">
+                      <Label className="text-xs font-medium text-foreground">
+                        📝 ข้อความแม่แบบสำรอง (Template / Fallback กรณีไม่ใช้ AI หรือ AI ขัดข้อง):
+                      </Label>
+                      <Textarea
+                        value={botSettings.public_reply_template}
+                        onChange={(e) =>
+                          setBotSettings((prev) => ({
+                            ...prev,
+                            public_reply_template: e.target.value,
+                          }))
+                        }
+                        placeholder="ขอบคุณที่สนใจนะคะ {name} ทักแชทไปเรียบร้อยแล้วค่า 🥰"
+                        className="min-h-[60px] text-xs leading-relaxed bg-background"
+                        disabled={!canManage}
+                      />
                       <p className="text-[11px] text-muted-foreground">
-                        💡 ในโหมด AI: ระบบจะให้ Gemini คิดคำตอบตามคำถามจริงของลูกค้าใต้โพสต์ก่อนเสมอ หาก AI ขัดข้องหรือเกินโควต้าจึงจะส่งข้อความสำรองนี้
+                        ใช้ {'{name}'} แทนชื่อผู้คอมเมนต์ได้ · หากมีกติกาคำตรงกับกฎพิเศษ บอทจะใช้ข้อความของกฎนั้นก่อน
                       </p>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
 
               {/* 3. ดึงเข้าแชท (ตอบเข้าแชทส่วนตัว) */}
-              <div className="flex flex-col gap-2.5 py-3.5">
+              <div className="flex flex-col gap-3 py-4 border-b">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <span>💌</span> ดึงเข้าแชท (ตอบเข้าแชทส่วนตัว)
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <span>💌</span> ดึงเข้าแชท (ตอบเข้าแชทส่วนตัว / Private Reply)
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      ส่งข้อความหาลูกค้าเข้ากล่องแชท Messenger ทันทีที่คอมเมนต์
+                    </p>
                   </div>
                   <Switch
                     checked={botSettings.auto_reply_private}
@@ -894,26 +1042,236 @@ export default function AutoReplyClient({
                     disabled={!canManage}
                   />
                 </div>
+
                 {botSettings.auto_reply_private && (
-                  <div className="flex flex-col gap-1.5">
-                    <Textarea
-                      value={botSettings.private_reply_template}
-                      onChange={(e) =>
-                        setBotSettings((prev) => ({ ...prev, private_reply_template: e.target.value }))
-                      }
-                      placeholder={
-                        botSettings.reply_mode === 'ai'
-                          ? 'ข้อความสำรอง (Fallback) สำหรับส่งเข้าแชทส่วนตัว กรณี AI ขัดข้อง'
-                          : 'ข้อความส่งเข้าแชทส่วนตัว (ว่าง = ใช้ข้อความตอบคอมเมนต์)'
-                      }
-                      className="min-h-[76px] resize-none text-xs leading-relaxed"
-                      disabled={!canManage}
-                    />
-                    {botSettings.reply_mode === 'ai' && (
+                  <div className="mt-1 flex flex-col gap-3.5 rounded-xl border bg-muted/20 p-3.5">
+                    {/* สไตล์การทักแชทส่วนตัว */}
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-xs font-semibold text-foreground">
+                        🎯 สไตล์ข้อความทักเข้าแชทส่วนตัว:
+                      </Label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              private_reply_style: 'warm_welcome',
+                              private_reply_instruction:
+                                'ทักทายลูกค้าอย่างอบอุ่น ขอบคุณที่สนใจ แนะนำโปรโมชั่นและสอบถามสินค้าที่ต้องการ',
+                            }))
+                          }
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left text-xs transition',
+                            botSettings.private_reply_style === 'warm_welcome'
+                              ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span className="font-semibold text-foreground">🌸 ทักทายต้อนรับอบอุ่น</span>
+                          <span className="text-[11px] text-muted-foreground">ต้อนรับอย่างเป็นกันเองและถามความสนใจ</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              private_reply_style: 'promo',
+                              private_reply_instruction:
+                                'ต้อนรับสู่แชทร้าน แนะนำโปรโมชั่นส่วนลดพิเศษประจำสัปดาห์ ส่งโค้ดส่วนลด และสอบถามสินค้าที่สนใจ',
+                            }))
+                          }
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left text-xs transition',
+                            botSettings.private_reply_style === 'promo'
+                              ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span className="font-semibold text-foreground">🎁 แนะนำโปรเด็ด & คูปอง</span>
+                          <span className="text-[11px] text-muted-foreground">แจกโปรโมชั่นทันทีที่ลูกค้าเปิดแชทเข้ามา</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            setBotSettings((prev) => ({
+                              ...prev,
+                              private_reply_style: 'custom',
+                            }))
+                          }
+                          className={cn(
+                            'flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left text-xs transition',
+                            botSettings.private_reply_style === 'custom'
+                              ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span className="font-semibold text-foreground">⚙️ กำหนดเอง (Custom)</span>
+                          <span className="text-[11px] text-muted-foreground">พิมพ์คำสั่งสอน AI ทักเข้าแชทตามต้องการ</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* คำสั่งสอน AI เฉพาะทักแชท */}
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Sparkles className="size-3 text-orange-500" />
+                        คำสั่งสอน AI เฉพาะดึงเข้าแชท (Private Training Instruction):
+                      </Label>
+                      <Textarea
+                        value={botSettings.private_reply_instruction}
+                        onChange={(e) =>
+                          setBotSettings((prev) => ({
+                            ...prev,
+                            private_reply_instruction: e.target.value,
+                            private_reply_style: 'custom',
+                          }))
+                        }
+                        placeholder="พิมพ์คำสั่งเฉพาะ เช่น ทักทายลูกค้าอย่างอบอุ่น ขอบคุณที่สนใจ แนะนำโปรโมชั่นและสอบถามสินค้าที่ต้องการ..."
+                        className="min-h-[70px] text-xs leading-relaxed bg-background"
+                        disabled={!canManage}
+                      />
+                    </div>
+
+                    {/* แนบรูปภาพเข้าแชทส่วนตัว */}
+                    <div className="flex flex-col gap-2 rounded-lg border border-dashed border-orange-300 bg-background/60 p-3 dark:border-orange-900/50">
+                      <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <ImageIcon className="size-3.5 text-orange-500" />
+                        แนบรูปภาพสินค้า/โปรโมชั่นเมื่อทักแชท (Private Reply Attachment):
+                      </Label>
                       <p className="text-[11px] text-muted-foreground">
-                        💡 ในโหมด AI: ระบบจะให้ Gemini สร้างข้อความทักทายต้อนรับเข้าแชทที่สุภาพ เป็นมิตร และให้ข้อมูลสินค้าแก่ลูกค้า
+                        ส่งรูปภาพนี้เข้าไปในแชทของลูกค้าพร้อมกับข้อความเปิดบทสนทนา (เช่น ป้ายโปรโมชั่น, เมนู, รูปสินค้าขายดี)
                       </p>
-                    )}
+
+                      {botSettings.private_reply_image_url ? (
+                        <div className="mt-1 flex items-center gap-3 rounded-lg border bg-card p-2.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={botSettings.private_reply_image_url}
+                            alt="ภาพแนบ"
+                            className="size-16 rounded-md object-cover border shrink-0 bg-muted"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-foreground truncate">
+                              {botSettings.private_reply_image_name || 'รูปภาพแนบในแชท'}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {botSettings.private_reply_image_url}
+                            </p>
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => setMediaPickerOpen(true)}
+                                disabled={!canManage}
+                              >
+                                เปลี่ยนรูปภาพ
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                                onClick={() =>
+                                  setBotSettings((prev) => ({
+                                    ...prev,
+                                    private_reply_image_url: null,
+                                    private_reply_image_name: null,
+                                  }))
+                                }
+                                disabled={!canManage}
+                              >
+                                ลบรูปภาพ
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex flex-col gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs gap-1.5 border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-800 dark:text-orange-300"
+                              onClick={() => setMediaPickerOpen(true)}
+                              disabled={!canManage}
+                            >
+                              <ImageIcon className="size-3.5" />
+                              เลือกรูปภาพจากคลังสื่อ
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => setShowManualUrlInput((v) => !v)}
+                            >
+                              🔗 วาง URL ลิงก์รูปภาพเอง
+                            </Button>
+                          </div>
+
+                          {showManualUrlInput && (
+                            <div className="flex items-center gap-2 pt-1 max-w-md">
+                              <Input
+                                value={manualUrlText}
+                                onChange={(e) => setManualUrlText(e.target.value)}
+                                placeholder="วาง URL รูปภาพ เช่น https://.../promo.jpg"
+                                className="h-8 text-xs"
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-8 text-xs shrink-0"
+                                onClick={() => {
+                                  if (manualUrlText.trim()) {
+                                    setBotSettings((prev) => ({
+                                      ...prev,
+                                      private_reply_image_url: manualUrlText.trim(),
+                                      private_reply_image_name: 'รูปภาพภายนอก',
+                                    }));
+                                    setManualUrlText('');
+                                    setShowManualUrlInput(false);
+                                    toast.success('ตั้งค่ารูปภาพแนบแล้ว');
+                                  }
+                                }}
+                              >
+                                ใส่รูปนี้
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ข้อความแม่แบบสำรอง (Template / Fallback) */}
+                    <div className="flex flex-col gap-1.5 border-t pt-3">
+                      <Label className="text-xs font-medium text-foreground">
+                        📝 ข้อความแม่แบบสำรองสำหรับแชทส่วนตัว (Template / Fallback):
+                      </Label>
+                      <Textarea
+                        value={botSettings.private_reply_template}
+                        onChange={(e) =>
+                          setBotSettings((prev) => ({
+                            ...prev,
+                            private_reply_template: e.target.value,
+                          }))
+                        }
+                        placeholder="สวัสดีค่ะ {name} ยินดีให้บริการค่ะ ต้องการสอบถามข้อมูลหรือสั่งซื้อสินค้าชิ้นไหนแจ้งได้เลยนะคะ"
+                        className="min-h-[60px] text-xs leading-relaxed bg-background"
+                        disabled={!canManage}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        ใช้ {'{name}'} แทนชื่อลูกค้าได้
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1257,19 +1615,39 @@ export default function AutoReplyClient({
                     )}
 
                     {/* Preview ข้อความทักแชทส่วนตัว */}
-                    {commentBotTestResult.would_reply_private && commentBotTestResult.private_reply_text && (
-                      <div className="rounded-md border bg-background p-2.5">
-                        <span className="font-semibold text-foreground flex items-center gap-1 text-[11px] mb-1">
+                    {commentBotTestResult.would_reply_private && (
+                      <div className="rounded-md border bg-background p-2.5 flex flex-col gap-2">
+                        <span className="font-semibold text-foreground flex items-center gap-1 text-[11px]">
                           💌 ข้อความที่จะส่งเข้าแชท Messenger (Private Reply):
                           <Badge variant="outline" className="text-[9px]">
                             {commentBotTestResult.private_reply_mode === 'ai' ? 'คิดโดย Gemini AI' : 'ใช้แม่แบบ Template'}
                           </Badge>
                         </span>
-                        <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                          {commentBotTestResult.private_reply_text}
-                        </p>
+                        {commentBotTestResult.private_reply_text && (
+                          <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                            {commentBotTestResult.private_reply_text}
+                          </p>
+                        )}
+                        {commentBotTestResult.private_reply_image_url && (
+                          <div className="flex items-center gap-2.5 rounded-md border bg-muted/30 p-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={commentBotTestResult.private_reply_image_url}
+                              alt="ภาพแนบในแชท"
+                              className="size-14 rounded-md object-cover border shrink-0 bg-muted"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <span className="text-[11px] font-semibold text-foreground block">
+                                🖼️ ภาพที่แนบส่งเข้าแชท:
+                              </span>
+                              <span className="text-[10px] text-muted-foreground truncate block">
+                                {commentBotTestResult.private_reply_image_url}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                         {commentBotTestResult.catalog_attached && commentBotTestResult.catalog_preview && (
-                          <div className="mt-2 pt-2 border-t text-[11px] text-muted-foreground whitespace-pre-wrap">
+                          <div className="mt-1 pt-2 border-t text-[11px] text-muted-foreground whitespace-pre-wrap">
                             <span className="font-medium text-foreground block mb-0.5">🛍️ แนบเมนูสินค้า/โปรฯ อัตโนมัติ:</span>
                             {commentBotTestResult.catalog_preview}
                           </div>
@@ -1320,6 +1698,20 @@ export default function AutoReplyClient({
           setCommentRuleEditing(null);
         }}
         onSave={handleSaveCommentRule}
+      />
+
+      {/* ---------- ไดอะล็อกเลือกรูปภาพจากคลังสื่อสำหรับ Private Reply ---------- */}
+      <MediaImagePickerDialog
+        open={mediaPickerOpen}
+        onClose={() => setMediaPickerOpen(false)}
+        onSelect={(url, name) => {
+          setBotSettings((prev) => ({
+            ...prev,
+            private_reply_image_url: url,
+            private_reply_image_name: name,
+          }));
+          toast.success('แนบรูปภาพเข้าแชทส่วนตัวแล้ว');
+        }}
       />
     </div>
   );
@@ -1632,6 +2024,122 @@ function CommentRuleDialog({
           <Button variant="outline" onClick={onClose}>ยกเลิก</Button>
           <Button onClick={handleFormSubmit} disabled={problem !== null}>
             {problem ?? 'ตกลง'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ================================================================== */
+/* ไดอะล็อกเลือกรูปภาพจากคลังสื่อ (สำหรับ Private Reply)                   */
+/* ================================================================== */
+
+type MediaLibraryItem = {
+  id: string;
+  preview_url: string;
+  public_url: string;
+  mime: string;
+  original_name?: string;
+};
+
+function MediaImagePickerDialog({
+  open,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSelect: (url: string, name: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<MediaLibraryItem[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetch('/api/media-library?for_picker=1', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.ok && json.data?.items) {
+          const imageItems = (json.data.items as MediaLibraryItem[]).filter((it) =>
+            it.mime?.startsWith('image/'),
+          );
+          setItems(imageItems);
+        }
+      })
+      .catch(() => {
+        toast.error('โหลดคลังสื่อไม่สำเร็จ');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-4">
+        <DialogHeader className="pb-2 text-left">
+          <DialogTitle className="text-base">เลือกรูปภาพจากคลังสื่อ</DialogTitle>
+          <DialogDescription className="text-xs">
+            แตะรูปภาพที่ต้องการแนบไปกับข้อความทักแชทส่วนตัว (Private Reply)
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto min-h-[250px] max-h-[480px]">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground text-xs">
+              <Loader2 className="size-6 animate-spin text-orange-500" />
+              <span>กำลังโหลดรูปภาพ...</span>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-xs text-muted-foreground">
+              <ImageIcon className="size-10 mb-2 opacity-40" />
+              <p>ยังไม่มีรูปภาพในคลังสื่อ</p>
+              <Link href="/media" className="mt-2 text-primary hover:underline font-medium">
+                ไปที่หน้าคลังสื่อเพื่ออัปโหลดรูปภาพ
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5 p-1">
+              {items.map((item) => {
+                const imgUrl = item.public_url || item.preview_url;
+                const name = item.original_name || 'รูปภาพคลังสื่อ';
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      onSelect(imgUrl, name);
+                      onClose();
+                    }}
+                    className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all text-left"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={item.preview_url || item.public_url}
+                      alt={name}
+                      className="size-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <p className="text-[10px] text-white truncate font-medium">{name}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="pt-2 border-t flex items-center justify-between sm:justify-between">
+          <Button variant="ghost" size="sm" asChild className="text-xs text-muted-foreground">
+            <Link href="/media">
+              จัดการคลังสื่อ
+              <ArrowRight className="size-3 ml-1" />
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" onClick={onClose} className="text-xs">
+            ปิด
           </Button>
         </DialogFooter>
       </DialogContent>

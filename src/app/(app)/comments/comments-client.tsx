@@ -91,9 +91,7 @@ export default function CommentsClient({
   const [words, setWords] = useState(initialWords);
   const [selectedPageId, setSelectedPageId] = useState<string>('all');
   const [unhandledOnly, setUnhandledOnly] = useState(false);
-  const [keywordOnly, setKeywordOnly] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [wordsOpen, setWordsOpen] = useState(false);
   const [botSettings, setBotSettings] = useState<CommentBotSettings | null>(null);
 
   useEffect(() => {
@@ -105,14 +103,13 @@ export default function CommentsClient({
   const load = useCallback(async (): Promise<void> => {
     const params = new URLSearchParams();
     if (unhandledOnly) params.set('unhandled', '1');
-    if (keywordOnly) params.set('keyword', '1');
     if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
     const d = await api<Feed & { filter_words: string[] }>(`/api/comments?${params.toString()}`);
     if (d) {
       setFeed({ comments: d.comments, has_more: d.has_more, unhandled_count: d.unhandled_count });
       setWords(d.filter_words);
     }
-  }, [unhandledOnly, keywordOnly, selectedPageId]);
+  }, [unhandledOnly, selectedPageId]);
 
   /* ---- ดึงซ้ำเป็นระยะ ---- */
   useEffect(() => {
@@ -154,11 +151,6 @@ export default function CommentsClient({
             {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             รีเฟรช
           </Button>
-          {canManageWords && (
-            <Button variant="outline" size="sm" onClick={() => setWordsOpen(true)}>
-              คำกรอง ({words.length})
-            </Button>
-          )}
         </div>
       </div>
 
@@ -262,24 +254,17 @@ export default function CommentsClient({
 
         <Button
           size="sm"
-          variant={!unhandledOnly && !keywordOnly ? 'default' : 'outline'}
-          onClick={() => { setUnhandledOnly(false); setKeywordOnly(false); }}
+          variant={!unhandledOnly ? 'default' : 'outline'}
+          onClick={() => setUnhandledOnly(false)}
         >
           ทั้งหมด
         </Button>
         <Button
           size="sm"
           variant={unhandledOnly ? 'default' : 'outline'}
-          onClick={() => { setUnhandledOnly(true); setKeywordOnly(false); }}
+          onClick={() => setUnhandledOnly(true)}
         >
           ยังไม่จัดการ ({feed.unhandled_count})
-        </Button>
-        <Button
-          size="sm"
-          variant={keywordOnly ? 'default' : 'outline'}
-          onClick={() => { setKeywordOnly(true); setUnhandledOnly(false); }}
-        >
-          เข้าคำกรอง
         </Button>
       </div>
 
@@ -312,13 +297,6 @@ export default function CommentsClient({
           แสดง {visible.length} รายการล่าสุด — ใช้ตัวกรองด้านบนเพื่อดูเฉพาะที่ต้องการ
         </p>
       )}
-
-      <FilterWordsDialog
-        open={wordsOpen}
-        onOpenChange={setWordsOpen}
-        words={words}
-        onSaved={(w) => { setWords(w); void load(); }}
-      />
     </div>
   );
 }
@@ -522,68 +500,5 @@ function CommentCard({
         </div>
       )}
     </div>
-  );
-}
-
-/* ================================================================== */
-
-function FilterWordsDialog({
-  open, onOpenChange, words, onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  words: string[];
-  onSaved: (w: string[]) => void;
-}) {
-  const [draft, setDraft] = useState(words.join(', '));
-  const [busy, setBusy] = useState(false);
-
-  async function save() {
-    setBusy(true);
-    try {
-      const list = draft.split(',').map((w) => w.trim()).filter(Boolean);
-      const d = await api<{ words: string[] }>('/api/comments/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ words: list }),
-      });
-      if (d) {
-        toast.success('บันทึกคำกรองแล้ว');
-        onSaved(d.words);
-        onOpenChange(false);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>คำกรองคอมเมนต์</DialogTitle>
-          <DialogDescription>
-            คอมเมนต์ที่มีคำเหล่านี้จะถูกไฮไลต์ให้เห็นก่อน — คั่นด้วยจุลภาค
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-2 py-2">
-          <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="ราคา, สนใจ, cf" />
-          <p className="text-[11px] text-muted-foreground">
-            💡 คอมเมนต์ที่มีคำเหล่านี้จะถูกไฮไลต์ให้เห็นก่อนในฟีด และสามารถตั้งเงื่อนไขให้บอทคอมเมนต์ตอบเฉพาะคำเหล่านี้ได้ที่หน้า{' '}
-            <Link href="/settings/autoreply?tab=comments" className="text-primary underline underline-offset-2">
-              ตั้งค่าแชทบอท
-            </Link>
-          </p>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>ยกเลิก</Button>
-          <Button onClick={() => void save()} disabled={busy}>
-            {busy && <Loader2 className="animate-spin" />}
-            บันทึก
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

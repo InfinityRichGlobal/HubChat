@@ -9,7 +9,8 @@ export type InboxStateInput =
   | { action: 'important'; value: boolean }
   | { action: 'status'; value: 'active' | 'done' | 'spam' }
   | { action: 'assignment'; value: 'me' | 'none' }
-  | { action: 'confirm_spam_restored'; value: true };
+  | { action: 'confirm_spam_restored'; value: true }
+  | { action: 'ai_bot'; value: boolean };
 
 export class InboxStateError extends Error {
   constructor(
@@ -39,6 +40,11 @@ export async function updateInboxState(
   if (input.action === 'important') {
     await updateConversation(conversationId, admin.id, { is_important: input.value });
     return { is_important: input.value, sync: 'hubchat' };
+  }
+
+  if (input.action === 'ai_bot') {
+    await updateConversation(conversationId, admin.id, { has_ai_reply: input.value });
+    return { has_ai_reply: input.value, sync: 'hubchat' };
   }
 
   if (input.action === 'assignment') {

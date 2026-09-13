@@ -14,6 +14,7 @@ const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status'), value: z.enum(['active', 'done', 'spam']) }),
   z.object({ action: z.literal('assignment'), value: z.enum(['me', 'none']) }),
   z.object({ action: z.literal('confirm_spam_restored'), value: z.literal(true) }),
+  z.object({ action: z.literal('ai_bot'), value: z.boolean() }),
 ]);
 
 export async function POST(req: Request, ctx: Ctx) {

@@ -64,6 +64,7 @@ export type ConversationRow = {
   meta_spam_synced_at: string | null;
   assigned_admin_id: string | null;
   assigned_admin_name: string | null;
+  assigned_admin_avatar_url: string | null;
   has_ai_reply: boolean;
   has_ai_handoff: boolean;
   referral_source: ReferralSource | null;
@@ -369,7 +370,7 @@ export async function listConversations(
 
   const customerIds = [...new Set(rows.map((r) => r.customer_id))];
   const unreadConvIds = rows.filter((r) => !r.is_read).map((r) => r.id);
-  const [customers, names, tagMap, orders, unreadCounts] = await Promise.all([
+  const [customers, names, avatarMap, tagMap, orders, unreadCounts] = await Promise.all([
     db()
       .from('customers')
       /**
@@ -380,6 +381,7 @@ export async function listConversations(
       .select(INBOX_SELECTS.customers)
       .in('id', customerIds),
     adminNames(rows.flatMap((r) => [r.locked_by_admin_id, r.assigned_admin_id]).filter((v): v is string => Boolean(v))),
+    getAllAdminAvatars(),
     tagsForConversations(rows.map((r) => r.id)),
     db()
       .from('orders')
@@ -441,6 +443,7 @@ export async function listConversations(
         meta_spam_synced_at: r.meta_spam_synced_at,
         assigned_admin_id: r.assigned_admin_id,
         assigned_admin_name: r.assigned_admin_id ? (names.get(r.assigned_admin_id) ?? 'แอดมิน') : null,
+        assigned_admin_avatar_url: r.assigned_admin_id ? (avatarMap[r.assigned_admin_id] ?? null) : null,
         has_ai_reply: r.has_ai_reply,
         has_ai_handoff: r.has_ai_handoff,
         referral_source: r.referral_source,

@@ -1398,12 +1398,22 @@ function ConversationItem({
             {(c.assigned_admin_name || c.order_count > 0) && (
               <div className="flex shrink-0 items-center justify-end gap-1">
                 {c.assigned_admin_name && (
-                  <div
-                    className="size-5 shrink-0 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold border"
-                    title={`ผู้ดูแล ${c.assigned_admin_name}`}
-                  >
-                    {c.assigned_admin_name.slice(0, 1).toUpperCase()}
-                  </div>
+                  c.assigned_admin_avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={c.assigned_admin_avatar_url}
+                      alt={c.assigned_admin_name}
+                      title={`ผู้ดูแล ${c.assigned_admin_name}`}
+                      className="size-5 shrink-0 rounded-full object-cover border"
+                    />
+                  ) : (
+                    <div
+                      className="size-5 shrink-0 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold border"
+                      title={`ผู้ดูแล ${c.assigned_admin_name}`}
+                    >
+                      {c.assigned_admin_name.slice(0, 1).toUpperCase()}
+                    </div>
+                  )
                 )}
                 {c.order_count > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
@@ -2088,7 +2098,8 @@ function ChatRoom({
       | { action: 'important'; value: boolean }
       | { action: 'status'; value: 'active' | 'done' | 'spam' }
       | { action: 'assignment'; value: 'me' | 'none' }
-      | { action: 'confirm_spam_restored'; value: true },
+      | { action: 'confirm_spam_restored'; value: true }
+      | { action: 'ai_bot'; value: boolean },
     success: string,
   ) {
     setStateBusy(true);
@@ -2099,6 +2110,8 @@ function ChatRoom({
       onUpdateConversation?.({ inbox_status: input.value });
     } else if (input.action === 'assignment') {
       onUpdateConversation?.({ assigned_admin_id: input.value === 'me' ? meId : null });
+    } else if (input.action === 'ai_bot') {
+      onUpdateConversation?.({ has_ai_reply: input.value });
     }
     try {
       const result = await apiCall<Record<string, unknown>>(`/api/conversations/${c.id}/inbox-state`, {
@@ -2343,6 +2356,39 @@ function ChatRoom({
             </Button>
             <Button variant="ghost" size="icon" className="size-8" aria-label="คลังวิดีโอ" title="คลังวิดีโอ" onClick={() => setLibraryKind('video')} disabled={sending || uploading}>
               <Video className="size-4" />
+            </Button>
+
+            <div className="mx-1 h-4 w-px bg-border shrink-0" />
+
+            {/* ปุ่มเปิด/ปิด AI บอทในห้องแชทนี้ (ข้างไอคอนวิดีโอตามที่ผู้ใช้ต้องการ) */}
+            <Button
+              type="button"
+              variant={c.has_ai_reply ? 'default' : 'outline'}
+              size="sm"
+              className={cn(
+                'h-8 px-2.5 text-xs gap-1.5 transition-colors font-medium',
+                c.has_ai_reply
+                  ? 'bg-violet-600 text-white hover:bg-violet-700'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+              )}
+              title={
+                c.has_ai_reply
+                  ? '🤖 บอทกำลังเปิดตอบอัตโนมัติในห้องนี้ (คลิกเพื่อปิด ให้แอดมินตอบเอง)'
+                  : '🤖 บอทปิดอยู่ (คลิกเพื่อเปิดให้ AI ตอบอัตโนมัติ)'
+              }
+              disabled={stateBusy}
+              onClick={() => {
+                const nextVal = !c.has_ai_reply;
+                void changeInboxState(
+                  { action: 'ai_bot', value: nextVal },
+                  nextVal
+                    ? 'เปิด AI บอทตอบอัตโนมัติในแชทนี้แล้ว'
+                    : 'ปิด AI บอทในแชทนี้แล้ว (แอดมินตอบเอง)',
+                );
+              }}
+            >
+              <Bot className={cn('size-3.5 shrink-0', c.has_ai_reply && 'animate-pulse')} />
+              <span>{c.has_ai_reply ? 'บอท: เปิด' : 'บอท: ปิด'}</span>
             </Button>
           </div>
         )}

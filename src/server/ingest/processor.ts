@@ -250,6 +250,18 @@ async function maybeAutoReply(
   if (!row.message_id) return;
 
   try {
+    // ตรวจว่าห้องแชทนี้เปิดบอทตอบอัตโนมัติ (has_ai_reply) หรือไม่
+    // ค่าเริ่มต้นคือปิด (แอดมินคุยเอง) เพื่อป้องกันบอทตอบมั่ว
+    const { data: conv } = await db()
+      .from('conversations')
+      .select('has_ai_reply')
+      .eq('id', row.conversation_id)
+      .maybeSingle();
+
+    if (!conv?.has_ai_reply) {
+      return;
+    }
+
     const outcome = await runAutoReply({
       message_id: row.message_id,
       conversation_id: row.conversation_id,

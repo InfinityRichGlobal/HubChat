@@ -202,6 +202,7 @@ export async function processCommentAutoReply(
         const aiReply = await generateCommentReply(msg || '(ส่งรูปหรือสติกเกอร์)', {
           fromName: ev.from_name,
           mode: 'public',
+          instruction: settings.public_reply_instruction,
         });
         if (aiReply?.trim()) {
           replyText = aiReply.trim();
@@ -256,6 +257,7 @@ export async function processCommentAutoReply(
         const aiDm = await generateCommentReply(msg || '(ส่งรูปหรือสติกเกอร์)', {
           fromName: ev.from_name,
           mode: 'private',
+          instruction: settings.private_reply_instruction,
         });
         if (aiDm?.trim()) {
           dmText = aiDm.trim();
@@ -272,6 +274,11 @@ export async function processCommentAutoReply(
       if (rawPrivateTemplate) {
         dmText = formatMessage(rawPrivateTemplate, ev.from_name);
       }
+    }
+
+    // หากมีรูปภาพจากคลังสื่อสำหรับ Private Reply:
+    if (settings.private_reply_image_url?.trim()) {
+      dmText = dmText ? `${dmText}\n\n🖼️ ภาพสินค้า/โปรโมชั่น: ${settings.private_reply_image_url.trim()}` : settings.private_reply_image_url.trim();
     }
 
     // หากเปิด auto_send_catalog (ส่งเมนูสินค้า+โปรฯ หลังดึงเข้าแชท): แนบเมนูและโปรโมชั่นเข้ากับข้อความ
@@ -437,6 +444,7 @@ export async function testCommentBot(input: {
         const aiText = await generateCommentReply(msg, {
           fromName: name,
           mode: 'public',
+          instruction: settings.public_reply_instruction,
         });
         if (aiText) {
           public_reply_mode = 'ai';
@@ -471,6 +479,7 @@ export async function testCommentBot(input: {
         const aiText = await generateCommentReply(msg, {
           fromName: name,
           mode: 'private',
+          instruction: settings.private_reply_instruction,
         });
         if (aiText) {
           private_reply_mode = 'ai';
@@ -508,6 +517,7 @@ export async function testCommentBot(input: {
     would_reply_private,
     private_reply_mode,
     private_reply_text,
+    private_reply_image_url: settings.private_reply_image_url ?? null,
     catalog_attached,
     catalog_preview,
   };
