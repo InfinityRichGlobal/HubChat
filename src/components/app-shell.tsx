@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   MessagesSquare, ShoppingBag, BarChart3, MessageCircle,
   Settings, LogOut, KeyRound, UserCircle2,
@@ -51,6 +51,15 @@ const NAV: NavItem[] = [
 
 const DEFAULT_PRIMARY = ['/inbox', '/orders', '/customers', '/media'];
 
+function ChatParamTracker({ onChange }: { onChange: (hasC: boolean) => void }) {
+  const searchParams = useSearchParams();
+  const c = searchParams?.get('c');
+  useEffect(() => {
+    onChange(Boolean(c));
+  }, [c, onChange]);
+  return null;
+}
+
 export default function AppShell({
   admin, children, brand,
 }: {
@@ -60,6 +69,7 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [is1on1Chat, setIs1on1Chat] = useState(false);
   const [counts, setCounts] = useState<{ unread_chats: number; unhandled_comments: number }>({
     unread_chats: 0,
     unhandled_comments: 0,
@@ -68,6 +78,18 @@ export default function AppShell({
   const [navCustomizeOpen, setNavCustomizeOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState('');
+
+  // ดักรับ event จาก inbox-client เพื่อซ่อนแถบเมนูล่างและหัวแอปทันที 0ms เมื่อเข้าห้องแชท 1:1 บนมือถือ
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<{ open: boolean }>;
+      if (typeof custom.detail?.open === 'boolean') {
+        setIs1on1Chat(custom.detail.open);
+      }
+    };
+    window.addEventListener('hubchat:1on1-chat', handler);
+    return () => window.removeEventListener('hubchat:1on1-chat', handler);
+  }, []);
 
   useEffect(() => {
     try {
@@ -176,9 +198,14 @@ export default function AppShell({
   };
 
   const isInbox = pathname === '/inbox' || pathname.startsWith('/inbox/');
+  const show1on1Mobile = isInbox && is1on1Chat;
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden md:flex-row bg-background">
+      <Suspense fallback={null}>
+        <ChatParamTracker onChange={setIs1on1Chat} />
+      </Suspense>
+
       {/* ---------- เมนูซ้าย (เดสก์ท็อป) ---------- */}
       <aside className="hidden w-56 shrink-0 flex-col border-r bg-card md:flex">
         <Link
@@ -222,7 +249,12 @@ export default function AppShell({
 
       {/* ---------- คอลัมน์เนื้อหาหลัก + แถบเมนูล่าง (มือถือ) ---------- */}
       <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden">
-        <header className="flex h-[calc(3.5rem+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b bg-card px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
+        <header
+          className={cn(
+            'flex h-[calc(3.5rem+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b bg-card px-4 pt-[env(safe-area-inset-top,0px)] md:hidden',
+            show1on1Mobile && 'hidden',
+          )}
+        >
           <Link
             href="/inbox"
             prefetch={true}
@@ -250,16 +282,23 @@ export default function AppShell({
         <main
           className={cn(
             'flex-1 min-h-0',
-            isInbox
-              ? 'overflow-hidden p-0 md:p-2'
-              : 'overflow-y-auto overflow-x-hidden p-2 md:p-4'
+            show1on1Mobile
+              ? 'overflow-hidden p-0'
+              : isInbox
+                ? 'overflow-hidden p-0 md:p-2'
+                : 'overflow-y-auto overflow-x-hidden p-2 md:p-4'
           )}
         >
           {children}
         </main>
 
-        {/* ---------- แถบเมนูล่าง (มือถือ) — ตรึงล่างจอ 100% ไม่เลื่อนตามเนื้อหา ---------- */}
-        <nav className="shrink-0 z-40 flex border-t bg-card pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-1 md:hidden shadow-lg">
+        {/* ---------- แถบเมนูล่าง (มือถือ) — ตรึงล่างจอ 100% ไม่เลื่อนตามเนื้อหา (ซ่อนเมื่อคุยแชท 1:1) ---------- */}
+        <nav
+          className={cn(
+            'shrink-0 z-40 flex border-t bg-card pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-1 md:hidden shadow-lg',
+            show1on1Mobile && 'hidden',
+          )}
+        >
           {mobilePrimary.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const badge = getBadgeCount(item.href);

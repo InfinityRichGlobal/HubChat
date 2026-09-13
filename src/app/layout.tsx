@@ -34,9 +34,11 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  userScalable: false,
   // สีแถบบนสุดตอนติดตั้งเป็นแอป — ต้องตรงกับ theme_color ใน manifest.json
   themeColor: '#111827',
   viewportFit: 'cover', // กันโดนรอยบากของ iPhone บัง
+  interactiveWidget: 'resizes-content',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

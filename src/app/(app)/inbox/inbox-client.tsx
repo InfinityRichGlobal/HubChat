@@ -356,6 +356,12 @@ export default function InboxClient({
     setActiveId(currentC);
   }, [searchParams]);
 
+  // แจ้ง app-shell ทันทีเมื่อเปิด/ปิดแชท 1:1 เพื่อซ่อนหรือแสดงเมนูล่างและหัวแอป
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('hubchat:1on1-chat', { detail: { open: Boolean(activeId) } }));
+  }, [activeId]);
+
   // ดักฟัง popstate ของเบราว์เซอร์ (เช่น ปัดขอบจอย้อนกลับบน iOS / Safari PWA หรือกดปุ่ม Back)
   // ให้สลับ activeId ทันทีแบบ synchronous 0ms ไม่ต้องรอ transition ของ Next.js router
   useEffect(() => {
@@ -569,7 +575,7 @@ export default function InboxClient({
   }, [conversations, orderFilter, assignedAdminFilter, platformFilter, inboxGroup, selectedTags]);
 
   return (
-    <div className="flex h-full w-full gap-3 p-[10px]">
+    <div className={cn('flex h-full w-full gap-3', (active || activeId) ? 'p-0 md:p-[10px]' : 'p-2 md:p-[10px]')}>
       {/* ---------------- ลิสต์แชท ---------------- */}
       <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
         <div className="flex flex-col gap-2">
@@ -1077,7 +1083,7 @@ export default function InboxClient({
             }}
           />
         ) : activeId ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border p-6 text-center text-muted-foreground">
+          <div className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center text-muted-foreground md:relative md:inset-auto md:z-auto md:h-full md:rounded-lg md:border">
             <Loader2 className="size-8 animate-spin text-primary" />
             <div className="text-sm font-medium">กำลังเปิดห้องแชท...</div>
             <Button
@@ -1505,6 +1511,72 @@ function ChatRoom({
   const newestMessageAtRef = useRef<string | null>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 
+  const [viewportStyle, setViewportStyle] = useState<{ height: string; top: string } | null>(null);
+
+  // ตรวจสอบและเกาะติด visualViewport บนมือถือ (iOS Safari / Android)
+  // เพื่อตรึงกล่องพิมพ์ไว้เหนือบอร์ดพิมพ์พอดี ไม่ให้จอเด้งขึ้นๆลงๆ หรือคีย์บอร์ดบัง
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const vv = window.visualViewport;
+    const updateViewport = () => {
+      if (window.innerWidth < 768 && vv) {
+        setViewportStyle({
+          height: `${vv.height}px`,
+          top: `${vv.offsetTop}px`,
+        });
+        if (window.scrollY !== 0 || window.scrollX !== 0) {
+          window.scrollTo(0, 0);
+        }
+      } else {
+        setViewportStyle(null);
+      }
+    };
+
+    updateViewport();
+
+    if (vv) {
+      vv.addEventListener('resize', updateViewport);
+      vv.addEventListener('scroll', updateViewport);
+    }
+    window.addEventListener('resize', updateViewport);
+
+    // ล็อค body scrolling บนมือถือขณะคุย 1:1 ป้องกัน Safari เลื่อนพื้นหลังจนจอกระตุก
+    const prevOverflow = document.body.style.overflow;
+    const prevPos = document.body.style.position;
+    const prevH = document.body.style.height;
+    const prevW = document.body.style.width;
+    const prevOverscroll = document.body.style.overscrollBehavior;
+
+    if (window.innerWidth < 768) {
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.height = '100%';
+      document.body.style.width = '100%';
+      document.body.style.overscrollBehavior = 'none';
+    }
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', updateViewport);
+        vv.removeEventListener('scroll', updateViewport);
+      }
+      window.removeEventListener('resize', updateViewport);
+      document.body.style.overflow = prevOverflow;
+      document.body.style.position = prevPos;
+      document.body.style.height = prevH;
+      document.body.style.width = prevW;
+      document.body.style.overscrollBehavior = prevOverscroll;
+    };
+  }, []);
+
+  // เมื่อคีย์บอร์ดเปิดหรือปิด และ viewport height เปลี่ยน ให้ปรับข้อความลงล่างสุด
+  useEffect(() => {
+    if (stickBottomRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [viewportStyle?.height]);
+
   /* ---- ตัวดึงข้อมูล : คืนค่าอย่างเดียว ไม่ตั้ง state เอง ---- */
   const fetchMessages = useCallback(
     async (before?: string | null, after?: string | null, signal?: AbortSignal): Promise<{ rows: MessageRow[]; has_more: boolean; truncated: boolean } | null> => {
@@ -1711,7 +1783,7 @@ function ChatRoom({
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    el.style.height = 'auto';
+    el.style.height = '44px';
     const lineHeight = Number.parseFloat(window.getComputedStyle(el).lineHeight) || 24;
     const maxHeight = lineHeight * 6 + 16;
     const nextHeight = Math.min(el.scrollHeight, maxHeight);
@@ -2171,9 +2243,17 @@ function ChatRoom({
   const replyHint = windowHint(c.last_customer_message_at);
 
   return (
-    <div className="flex h-full flex-col rounded-lg border">
+    <div
+      className={cn(
+        'flex flex-col bg-background',
+        viewportStyle
+          ? 'fixed inset-x-0 z-40 rounded-none border-0'
+          : 'h-full rounded-lg border',
+      )}
+      style={viewportStyle ?? undefined}
+    >
       {/* ---------- หัวห้อง ---------- */}
-      <header className="border-b bg-card/60 px-2.5 py-2">
+      <header className="border-b bg-card/90 backdrop-blur-xs px-2.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top,0px))] md:pt-2">
         <div className="flex items-start gap-2.5">
           <Button variant="ghost" size="icon" className="-ml-2 size-9 md:hidden" onClick={onBack} aria-label="กลับ">
             <ArrowLeft />
@@ -2310,7 +2390,7 @@ function ChatRoom({
 
       {/* ---------- ข้อความ ---------- */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3">
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overscroll-contain px-3 py-3">
           {/* ⭐ ปุ่มโหลดของเก่า — เดิมเห็นได้แค่ชุดล่าสุดเท่านั้น เลื่อนขึ้นไปก็ไม่มีอะไรเพิ่ม */}
           {hasOlder && (
             <div className="mb-2 flex justify-center">
@@ -2383,7 +2463,7 @@ function ChatRoom({
       </div>
 
       {/* ---------- ช่องพิมพ์ ---------- */}
-      <div className="relative border-t p-2">
+      <div className="relative border-t bg-card p-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] md:pb-2">
         {canReply && (
           <div className="mb-1.5 flex items-center gap-1" aria-label="เครื่องมือแชท">
             <Button variant={browseCanned ? 'secondary' : 'ghost'} size="icon" className="size-8" aria-label="ชุดคำตอบ" title="ชุดคำตอบ" onClick={() => { setBrowseCanned((open) => !open); setDismissedCanned(false); }} disabled={sending || uploading}>
@@ -2647,6 +2727,16 @@ function ChatRoom({
               onChange={(e) => {
                 setText(e.target.value);
                 setDismissedCanned(false);
+              }}
+              onFocus={() => {
+                if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+                  setTimeout(() => {
+                    if (stickBottomRef.current && scrollRef.current) {
+                      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                    }
+                  }, 250);
+                }
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
