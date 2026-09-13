@@ -145,3 +145,14 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
 
   return summary;
 }
+
+let lastSyncTimestamp = 0;
+
+export async function syncPageCommentsThrottled(minIntervalMs = 15_000): Promise<CommentSyncSummary | null> {
+  const now = Date.now();
+  if (now - lastSyncTimestamp < minIntervalMs) {
+    return null;
+  }
+  lastSyncTimestamp = now;
+  return syncPageComments();
+}
