@@ -68,7 +68,7 @@ export async function sendImage(input: SendImageInput): Promise<SendResult> {
   const problem = validateImage({ size: input.file.size, type: input.file.mime });
   if (problem) throw new ImageSendError(problem);
 
-  // เก็บสำเนาขาออกใน R2 ก่อนถ้าตั้งค่าแล้ว (D-56) แต่ R2 พังต้องไม่ทำให้การตอบลูกค้าพัง
+  // เก็บสำเนาขาออกใน Storage (D-56) แต่หาก Storage พังต้องไม่ทำให้การตอบลูกค้าพัง
   let mediaId: string | null = null;
   try {
     mediaId = await storeUploadedFile(input.file.bytes, input.file.mime, 'outbound', {

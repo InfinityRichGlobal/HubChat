@@ -22,12 +22,6 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'b'.repeat(40);
 process.env.SESSION_SECRET = 'c'.repeat(40);
 process.env.ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
 
-// ⭐ ตั้งค่า R2 ปลอมไว้ เพื่อให้ isStorageConfigured() เป็น true
-//    ส่วนการยิงจริงถูกสวมด้วย fetch ปลอม จึงไม่ได้ต่อเน็ตออกไปไหน
-process.env.R2_ACCOUNT_ID = 'test-account';
-process.env.R2_ACCESS_KEY_ID = 'test-key';
-process.env.R2_SECRET_ACCESS_KEY = 'test-secret';
-process.env.R2_BUCKET = 'test-bucket';
 
 const { captureInboundMedia } = await import('@/server/storage/media');
 const { __setStorageFetcherForTests } = await import('@/server/storage/supabase-storage');
@@ -82,7 +76,7 @@ describe.skipIf(!available)('PostgreSQL จริง — เก็บสื่�
    * โลกภายนอกปลอม : นับจำนวนครั้งที่ถูกยิงจริง แยกเป็นดาวน์โหลด/อัปโหลด
    *
    * ⚠️ ต้องอ่าน url จาก Request object ให้ถูก
-   *    ชั้น R2 เซ็นคำขอแล้วส่ง Request เข้ามา ไม่ใช่สตริง
+   *    ชั้น Storage ส่ง Request เข้ามา ไม่ใช่สตริง
    *    ถ้าใช้ String(input) จะได้ '[object Request]' แล้วแยกไม่ออกว่าอันไหนอัปโหลด
    *    (เคยเขียนผิดแบบนั้นแล้วเทสต์ผ่านทั้งที่การอัปโหลดล้มเหลว)
    */
@@ -93,7 +87,7 @@ describe.skipIf(!available)('PostgreSQL จริง — เก็บสื่�
         typeof input === 'string' ? input
         : input instanceof URL ? input.href
         : (input as Request).url;
-      if (url.includes('r2.cloudflarestorage.com')) {
+      if (url.includes('storage/v1/object') || url.includes('r2.cloudflarestorage.com')) {
         state.uploads += 1;
         return new Response('', { status: opts.uploadStatus ?? 200 });
       }

@@ -75,7 +75,7 @@ export default function CustomerAvatar({
       aria-hidden="true"
     >
       {showImage ? (
-        // eslint-disable-next-line @next/next/no-img-element -- รูปมาจากโดเมนของ Meta/R2 ที่เปลี่ยนได้ ไม่เหมาะกับ next/image
+        // eslint-disable-next-line @next/next/no-img-element -- รูปมาจากโดเมนของ Meta/Storage ที่เปลี่ยนได้ ไม่เหมาะกับ next/image
         <img
           src={src!}
           alt=""

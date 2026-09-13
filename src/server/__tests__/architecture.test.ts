@@ -813,14 +813,14 @@ describe('🔴 ข้อมูลที่ทำให้ออเดอร์�
 /* D-17 — เก็บสื่อไว้เองอย่างถาวร                                        */
 /* ================================================================== */
 describe('🔴 ที่เก็บไฟล์ต้องอยู่ฝั่งเซิร์ฟเวอร์ที่เดียว', () => {
-  it('r2.cloudflarestorage.com ปรากฏได้เฉพาะใน server/storage/r2.ts', () => {
+  it('r2.cloudflarestorage.com ต้องไม่ปรากฏในโค้ดของระบบ', () => {
     const offenders = CODE_FILES.filter(
-      (f) => read(f).includes('r2.cloudflarestorage.com') && rel(f) !== 'server/storage/r2.ts',
+      (f) => read(f).includes('r2.cloudflarestorage.com'),
     ).map(rel);
     expect(offenders).toEqual([]);
   });
 
-  it('🔴 กุญแจของ R2 ห้ามหลุดไปฝั่งเบราว์เซอร์', () => {
+  it('🔴 กุญแจและไลบรารี Storage ต้องห้ามหลุดไปฝั่งเบราว์เซอร์', () => {
     const clientFiles = CODE_FILES.filter((f) => read(f).slice(0, 200).includes("'use client'"));
     const offenders = clientFiles
       .filter((f) => /R2_ACCESS_KEY|R2_SECRET|aws4fetch|AwsClient/.test(read(f)))

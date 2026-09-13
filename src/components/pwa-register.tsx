@@ -7,7 +7,7 @@
  *
  * ⚠️ Service Worker ทำงานเฉพาะบน https หรือ localhost เท่านั้น
  *    เปิดผ่าน http://192.168.x.x จะลงทะเบียนไม่ได้ — ไม่ใช่บั๊กของเรา
- *    (นี่คือเหตุผลที่ต้องใช้ Cloudflare Tunnel ตอนทดสอบบนมือถือ)
+ *    (นี่คือเหตุผลที่ต้องใช้ HTTPS/Tunnel หรือ Production domain ตอนทดสอบบนมือถือ)
  */
 import { useEffect } from 'react';
 
