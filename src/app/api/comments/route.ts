@@ -13,6 +13,14 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   try {
     const admin = await requirePermission('chat.reply');
+
+    try {
+      const { processWebhookBatch } = await import('@/server/ingest/processor');
+      await processWebhookBatch(5);
+    } catch {
+      // ไม่ให้กระทบการดึงคอมเมนต์
+    }
+
     const sp = req.nextUrl.searchParams;
 
     const result = await listComments(admin, {
