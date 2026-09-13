@@ -69,7 +69,9 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
     summary.comments_seen += res.comments.length;
 
     for (const c of res.comments) {
-      const isFromPage = c.from_id !== null && c.from_id === p.page_id;
+      const isFromPage =
+        (c.from_id !== null && c.from_id === p.page_id) ||
+        (c.from_name !== null && (c.from_name === p.page_name || c.from_name === p.display_name));
 
       try {
         const saved = await saveIncomingComment(

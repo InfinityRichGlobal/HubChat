@@ -144,6 +144,20 @@ export async function processCommentAutoReply(
   // คอมเมนต์ของเพจเราเอง ไม่ต้องตอบ
   if (ev.is_from_page) return;
 
+  // ป้องกันการตอบซ้ำ: หากคอมเมนต์นี้เคยตอบสาธารณะไปแล้ว ให้ข้ามทันที
+  if (savedCommentRowId) {
+    const { data: existing } = await db()
+      .from('comments')
+      .select('replied_public')
+      .eq('id', savedCommentRowId)
+      .maybeSingle();
+
+    if (existing?.replied_public) {
+      console.log(`[comment-bot] คอมเมนต์ ${ev.comment_id} เคยตอบสาธารณะไปแล้ว ข้ามการตอบซ้ำ`);
+      return;
+    }
+  }
+
   const settings = await getCommentBotSettings();
 
   // ถ้าไม่ได้เปิดฟีเจอร์ใดเลย ไม่ต้องทำต่อ
