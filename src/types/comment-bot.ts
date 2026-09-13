@@ -38,3 +38,18 @@ export const DEFAULT_COMMENT_BOT_SETTINGS: CommentBotSettings = {
   filter_keywords: ['สนใจ', 'ราคา', 'สั่งซื้อ', 'มีของไหม', 'โปร'],
   rules: [],
 };
+
+export type CommentBotTestResult = {
+  matched_rule: CommentBotRule | null;
+  passes_filter: boolean;
+  filter_reason: string;
+  would_like: boolean;
+  would_reply_public: boolean;
+  public_reply_mode: 'ai' | 'template' | 'rule' | 'none';
+  public_reply_text: string | null;
+  would_reply_private: boolean;
+  private_reply_mode: 'ai' | 'template' | 'rule' | 'none';
+  private_reply_text: string | null;
+  catalog_attached: boolean;
+  catalog_preview: string | null;
+};

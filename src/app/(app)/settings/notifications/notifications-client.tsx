@@ -216,7 +216,81 @@ export default function NotificationsClient({
             เครื่องแต่ละเครื่องต้องเปิดแยกกัน — เปิดบนมือถือแล้ว ไม่ได้แปลว่าคอมจะเด้งด้วย
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-col gap-4">
+          {/* 📋 Step-by-Step Checklist ตรวจสอบว่าทำไมไม่เด้ง */}
+          <div className="rounded-xl border bg-muted/20 p-3.5 flex flex-col gap-2.5 text-xs">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              📋 เช็คลิสต์ 4 ด่านตรวจการแจ้งเตือน (ต้องผ่านครบทุกข้อ):
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* ด่าน 1: กุญแจ VAPID */}
+              <div className="flex items-start gap-2 rounded-lg border bg-background p-2.5">
+                {pushConfigured ? (
+                  <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="size-4 text-amber-500 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p className="font-medium text-foreground">1. กุญแจ VAPID ของระบบ</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {pushConfigured ? 'พร้อมใช้งานแล้ว' : 'ยังไม่ได้ตั้งกุญแจแจ้งเตือน'}
+                  </p>
+                </div>
+              </div>
+
+              {/* ด่าน 2: ติดตั้งเป็น App PWA (สำคัญมากสำหรับ iOS) */}
+              <div className="flex items-start gap-2 rounded-lg border bg-background p-2.5">
+                {installed || !ios ? (
+                  <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="size-4 text-rose-500 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p className="font-medium text-foreground">2. ติดตั้งเป็นแอป (Add to Home)</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {installed
+                      ? 'ติดตั้งลงหน้าจอโฮมแล้ว'
+                      : ios
+                      ? '⚠️ iPhone ต้องกดแชร์ > เพิ่มไปยังหน้าจอโฮม ก่อน'
+                      : 'เปิดผ่านเบราว์เซอร์ปกติได้'}
+                  </p>
+                </div>
+              </div>
+
+              {/* ด่าน 3: สิทธิ์การแจ้งเตือนของเบราว์เซอร์ */}
+              <div className="flex items-start gap-2 rounded-lg border bg-background p-2.5">
+                {support?.ok ? (
+                  <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="size-4 text-amber-500 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p className="font-medium text-foreground">3. เบราว์เซอร์รองรับการแจ้งเตือน</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {support?.ok ? 'อุปกรณ์นี้รองรับ Web Push' : support?.message_th || 'กำลังตรวจสอบ...'}
+                  </p>
+                </div>
+              </div>
+
+              {/* ด่าน 4: การลงทะเบียนเครื่องนี้ */}
+              <div className="flex items-start gap-2 rounded-lg border bg-background p-2.5">
+                {deviceOn ? (
+                  <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="size-4 text-amber-500 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p className="font-medium text-foreground">4. เปิดรับการแจ้งเตือนบนเครื่องนี้</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {deviceOn
+                      ? 'เชื่อมต่อ Token แจ้งเตือนแล้ว'
+                      : 'ยังไม่ได้กดปุ่ม "เปิดแจ้งเตือนบนเครื่องนี้" ด้านล่าง'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {!pushConfigured && (
             <Alert variant="destructive">
               <AlertTriangle className="size-4" />

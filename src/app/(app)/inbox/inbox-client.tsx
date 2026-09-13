@@ -53,6 +53,14 @@ import type { ExtractedAddress } from '@/server/extract/address';
 /* ตัวช่วยแสดงผล                                                     */
 /* ---------------------------------------------------------------- */
 
+function isLightColor(hex: string): boolean {
+  const c = hex.replace('#', '');
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150;
+}
+
 /** นาฬิกา 24 ชม. ตามสเปก */
 function clockTh(iso: string): string {
   return new Date(iso).toLocaleTimeString('th-TH', {
@@ -1374,7 +1382,7 @@ function ConversationItem({
                   <span
                     key={id}
                     className="rounded-full border px-1.5 py-0.5 text-[10px]"
-                    style={{ borderColor: t.color, color: t.color }}
+                    style={{ backgroundColor: t.color, borderColor: t.color, color: isLightColor(t.color) ? '#1a1a1a' : '#ffffff' }}
                   >
                     {t.name}
                   </span>
@@ -1390,13 +1398,12 @@ function ConversationItem({
             {(c.assigned_admin_name || c.order_count > 0) && (
               <div className="flex shrink-0 items-center justify-end gap-1">
                 {c.assigned_admin_name && (
-                  <span
-                    className="inline-flex max-w-16 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 font-medium"
+                  <div
+                    className="size-5 shrink-0 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold border"
                     title={`ผู้ดูแล ${c.assigned_admin_name}`}
                   >
-                    <UserCheck className="size-2.5 shrink-0" />
-                    <span className="truncate">{c.assigned_admin_name}</span>
-                  </span>
+                    {c.assigned_admin_name.slice(0, 1).toUpperCase()}
+                  </div>
                 )}
                 {c.order_count > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
@@ -2229,7 +2236,7 @@ function ChatRoom({
               <span
                 key={id}
                 className="rounded-full border px-2 py-0.5 text-[11px]"
-                style={{ borderColor: t.color, color: t.color }}
+                style={{ backgroundColor: t.color, borderColor: t.color, color: isLightColor(t.color) ? '#1a1a1a' : '#ffffff' }}
               >
                 {t.name}
               </span>
@@ -3312,10 +3319,10 @@ function TagPicker({
                 disabled={busy === t.id}
                 onClick={() => void toggle(t)}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm',
-                  on ? 'text-primary-foreground' : 'text-muted-foreground',
+                  'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
+                  !on && 'text-muted-foreground hover:bg-muted/50'
                 )}
-                style={on ? { backgroundColor: t.color, borderColor: t.color } : { borderColor: t.color }}
+                style={on ? { backgroundColor: t.color, borderColor: t.color, color: isLightColor(t.color) ? '#1a1a1a' : '#ffffff' } : { borderColor: t.color, color: t.color }}
               >
                 {busy === t.id ? <Loader2 className="size-3 animate-spin" /> : null}
                 {t.name}

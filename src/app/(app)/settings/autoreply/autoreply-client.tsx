@@ -16,6 +16,7 @@ import {
   Bot,
   Brain,
   Check,
+  CheckCircle2,
   CornerDownRight,
   Edit2,
   Filter,
@@ -24,7 +25,10 @@ import {
   Mail,
   MessageCircle,
   MessageSquare,
+  Play,
   Plus,
+  RefreshCw,
+  Send,
   ShieldAlert,
   ShoppingBag,
   Sparkles,
@@ -39,6 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -63,6 +68,7 @@ import {
   DEFAULT_COMMENT_BOT_SETTINGS,
   type CommentBotSettings,
   type CommentBotRule,
+  type CommentBotTestResult,
 } from '@/types/comment-bot';
 
 type PageInfo = { id: string; display_name: string | null; page_name: string; tag_color: string };
@@ -111,27 +117,129 @@ export default function AutoReplyClient({
   const initialTab = searchParams.get('tab') === 'comments' ? 'comments' : 'chat';
   const [activeTab, setActiveTab] = useState<'chat' | 'comments'>(initialTab);
 
-  // ข้อมูล AI สำหรับแสดงผลในหน้าบอทคอมเมนต์
+  // ข้อมูล AI สำหรับแสดงผลในหน้าบอทคอมเมนต์และบอทแชท
   const [aiInfo, setAiInfo] = useState<{
     hasApiKey: boolean;
     model: string;
     hasKnowledge: boolean;
+    enableChatAssist: boolean;
   } | null>(null);
+
+  // ---------- ผู้ช่วย AI ในห้องแชท (Chat AI Assistant) ----------
+  const [chatAssistEnabled, setChatAssistEnabled] = useState(true);
+  const [savingChatAssist, setSavingChatAssist] = useState(false);
+  const [chatSimInput, setChatSimInput] = useState('สวัสดีค่ะ มีสินค้าพร้อมส่งไหมคะ มีโปรโมชั่นอะไรบ้าง');
+  const [chatSimOutput, setChatSimOutput] = useState('');
+  const [testingChatSim, setTestingChatSim] = useState(false);
+
+  // ---------- ทดสอบบอทคอมเมนต์ (Simulator) ----------
+  const [testCommentText, setTestCommentText] = useState('สนใจสั่งซื้อค่ะ ราคาเท่าไหร่คะ มีเก็บเงินปลายทางไหม');
+  const [testCommenterName, setTestCommenterName] = useState('คุณลูกค้า');
+  const [testingCommentBot, setTestingCommentBot] = useState(false);
+  const [commentBotTestResult, setCommentBotTestResult] = useState<CommentBotTestResult | null>(null);
 
   useEffect(() => {
     fetch('/api/ai/settings', { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => {
         if (json.ok && json.data) {
+          const isAssistOn = json.data.enableChatAssist ?? true;
           setAiInfo({
             hasApiKey: json.data.hasApiKey,
             model: json.data.model || 'gemini-3.6-flash',
             hasKnowledge: Boolean(json.data.knowledge?.trim()),
+            enableChatAssist: isAssistOn,
           });
+          setChatAssistEnabled(isAssistOn);
         }
       })
       .catch(() => {});
   }, []);
+
+  async function handleToggleChatAssist(nextVal: boolean) {
+    setChatAssistEnabled(nextVal);
+    setSavingChatAssist(true);
+    try {
+      const res = await fetch('/api/ai/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enableChatAssist: nextVal }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(nextVal ? 'เปิดผู้ช่วย AI ในห้องแชทแล้ว' : 'ปิดผู้ช่วย AI ในห้องแชทแล้ว');
+        setAiInfo((prev) => (prev ? { ...prev, enableChatAssist: nextVal } : null));
+      } else {
+        toast.error('บันทึกไม่สำเร็จ');
+        setChatAssistEnabled(!nextVal);
+      }
+    } catch {
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+      setChatAssistEnabled(!nextVal);
+    } finally {
+      setSavingChatAssist(false);
+    }
+  }
+
+  async function handleSimulateChatAssist() {
+    if (!chatSimInput.trim()) {
+      toast.error('กรุณาระบุข้อความจำลองของลูกค้า');
+      return;
+    }
+    setTestingChatSim(true);
+    setChatSimOutput('');
+    try {
+      const res = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'playground',
+          userMessage: chatSimInput.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data?.reply) {
+        setChatSimOutput(json.data.reply);
+      } else {
+        toast.error(json?.error?.message_th || 'AI ไม่สามารถตอบได้');
+      }
+    } catch {
+      toast.error('เกิดข้อผิดพลาดในการทดสอบ');
+    } finally {
+      setTestingChatSim(false);
+    }
+  }
+
+  async function handleRunCommentBotTest() {
+    if (!testCommentText.trim()) {
+      toast.error('กรุณาระบุข้อความคอมเมนต์จำลอง');
+      return;
+    }
+    setTestingCommentBot(true);
+    setCommentBotTestResult(null);
+    try {
+      const res = await fetch('/api/comments/bot-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comment_text: testCommentText.trim(),
+          commenter_name: testCommenterName.trim() || undefined,
+          settings: botSettings,
+        }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data) {
+        setCommentBotTestResult(json.data as CommentBotTestResult);
+        toast.success('รันเทสบอทคอมเมนต์สำเร็จ');
+      } else {
+        toast.error(json?.error?.message_th || 'รันเทสไม่สำเร็จ');
+      }
+    } catch {
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setTestingCommentBot(false);
+    }
+  }
 
   // ---------- ข้อมูลบอทแชท ----------
   const [rules, setRules] = useState(initialRules);
@@ -333,7 +441,127 @@ export default function AutoReplyClient({
       {/* ================================================================== */}
       {activeTab === 'chat' && (
         <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-2">
+          {/* 🧠 ผู้ช่วย AI ในห้องแชท (Chat AI Assistant) */}
+          <Card className="border-blue-200/60 bg-blue-50/20 dark:border-blue-900/40 dark:bg-blue-950/10">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                    <Brain className="size-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      ผู้ช่วย AI ในห้องแชท (Inbox AI Assistant)
+                      <Badge variant={chatAssistEnabled ? 'default' : 'secondary'} className="text-[10px]">
+                        {chatAssistEnabled ? 'เปิดใช้งาน' : 'ปิดอยู่'}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      ให้ Google Gemini ช่วยแอดมินคิดและร่างข้อความตอบลูกค้าในกล่องแชทอินบ็อกซ์
+                    </CardDescription>
+                  </div>
+                </div>
+                {canManage && (
+                  <Switch
+                    checked={chatAssistEnabled}
+                    disabled={savingChatAssist}
+                    onCheckedChange={(val) => void handleToggleChatAssist(val)}
+                  />
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 pt-0">
+              {chatAssistEnabled ? (
+                <>
+                  <div className="rounded-lg border bg-background/80 p-3 text-xs flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-medium text-foreground">
+                        <Sparkles className="size-3.5 text-blue-500" />
+                        <span>หลักการทำงานของผู้ช่วย AI ในห้องแชท:</span>
+                      </div>
+                      <Link
+                        href="/settings/ai"
+                        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline font-medium"
+                      >
+                        <span>ตั้งค่าคลังความรู้ & โมเดล AI</span>
+                        <ArrowRight className="size-3" />
+                      </Link>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-muted-foreground pl-1">
+                      <li>
+                        <strong className="text-foreground">โหมดร่างข้อความแนะนำ (Recommend Draft):</strong> AI จะนำข้อความล่าสุดของลูกค้า + ข้อมูลสินค้าในคลังความรู้ มาร่างคำตอบแนะนำในกล่องพิมพ์ให้แอดมินตรวจดู
+                      </li>
+                      <li>
+                        <strong className="text-foreground">ปลอดภัย 100%:</strong> ข้อความจะไม่ถูกส่งหาลูกค้าอัตโนมัติ แอดมินสามารถกดส่ง หรือปรับแต่งข้อความก่อนส่งได้ทันที
+                      </li>
+                      <li>
+                        <strong className="text-foreground">สมองที่ใช้:</strong> {aiInfo?.model ?? 'gemini-3.6-flash'} {aiInfo?.hasKnowledge ? '(มีคลังความรู้สินค้าแล้ว)' : '(ยังไม่มีคลังความรู้สินค้า)'}
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* จำลองคำตอบ AI ในแชท */}
+                  <div className="rounded-lg border bg-background p-3 flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Play className="size-3 text-blue-500" />
+                        ทดลองให้ AI ร่างคำตอบในแชท:
+                      </span>
+                      {chatSimOutput && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[11px] gap-1 px-2"
+                          onClick={() => void handleSimulateChatAssist()}
+                          disabled={testingChatSim}
+                        >
+                          <RefreshCw className={cn("size-2.5", testingChatSim && "animate-spin")} />
+                          ลองใหม่
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={chatSimInput}
+                        onChange={(e) => setChatSimInput(e.target.value)}
+                        placeholder="พิมพ์ข้อความลูกค้า เช่น สนใจสินค้าตัวนี้ มีโปรส่งฟรีไหมคะ"
+                        className="text-xs h-8"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void handleSimulateChatAssist();
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        className="h-8 shrink-0 text-xs gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                        onClick={() => void handleSimulateChatAssist()}
+                        disabled={testingChatSim || !chatSimInput.trim()}
+                      >
+                        {testingChatSim ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
+                        ทดสอบ
+                      </Button>
+                    </div>
+
+                    {chatSimOutput && (
+                      <div className="mt-1 rounded-md bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200/50 p-2.5 text-xs">
+                        <span className="font-semibold text-blue-700 dark:text-blue-300 block mb-1">
+                          💬 ร่างข้อความที่ AI แนะนำให้แอดมิน:
+                        </span>
+                        <p className="whitespace-pre-wrap leading-relaxed text-foreground">
+                          {chatSimOutput}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground py-1">
+                  เมื่อปิดการทำงาน แอดมินจะพิมพ์ตอบลูกค้าด้วยตนเองหรือใช้เทมเพลต Quick Reply ปกติ โดยไม่มีปุ่มให้ AI แนะนำคำตอบ
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="flex flex-wrap items-start justify-between gap-2 pt-2 border-t">
             <div>
               <h2 className="text-base font-semibold">ตอบอัตโนมัติด้วยคีย์เวิร์ด</h2>
               <p className="text-xs text-muted-foreground">
@@ -908,6 +1136,146 @@ export default function AutoReplyClient({
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 🧪 ห้องทดสอบบอทคอมเมนต์ (Comment Bot Simulator) */}
+            <div className="mt-6 rounded-xl border border-orange-200 bg-orange-50/20 dark:border-orange-900/40 dark:bg-orange-950/10 p-4">
+              <div className="flex flex-col gap-1 mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-7 items-center justify-center rounded-lg bg-orange-500/15 text-orange-600 dark:text-orange-400">
+                    <Sparkles className="size-3.5" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    🧪 ทดสอบบอทคอมเมนต์ (Dry-run Simulator)
+                  </h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  พิมพ์คอมเมนต์จำลองเพื่อทดสอบดูว่าบอทจะ กดไลก์, ตอบใต้โพสต์, หรือดึงเข้าแชทอย่างไร ตามกฎที่ตั้งไว้ด้านบน (ไม่ส่งจริงไปที่เพจ)
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-lg border bg-background p-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[11px] text-muted-foreground">ชื่อลูกค้าจำลอง:</Label>
+                    <Input
+                      value={testCommenterName}
+                      onChange={(e) => setTestCommenterName(e.target.value)}
+                      placeholder="เช่น น้องบีม"
+                      className="text-xs h-8"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <Label className="text-[11px] text-muted-foreground">ข้อความคอมเมนต์:</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={testCommentText}
+                        onChange={(e) => setTestCommentText(e.target.value)}
+                        placeholder="พิมพ์คอมเมนต์ เช่น สนใจค่ะ มีโปรส่งฟรีไหมคะ"
+                        className="text-xs h-8"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void handleRunCommentBotTest();
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        className="h-8 shrink-0 text-xs gap-1 bg-orange-600 hover:bg-orange-700 text-white"
+                        onClick={() => void handleRunCommentBotTest()}
+                        disabled={testingCommentBot || !testCommentText.trim()}
+                      >
+                        {testingCommentBot ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                        รันเทส
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {commentBotTestResult && (
+                  <div className="mt-2 flex flex-col gap-2.5 rounded-lg border p-3 bg-muted/20 text-xs">
+                    <div className="flex items-center justify-between border-b pb-2">
+                      <span className="font-semibold text-foreground flex items-center gap-1.5">
+                        <CheckCircle2 className="size-3.5 text-emerald-600" />
+                        ผลการจำลองการตอบของบอท:
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {commentBotTestResult.filter_reason}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="flex items-center gap-2 rounded-md border p-2 bg-background">
+                        <span className="text-base">👍</span>
+                        <div>
+                          <p className="font-medium text-[11px]">กดไลก์อัตโนมัติ</p>
+                          <Badge variant={commentBotTestResult.would_like ? 'default' : 'secondary'} className="text-[9px] mt-0.5">
+                            {commentBotTestResult.would_like ? 'กดไลก์' : 'ไม่กดไลก์'}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 rounded-md border p-2 bg-background">
+                        <span className="text-base">↩️</span>
+                        <div>
+                          <p className="font-medium text-[11px]">ตอบใต้โพสต์</p>
+                          <Badge variant={commentBotTestResult.would_reply_public ? 'default' : 'secondary'} className="text-[9px] mt-0.5">
+                            {commentBotTestResult.would_reply_public
+                              ? `ตอบ (${commentBotTestResult.public_reply_mode})`
+                              : 'ไม่ตอบ'}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 rounded-md border p-2 bg-background">
+                        <span className="text-base">💌</span>
+                        <div>
+                          <p className="font-medium text-[11px]">ดึงเข้าแชทส่วนตัว</p>
+                          <Badge variant={commentBotTestResult.would_reply_private ? 'default' : 'secondary'} className="text-[9px] mt-0.5">
+                            {commentBotTestResult.would_reply_private
+                              ? `ทักแชท (${commentBotTestResult.private_reply_mode})`
+                              : 'ไม่ทัก'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Preview ข้อความตอบใต้โพสต์ */}
+                    {commentBotTestResult.would_reply_public && commentBotTestResult.public_reply_text && (
+                      <div className="rounded-md border bg-background p-2.5">
+                        <span className="font-semibold text-foreground flex items-center gap-1 text-[11px] mb-1">
+                          💬 ข้อความที่จะโพสต์ตอบใต้คอมเมนต์:
+                          <Badge variant="outline" className="text-[9px]">
+                            {commentBotTestResult.public_reply_mode === 'ai' ? 'คิดโดย Gemini AI' : 'ใช้แม่แบบ Template'}
+                          </Badge>
+                        </span>
+                        <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                          {commentBotTestResult.public_reply_text}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Preview ข้อความทักแชทส่วนตัว */}
+                    {commentBotTestResult.would_reply_private && commentBotTestResult.private_reply_text && (
+                      <div className="rounded-md border bg-background p-2.5">
+                        <span className="font-semibold text-foreground flex items-center gap-1 text-[11px] mb-1">
+                          💌 ข้อความที่จะส่งเข้าแชท Messenger (Private Reply):
+                          <Badge variant="outline" className="text-[9px]">
+                            {commentBotTestResult.private_reply_mode === 'ai' ? 'คิดโดย Gemini AI' : 'ใช้แม่แบบ Template'}
+                          </Badge>
+                        </span>
+                        <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                          {commentBotTestResult.private_reply_text}
+                        </p>
+                        {commentBotTestResult.catalog_attached && commentBotTestResult.catalog_preview && (
+                          <div className="mt-2 pt-2 border-t text-[11px] text-muted-foreground whitespace-pre-wrap">
+                            <span className="font-medium text-foreground block mb-0.5">🛍️ แนบเมนูสินค้า/โปรฯ อัตโนมัติ:</span>
+                            {commentBotTestResult.catalog_preview}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -20,10 +20,11 @@ import {
   CommentBotSettingsSchema,
   type CommentBotSettings,
   type CommentBotRule,
+  type CommentBotTestResult,
   DEFAULT_COMMENT_BOT_SETTINGS,
 } from '@/types/comment-bot';
 
-export type { CommentBotSettings, CommentBotRule };
+export type { CommentBotSettings, CommentBotRule, CommentBotTestResult };
 export { DEFAULT_COMMENT_BOT_SETTINGS };
 
 const SETTINGS_KEY = 'comment_bot_settings';
@@ -376,5 +377,138 @@ export async function subscribeAllFacebookPages(): Promise<{
     total: results.length,
     succeeded,
     message_th: `เชื่อมต่อ Webhook สำหรับคอมเมนต์ (feed) ให้ ${succeeded} จาก ${results.length} เพจเรียบร้อยแล้ว`,
+  };
+}
+
+/**
+ * ทดสอบการทำงานของบอทคอมเมนต์แบบจำลอง (Dry-run)
+ */
+export async function testCommentBot(input: {
+  comment_text: string;
+  commenter_name?: string;
+  settings?: CommentBotSettings;
+}): Promise<CommentBotTestResult> {
+  const settings = input.settings || await getCommentBotSettings();
+  const msg = (input.comment_text || '').trim();
+  const name = (input.commenter_name || '').trim() || 'คุณลูกค้า';
+
+  // 1. ค้นหากฎเฉพาะคำ (rules) ที่ตรง
+  let matchedRule: CommentBotRule | null = null;
+  for (const r of settings.rules) {
+    if (!r.is_active) continue;
+    if (matchKeyword(msg, r.keyword, r.match_type)) {
+      matchedRule = r;
+      break;
+    }
+  }
+
+  // 2. ตรวจสอบเงื่อนไขตัวกรองคำ (filter_mode)
+  let passes_filter = true;
+  let filter_reason = 'ผ่านการกรอง (ตอบทุกคอมเมนต์)';
+  if (settings.filter_mode === 'keyword_only') {
+    const matchedFilterKw = (settings.filter_keywords || []).find((kw) =>
+      matchKeyword(msg, kw, 'contains')
+    );
+    if (matchedFilterKw) {
+      passes_filter = true;
+      filter_reason = `ตรวจพบคีย์เวิร์ด "${matchedFilterKw}"`;
+    } else {
+      passes_filter = false;
+      filter_reason = 'ไม่พบคีย์เวิร์ดที่กำหนดในคอมเมนต์';
+    }
+  }
+
+  // 3. ไลก์
+  const would_like = settings.auto_like && passes_filter;
+
+  // 4. ตอบใต้โพสต์
+  let would_reply_public = false;
+  let public_reply_mode: 'ai' | 'template' | 'rule' | 'none' = 'none';
+  let public_reply_text: string | null = null;
+
+  if (matchedRule && matchedRule.public_reply) {
+    would_reply_public = true;
+    public_reply_mode = 'rule';
+    public_reply_text = formatMessage(matchedRule.public_reply, name);
+  } else if (settings.auto_reply_public && passes_filter) {
+    would_reply_public = true;
+    if (settings.reply_mode === 'ai') {
+      try {
+        const aiText = await generateCommentReply(msg, {
+          fromName: name,
+          mode: 'public',
+        });
+        if (aiText) {
+          public_reply_mode = 'ai';
+          public_reply_text = aiText;
+        } else {
+          public_reply_mode = 'template';
+          public_reply_text = formatMessage(settings.public_reply_template, name);
+        }
+      } catch {
+        public_reply_mode = 'template';
+        public_reply_text = formatMessage(settings.public_reply_template, name);
+      }
+    } else {
+      public_reply_mode = 'template';
+      public_reply_text = formatMessage(settings.public_reply_template, name);
+    }
+  }
+
+  // 5. ดึงเข้าแชทส่วนตัว
+  let would_reply_private = false;
+  let private_reply_mode: 'ai' | 'template' | 'rule' | 'none' = 'none';
+  let private_reply_text: string | null = null;
+
+  if (matchedRule && matchedRule.private_reply) {
+    would_reply_private = true;
+    private_reply_mode = 'rule';
+    private_reply_text = formatMessage(matchedRule.private_reply, name);
+  } else if (settings.auto_reply_private && passes_filter) {
+    would_reply_private = true;
+    if (settings.reply_mode === 'ai') {
+      try {
+        const aiText = await generateCommentReply(msg, {
+          fromName: name,
+          mode: 'private',
+        });
+        if (aiText) {
+          private_reply_mode = 'ai';
+          private_reply_text = aiText;
+        } else {
+          private_reply_mode = 'template';
+          private_reply_text = formatMessage(settings.private_reply_template, name);
+        }
+      } catch {
+        private_reply_mode = 'template';
+        private_reply_text = formatMessage(settings.private_reply_template, name);
+      }
+    } else {
+      private_reply_mode = 'template';
+      private_reply_text = formatMessage(settings.private_reply_template, name);
+    }
+  }
+
+  // 6. แคตตาล็อก
+  let catalog_attached = false;
+  let catalog_preview: string | null = null;
+  if (would_reply_private && settings.auto_send_catalog) {
+    catalog_preview = await formatCatalogText();
+    catalog_attached = Boolean(catalog_preview);
+  }
+
+  return {
+    matched_rule: matchedRule,
+    passes_filter,
+    filter_reason,
+    would_like,
+    would_reply_public,
+    public_reply_mode,
+    public_reply_text,
+    would_reply_private,
+    private_reply_mode,
+    private_reply_text,
+    catalog_attached,
+    catalog_preview,
   };
 }

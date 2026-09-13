@@ -194,6 +194,47 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
     }
   }
 
+  const [savingExample, setSavingExample] = useState(false);
+
+  async function handleSaveExample() {
+    if (!testInput.trim() || !testOutput.trim()) {
+      toast.error('กรุณาระบุทั้งข้อความลูกค้าและคำตอบก่อนบันทึก');
+      return;
+    }
+    setSavingExample(true);
+    try {
+      const addition = `\n\n- คำถามลูกค้า: ${testInput.trim()}\n  แนวทางคำตอบ: ${testOutput.trim()}`;
+      const updatedKnowledge = (knowledge || '').trim() + addition;
+      setKnowledge(updatedKnowledge);
+
+      if (isOwner) {
+        const payload: Record<string, unknown> = {
+          systemPrompt,
+          knowledge: updatedKnowledge,
+          model,
+          temperature,
+        };
+        const res = await fetch('/api/ai/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (json.ok) {
+          toast.success('บันทึกตัวอย่างคำตอบลงคลังความรู้เรียบร้อยแล้ว');
+        } else {
+          toast.success('เพิ่มตัวอย่างลงในช่องคลังความรู้แล้ว (กรุณากดบันทึกด้านบน)');
+        }
+      } else {
+        toast.success('เพิ่มตัวอย่างลงในช่องคลังความรู้แล้ว (กรุณากดบันทึกด้านบน)');
+      }
+    } catch {
+      toast.error('บันทึกตัวอย่างไม่สำเร็จ');
+    } finally {
+      setSavingExample(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -370,50 +411,44 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
         </CardContent>
       </Card>
 
-      {/* 4. สวิตช์เปิด-ปิดฟังก์ชัน AI */}
+      {/* 4. จุดใช้งาน AI — ลิงก์ไปหน้าตั้งค่าบอท */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Sliders className="size-4 text-primary" />
-            4. เปิด-ปิดจุดใช้งาน AI ในระบบ
+            4. จุดใช้งาน AI ในระบบ
           </CardTitle>
           <CardDescription>
-            ควบคุมว่าต้องการให้ AI ทำงานที่จุดใดบ้าง
+            เปิด/ปิดและตั้งค่าละเอียดของแต่ละบอทได้ที่หน้าตั้งค่าบอท
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col divide-y">
-          <div className="flex items-center justify-between py-3">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium">แนะนำคำตอบในหน้าคอมเมนต์</span>
-              <span className="text-xs text-muted-foreground">แสดงปุ่ม &quot;ให้ AI ช่วยคิดคำตอบ&quot; ใต้คอมเมนต์ลูกค้า</span>
+        <CardContent className="flex flex-col gap-2">
+          <Link
+            href="/settings/autoreply?tab=chat"
+            className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <MessageSquare className="size-4 text-blue-500" />
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">💬 บอทแชท + ผู้ช่วย AI</span>
+                <span className="text-xs text-muted-foreground">ตอบแชทอัตโนมัติ & แนะนำคำตอบในอินบ็อกซ์</span>
+              </div>
             </div>
-            <Switch checked={enableCommentSuggest} onCheckedChange={setEnableCommentSuggest} />
-          </div>
-
-          <div className="flex items-center justify-between py-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">ตอบคอมเมนต์อัตโนมัติ (AI Auto-Reply)</span>
-              <span className="text-xs text-muted-foreground">
-                เมื่อมีคอมเมนต์ใหม่เข้ามา ให้ AI นำคลังความรู้มาคิดคำตอบและตอบกลับใต้โพสต์ทันที (เชื่อมโยงกับบอทคอมเมนต์)
-              </span>
-              <Link
-                href="/settings/autoreply?tab=comments"
-                className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-2 hover:opacity-80 mt-0.5"
-              >
-                <Sliders className="size-3" />
-                ตั้งค่าเงื่อนไขบอทคอมเมนต์เพิ่มเติม (กดไลก์ / ดึงเข้าแชท / กรองคำ)
-              </Link>
+            <ExternalLink className="size-4 text-muted-foreground" />
+          </Link>
+          <Link
+            href="/settings/autoreply?tab=comments"
+            className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <MessageSquare className="size-4 text-orange-500" />
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">📝 บอทคอมเมนต์</span>
+                <span className="text-xs text-muted-foreground">กดไลก์ ตอบคอมเมนต์ ดึงเข้าแชท ส่งเมนูสินค้า</span>
+              </div>
             </div>
-            <Switch checked={autoReplyComments} onCheckedChange={setAutoReplyComments} />
-          </div>
-
-          <div className="flex items-center justify-between py-3">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium">ผู้ช่วย AI ในห้องแชท</span>
-              <span className="text-xs text-muted-foreground">ช่วยร่างข้อความตอบลูกค้าในกล่องแชทอินบ็อกซ์</span>
-            </div>
-            <Switch checked={enableChatAssist} onCheckedChange={setEnableChatAssist} />
-          </div>
+            <ExternalLink className="size-4 text-muted-foreground" />
+          </Link>
         </CardContent>
       </Card>
 
@@ -425,7 +460,7 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
             5. ห้องทดลองเทรนบอท (AI Playground)
           </CardTitle>
           <CardDescription>
-            ทดลองพิมพ์ข้อความจำลองจากลูกค้า เพื่อดูว่า AI จะตอบกลับอย่างไรตามคำสั่งและคลังความรู้ที่ตั้งไว้
+            ทดลองพิมพ์ข้อความจำลอง → ดูคำตอบ AI → แก้ไขให้ถูกต้อง → บันทึกเป็นตัวอย่างลงคลังความรู้
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -454,13 +489,43 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
 
           {testOutput && (
             <div className="mt-2 rounded-lg border bg-background p-3.5 shadow-xs">
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                <Bot className="size-3.5" />
-                คำตอบจาก AI ({model}):
+              <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  <Bot className="size-3.5" />
+                  คำตอบจาก AI ({model}):
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={handlePlaygroundTest}
+                  disabled={testingPlayground}
+                >
+                  <RefreshCw className={`size-3 ${testingPlayground ? 'animate-spin' : ''}`} />
+                  ตอบใหม่
+                </Button>
               </div>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                {testOutput}
-              </p>
+              <Textarea
+                value={testOutput}
+                onChange={(e) => setTestOutput(e.target.value)}
+                className="min-h-[80px] text-sm leading-relaxed"
+                placeholder="แก้ไขคำตอบให้ถูกต้องตามที่ต้องการ"
+              />
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">
+                  ✏️ แก้ไขคำตอบด้านบนให้ถูกต้อง แล้วกด &quot;บันทึกเป็นตัวอย่าง&quot; เพื่อสอน AI
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                  onClick={handleSaveExample}
+                  disabled={savingExample}
+                >
+                  {savingExample ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                  บันทึกเป็นตัวอย่าง
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>

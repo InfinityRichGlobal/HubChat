@@ -378,24 +378,26 @@ async function handleComment(
     // รันบอทคอมเมนต์อัตโนมัติ (ไลก์ ตอบใต้โพสต์ ทักส่วนตัว ตามที่ตั้งค่าไว้)
     await processCommentAutoReply(page, ev, saved.id);
 
-    if (!saved.matched) return;
-
-    summary.comments_flagged += 1;
+    if (saved.matched) {
+      summary.comments_flagged += 1;
+    }
 
     /**
-     * ⭐ แจ้งเตือนเฉพาะคอมเมนต์ที่ "เข้าคำกรอง" เท่านั้น
-     *    โพสต์ที่ยิงแอดอยู่มีคอมเมนต์ได้เป็นพัน ถ้าแจ้งทุกอันแอดมินปิดแจ้งเตือนทิ้งแน่
-     *    และ 🔴 แจ้งเตือนอย่างเดียว ห้ามตอบอัตโนมัติ (สเปก 5.5)
+     * ⭐ แจ้งเตือนเมื่อมีคอมเมนต์ใหม่จากลูกค้า
+     *    ถ้าเข้าคำกรอง จะระบุคำที่พบในหัวข้อ
      */
-    if (saved.id) {
+    if (saved.id && !ev.is_from_page) {
+      const title = saved.matched
+        ? `💭 คอมเมนต์เข้าคำว่า "${saved.matched}"`
+        : `💬 มีคอมเมนต์ใหม่ใต้โพสต์`;
       const result = await dispatchNotification({
         event: 'new_comment',
         page_id: page.id,
         // comment_id ของ Meta ไม่ซ้ำอยู่แล้ว ใช้เป็นกุญแจกันซ้ำได้ตรง ๆ
         subject_id: saved.id,
         conversation_id: null,
-        title: `💭 คอมเมนต์เข้าคำว่า "${saved.matched}"`,
-        body: `${ev.from_name || 'ผู้ใช้'}: ${(ev.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '(ไม่มีข้อความ)'}`,
+        title,
+        body: `${ev.from_name || 'ลูกค้า'}: ${(ev.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '(ไม่มีข้อความ)'}`,
         link: '/comments',
       });
       summary.notifications_queued += result.queued;
