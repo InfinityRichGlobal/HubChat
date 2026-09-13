@@ -354,6 +354,32 @@ export async function processCommentAutoReply(
               p_conversation_id: null,
               p_customer_id: null,
             });
+
+            try {
+              const { data: latestConv } = await db()
+                .from('conversations')
+                .select('customer_id, customers(name, profile_pic_url)')
+                .eq('page_id', page.id)
+                .order('last_message_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              const cust = (Array.isArray(latestConv?.customers) ? latestConv?.customers[0] : latestConv?.customers) as { name?: string; profile_pic_url?: string } | null;
+              const customerName = cust?.name;
+              const customerPic = cust?.profile_pic_url;
+
+              if (customerName || customerPic) {
+                await db()
+                  .from('comments')
+                  .update({
+                    ...(customerName ? { from_name: customerName } : {}),
+                    ...(customerPic ? { from_pic_url: customerPic } : {}),
+                  })
+                  .eq('id', savedCommentRowId);
+              }
+            } catch (nameErr) {
+              console.warn('[comment-bot] อัปเดตชื่อลูกค้าจากแชทไม่สำเร็จ:', nameErr);
+            }
           } else {
             console.warn(
               `[comment-bot] ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} ไม่สำเร็จ (${page.platform}):`,
