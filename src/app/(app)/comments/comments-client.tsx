@@ -135,18 +135,15 @@ export default function CommentsClient({
     }
   }, [unhandledOnly, selectedPageId]);
 
-  /* ---- ดึงซ้ำเป็นระยะ พร้อมซิงค์สดจาก Meta ทุก 30 วินาที ---- */
+  /* ---- ดึงและซิงค์สดจาก Meta Graph API อัตโนมัติทุก 15 วินาที ---- */
   useEffect(() => {
     let alive = true;
-    let pollCount = 0;
     const apply = () => {
       if (!alive) return;
-      pollCount++;
-      const shouldSync = pollCount % 5 === 0;
-      void load(shouldSync);
+      void load(true);
     };
     const first = setTimeout(() => void load(true), 0);
-    const timer = setInterval(apply, POLL_MS);
+    const timer = setInterval(apply, 15_000);
     return () => {
       alive = false;
       clearTimeout(first);
