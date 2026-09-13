@@ -69,8 +69,9 @@ const EMPTY: BackfillSummary = {
  *    กดซ้ำได้เรื่อย ๆ และกันซ้ำอยู่แล้ว จึงปลอดภัยกว่าดึงทีเดียวจบ
  */
 const MAX_PAGES_PER_RUN = 1;
-const CONVERSATIONS_PER_PAGE = 8;
-const MESSAGES_PER_CONVERSATION = 20;
+const CONVERSATIONS_PER_PAGE = 3;
+const MESSAGES_PER_CONVERSATION = 10;
+const MAX_SYNC_DURATION_MS = 6500;
 
 function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -174,6 +175,7 @@ export async function backfillPageConversations(
   page: MetaPage,
   after?: string | null,
 ): Promise<BackfillSummary> {
+  const startTime = Date.now();
   const summary: BackfillSummary = { ...EMPTY };
   const platform: Platform = page.platform;
 
@@ -197,6 +199,10 @@ export async function backfillPageConversations(
     }
 
     for (const conv of result.conversations) {
+      if (Date.now() - startTime > MAX_SYNC_DURATION_MS && summary.conversations_seen > 0) {
+        console.warn(`[backfill] เวลาใกล้แตะลิมิต (${MAX_SYNC_DURATION_MS}ms) สรุปยอดเท่าที่ดึงได้ทันที`);
+        break;
+      }
       summary.conversations_seen += 1;
 
       // หา psid ของลูกค้า = คนที่ไม่ใช่เพจ

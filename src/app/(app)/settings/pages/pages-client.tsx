@@ -672,10 +672,19 @@ function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ after: next }),
         });
-        const json = await res.json();
+        let json: any = null;
+        try {
+          json = await res.json();
+        } catch {
+          problem =
+            res.status === 504
+              ? 'เซิร์ฟเวอร์ใช้เวลาประมวลผลนานเกินกำหนด — กรุณากดดึงอีกครั้ง'
+              : `เซิร์ฟเวอร์ตอบกลับรหัสข้อผิดพลาด (${res.status})`;
+          break;
+        }
 
-        if (!res.ok || !json.ok) {
-          problem = json?.error?.message_th ?? 'ดึงแชทเก่าไม่สำเร็จ';
+        if (!res.ok || !json?.ok) {
+          problem = json?.error?.message_th ?? `ดึงแชทเก่าไม่สำเร็จ (${res.status})`;
           break;
         }
 
@@ -744,7 +753,7 @@ function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" disabled>
           <Loader2 className="animate-spin" />
-          กำลังดึง... {tally ? `(${tally.conversations} ห้อง · ${tally.saved} ข้อความ)` : '(กำลังติดต่อ Meta...)'}
+          กำลังดึงแชท... {tally ? `(${tally.conversations} ห้อง · ${tally.saved} ข้อความ)` : '(กำลังประมวลผล ~3 วินาที)'}
         </Button>
         <Button
           variant="ghost"
