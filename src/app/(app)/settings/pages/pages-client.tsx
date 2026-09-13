@@ -638,10 +638,10 @@ type SyncTally = {
 };
 
 /**
- * 1 คลิก = 1 ชุด (~8 ห้องแชท) เพื่อความรวดเร็วและไม่ชน Timeout ของ Vercel
- * หากยังมีแชทเหลืออยู่ ปุ่มจะเปลี่ยนเป็น "ดึงต่อ (ยังเหลืออีก)" ให้กดต่อได้ทันที
+ * 1 คลิก = ดึงอัตโนมัติ 5 รอบย่อยต่อเนื่อง (รอบละ ~2-3 วินาที)
+ * เพื่อดึงเป็นก้อนใหญ่ได้อย่างรวดเร็ว โดยไม่ชน Timeout ของ Vercel
  */
-const MAX_ROUNDS_PER_CLICK = 1;
+const MAX_ROUNDS_PER_CLICK = 5;
 
 function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
   const [running, setRunning] = useState(false);
@@ -753,7 +753,7 @@ function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" disabled>
           <Loader2 className="animate-spin" />
-          กำลังดึงแชท... {tally ? `(${tally.conversations} ห้อง · ${tally.saved} ข้อความ)` : '(กำลังประมวลผล ~3 วินาที)'}
+          กำลังดึงแชท... {tally ? `(รอบ ${tally.rounds}/${MAX_ROUNDS_PER_CLICK} · ได้ ${tally.conversations} ห้อง · ${tally.saved} ข้อความ)` : '(กำลังเริ่มดึง...)'}
         </Button>
         <Button
           variant="ghost"
