@@ -471,7 +471,7 @@ function CommentCard({
   return (
     <div
       className={cn(
-        'flex flex-col gap-2.5 rounded-2xl border bg-card p-3 sm:p-3.5 shadow-2xs transition',
+        'flex flex-col gap-2 rounded-xl border bg-card px-3 pt-3 pb-2 sm:px-3.5 sm:pt-3 sm:pb-2.5 shadow-2xs transition',
         c.is_handled && 'bg-card/85 border-border/70',
         c.is_deleted && 'opacity-60',
       )}
@@ -479,12 +479,17 @@ function CommentCard({
       {/* แถวหัวข้อ: โปรไฟล์ลูกค้า + เวลา (จัดชิดซ้ายและขวา ไม่เบียดกัน) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="shrink-0">
+          <div className="relative shrink-0">
             <CustomerAvatar
               name={c.from_name || c.from_username || 'ลูกค้า'}
               src={c.from_pic_url}
               size="sm"
             />
+            {page && (
+              <span className="absolute -bottom-1 -right-1 pointer-events-none">
+                <PlatformIcon platform={page.platform} size="xs" />
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
@@ -556,7 +561,7 @@ function CommentCard({
       )}
 
       {/* เนื้อหาคอมเมนต์ของลูกค้า */}
-      <div className="flex flex-col gap-1.5 px-0.5 py-0.5">
+      <div className="flex flex-col gap-1 px-0.5">
         <p className={cn('text-sm text-foreground whitespace-pre-wrap leading-relaxed', c.is_deleted && 'line-through text-muted-foreground')}>
           {c.message || '(ไม่มีข้อความ)'}
         </p>
@@ -665,20 +670,20 @@ function CommentCard({
 
       {/* แถบปุ่มจัดการ (เมื่อไม่ได้เปิดฟอร์มตอบ) */}
       {mode === 'none' && (
-        <div className="flex flex-wrap items-center justify-between gap-1.5 border-t border-border/40 pt-2 mt-0.5">
+        <div className="flex flex-wrap items-center justify-between gap-1 border-t border-border/40 pt-1.5 mt-0">
           {/* แถบปุ่มหลัก (ตอบกลับ / ทักแชท / ไลก์) */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1">
             {!c.is_deleted && (
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7.5 gap-1.5 text-xs font-medium rounded-lg hover:border-primary/50"
+                className="h-7 gap-1 text-xs font-medium rounded-lg hover:border-primary/50"
                 onClick={() => {
                   setMode('public');
                   setTimeout(() => textareaRef.current?.focus(), 50);
                 }}
               >
-                <MessageSquare className="size-3.5 text-sky-500" />
+                <MessageSquare className="size-3 text-sky-500" />
                 ตอบใต้โพสต์
               </Button>
             )}
@@ -687,13 +692,13 @@ function CommentCard({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7.5 gap-1.5 text-xs font-medium rounded-lg text-purple-700 border-purple-200 hover:bg-purple-50 dark:border-purple-900/50 dark:text-purple-400 dark:hover:bg-purple-950/30"
+                className="h-7 gap-1 text-xs font-medium rounded-lg text-purple-700 border-purple-200 hover:bg-purple-50 dark:border-purple-900/50 dark:text-purple-400 dark:hover:bg-purple-950/30"
                 onClick={() => {
                   setMode('private');
                   setTimeout(() => textareaRef.current?.focus(), 50);
                 }}
               >
-                <Send className="size-3.5" />
+                <Send className="size-3" />
                 ทักส่วนตัว
               </Button>
             )}
@@ -710,29 +715,29 @@ function CommentCard({
                 variant="ghost"
                 disabled={sending}
                 onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
-                className={cn('h-7.5 gap-1.5 text-xs rounded-lg px-2', c.is_liked && 'text-primary font-semibold')}
+                className={cn('h-7 gap-1 text-xs rounded-lg px-2', c.is_liked && 'text-primary font-semibold')}
               >
-                <ThumbsUp className={cn('size-3.5', c.is_liked && 'fill-current text-primary')} />
+                <ThumbsUp className={cn('size-3', c.is_liked && 'fill-current text-primary')} />
                 {c.is_liked ? 'เลิกถูกใจ' : 'ถูกใจ'}
               </Button>
             )}
 
             {/* ถ้าตอบครบทั้งสองแบบแล้ว */}
             {c.replied_public && c.replied_private && (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground py-0.5">
                 ตอบกลับครบแล้ว
               </span>
             )}
           </div>
 
           {/* ปุ่มจัดการเสริม (ซ่อน, จัดการแล้ว, ลบ, ไปที่แชท) */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             <Button
               size="sm"
               variant="ghost"
               disabled={sending}
               onClick={() => void act({ action: 'handled', handled: !c.is_handled })}
-              className="h-7.5 gap-1 text-xs text-muted-foreground hover:text-foreground rounded-lg px-2"
+              className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground rounded-lg px-2"
               title={c.is_handled ? 'กดเพื่อทำเครื่องหมายว่ายังไม่จัดการ' : 'กดเมื่อจัดการเสร็จแล้ว'}
             >
               <Check className={cn('size-3.5', c.is_handled && 'text-emerald-600 font-bold')} />
@@ -741,8 +746,8 @@ function CommentCard({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7.5 rounded-lg text-muted-foreground">
-                  <MoreHorizontal className="size-4" />
+                <Button variant="ghost" size="icon" className="size-7 rounded-lg text-muted-foreground">
+                  <MoreHorizontal className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40 text-xs">
