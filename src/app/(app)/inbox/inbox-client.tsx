@@ -4,10 +4,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle, ArrowLeft, ArrowDown, Check, CheckCheck, ChevronDown, ChevronUp, ClipboardCopy, Copy, ExternalLink, ImageIcon, Images,
-  Bot, CheckCircle2, Clock, Handshake, Inbox, Layers, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
+  Bot, CheckCircle2, Clock, Handshake, Heart, Inbox, Layers, Loader2, Lock, MapPin, MessageCircle, MessageSquareOff,
   Megaphone, Package, Paperclip, Phone, Reply, RefreshCw, Search, Send, ShieldAlert, ShoppingBag, ShoppingCart,
   SlidersHorizontal, Sparkles, Star, User, UserCheck, Tag as TagIcon, Video, X,
 } from 'lucide-react';
+import type { AiCategory } from '@/types/ai-assist';
+import { DEFAULT_ASSIST_CATEGORIES, DEFAULT_RELATION_CATEGORIES } from '@/types/ai-assist';
 import OrderDialog from './order-dialog';
 import CustomerDrawer from './customer-drawer';
 import ProductPicker from './product-picker';
@@ -1476,6 +1478,9 @@ function ChatRoom({
   const [productOpen, setProductOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [aiDrafting, setAiDrafting] = useState(false);
+  const [aiDraftingMode, setAiDraftingMode] = useState<'reply' | 'relationship' | null>(null);
+  const [assistCategories, setAssistCategories] = useState<AiCategory[]>(DEFAULT_ASSIST_CATEGORIES);
+  const [relationCategories, setRelationCategories] = useState<AiCategory[]>(DEFAULT_RELATION_CATEGORIES);
   const [stateBusy, setStateBusy] = useState(false);
   const [menuFor, setMenuFor] = useState<MessageRow | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
@@ -1824,6 +1829,25 @@ function ChatRoom({
       clearTimeout(timer);
     };
   }, [slashQuery, browseCanned]);
+
+  // โหลดหมวดหมู่ AI ช่วยคิด และ AI สานสัมพันธ์
+  useEffect(() => {
+    fetch('/api/ai/assist')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok && json.data) {
+          if (Array.isArray(json.data.assist) && json.data.assist.length > 0) {
+            setAssistCategories(json.data.assist);
+          }
+          if (Array.isArray(json.data.relation) && json.data.relation.length > 0) {
+            setRelationCategories(json.data.relation);
+          }
+        }
+      })
+      .catch((e) => {
+        console.error('[inbox] Failed to load assist categories:', e);
+      });
+  }, []);
 
   // ⚠️ คำนวณจาก state แทนการล้าง state ในตัว effect
   //    (ล้างใน effect จะทำให้ React เรนเดอร์ซ้อนกันเป็นทอด ๆ)
@@ -2199,43 +2223,83 @@ function ChatRoom({
     }
   }
 
-  async function handleAiDraftReply() {
-    // หาข้อความลูกค้า: จากที่เลือกตอบกลับอยู่ หรือข้อความล่าสุดของลูกค้าในห้องนี้
+  async function handleAiDraftReply(categoryId?: string) {
+    // หาข้อความลูกค้า: จากที่เลือกตอบกลับอยู่ หรือข้อความล่าสุดของลูกค้าในห้องนี้ (direction === 'in' เท่านั้น ไม่เอาฝั่งเรา)
     const targetText =
       replyTarget?.direction === 'in' && replyTarget.text
         ? replyTarget.text
-        : messages?.filter((m) => m.direction === 'in' && m.text)?.slice(-1)[0]?.text;
+        : messages?.filter((m) => m.direction === 'in' && m.text && m.text.trim().length > 0)?.slice(-1)[0]?.text;
 
     if (!targetText) {
-      toast.info('ไม่พบข้อความจากลูกค้าในห้องนี้เพื่อให้ AI อ้างอิง');
+      toast.info('ไม่พบข้อความจากลูกค้าในห้องนี้เพื่อให้ AI ช่วยคิด');
       return;
     }
 
     setAiDrafting(true);
+    setAiDraftingMode('reply');
     try {
-      const res = await fetch('/api/ai/test', {
+      const res = await fetch('/api/ai/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'playground',
-          userMessage: targetText,
+          mode: 'reply',
+          conversationId: c.id,
+          categoryId,
+          customerMessage: targetText,
+          customerName: displayName(c),
         }),
       });
       const json = await res.json();
       if (json.ok && json.data?.reply) {
         setText(json.data.reply);
-        toast.success('AI ช่วยคิดและร่างคำตอบให้แล้ว');
+        const catLabel = json.data.categoryTitle ? `[${json.data.categoryTitle}] ` : '';
+        toast.success(`✨ ${catLabel}AI ร่างคำตอบลงในกล่องข้อความแล้ว`);
         setTimeout(() => {
           inputRef.current?.focus();
         }, 50);
       } else {
-        toast.error(json?.error?.message_th || 'AI ไม่สามารถคิดคำตอบได้');
+        toast.error(json?.error?.message_th || json?.error?.message || 'AI ไม่สามารถคิดคำตอบได้');
       }
     } catch (err) {
       console.error('[inbox] AI draft error:', err);
       toast.error('เกิดข้อผิดพลาดในการเรียก AI');
     } finally {
       setAiDrafting(false);
+      setAiDraftingMode(null);
+    }
+  }
+
+  async function handleAiDraftRelation(categoryId: string) {
+    setAiDrafting(true);
+    setAiDraftingMode('relationship');
+    try {
+      const res = await fetch('/api/ai/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'relationship',
+          conversationId: c.id,
+          categoryId,
+          customerName: displayName(c),
+        }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data?.reply) {
+        setText(json.data.reply);
+        const catLabel = json.data.categoryTitle ? `[${json.data.categoryTitle}] ` : '';
+        toast.success(`❤️ ${catLabel}AI ร่างข้อความสานสัมพันธ์ลงในกล่องข้อความแล้ว`);
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 50);
+      } else {
+        toast.error(json?.error?.message_th || json?.error?.message || 'AI ไม่สามารถสร้างข้อความสานสัมพันธ์ได้');
+      }
+    } catch (err) {
+      console.error('[inbox] AI relation error:', err);
+      toast.error('เกิดข้อผิดพลาดในการเรียก AI');
+    } finally {
+      setAiDrafting(false);
+      setAiDraftingMode(null);
     }
   }
 
@@ -2479,6 +2543,58 @@ function ChatRoom({
               <Video className="size-4" />
             </Button>
 
+            {/* ❤️ ปุ่ม AI สานสัมพันธ์/ทักทาย (ข้างปุ่มวิดีโอ ตามที่ผู้ใช้ต้องการ) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
+                  aria-label="AI สานสัมพันธ์"
+                  title="❤️ AI สานสัมพันธ์ / ทักทายลูกค้า (คลิกเพื่อเลือกหมวดหมู่)"
+                  disabled={aiDrafting || sending || uploading}
+                >
+                  {aiDrafting && aiDraftingMode === 'relationship' ? (
+                    <Loader2 className="size-4 animate-spin text-rose-500" />
+                  ) : (
+                    <Heart className="size-4 fill-rose-500/20 text-rose-500" />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                  <Heart className="size-3.5 text-rose-500 fill-rose-500/20" />
+                  <span>AI สานสัมพันธ์ & CRM</span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {relationCategories.map((cat) => (
+                  <DropdownMenuItem
+                    key={cat.id}
+                    onClick={() => void handleAiDraftRelation(cat.id)}
+                    className="flex flex-col items-start py-2 cursor-pointer"
+                  >
+                    <span className="font-medium text-xs text-foreground">{cat.icon ? `${cat.icon} ` : ''}{cat.name}</span>
+                    {cat.description && (
+                      <span className="text-[10px] text-muted-foreground line-clamp-1">{cat.description}</span>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <a
+                    href="/settings/ai/assist?tab=relation"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-between text-xs text-muted-foreground hover:text-primary cursor-pointer w-full py-1.5"
+                  >
+                    <span>⚙️ จัดการ/เทรนหมวดหมู่</span>
+                    <ExternalLink className="size-3" />
+                  </a>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <div className="mx-1 h-4 w-px bg-border shrink-0" />
 
             {/* ปุ่มเปิด/ปิด AI บอทในห้องแชทนี้ (ข้างไอคอนวิดีโอตามที่ผู้ใช้ต้องการ) */}
@@ -2512,23 +2628,66 @@ function ChatRoom({
               <span>{c.has_ai_reply ? 'บอท: เปิด' : 'บอท: ปิด'}</span>
             </Button>
 
-            {/* ✨ ปุ่ม AI ช่วยคิด (ร่างคำตอบลงในกล่องพิมพ์ตามชุดเทรน) */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 px-2.5 text-xs gap-1.5 transition-colors font-medium border-amber-500/40 bg-amber-500/10 text-amber-800 hover:bg-amber-500/20 dark:text-amber-200"
-              title="✨ ให้ AI ช่วยคิดและร่างคำตอบลงในช่องพิมพ์จากข้อความล่าสุดของลูกค้า"
-              disabled={aiDrafting || sending || uploading}
-              onClick={() => void handleAiDraftReply()}
-            >
-              {aiDrafting ? (
-                <Loader2 className="size-3.5 animate-spin text-amber-600" />
-              ) : (
-                <Sparkles className="size-3.5 text-amber-500" />
-              )}
-              <span>AI ช่วยคิด</span>
-            </Button>
+            {/* ✨ ปุ่ม AI ช่วยคิด (DropdownMenu เลือกหมวดหมู่หรือคิดอัตโนมัติ) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs gap-1.5 transition-colors font-medium border-amber-500/40 bg-amber-500/10 text-amber-800 hover:bg-amber-500/20 dark:text-amber-200"
+                  title="✨ ให้ AI ช่วยคิดและร่างคำตอบลงในช่องพิมพ์จากข้อความล่าสุดของลูกค้า"
+                  disabled={aiDrafting || sending || uploading}
+                >
+                  {aiDrafting && aiDraftingMode === 'reply' ? (
+                    <Loader2 className="size-3.5 animate-spin text-amber-600" />
+                  ) : (
+                    <Sparkles className="size-3.5 text-amber-500" />
+                  )}
+                  <span>AI ช่วยคิด</span>
+                  <ChevronDown className="size-3 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                  <Sparkles className="size-3.5 text-amber-500" />
+                  <span>หมวดหมู่ AI ช่วยคิด</span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => void handleAiDraftReply()}
+                  className="flex flex-col items-start py-2 cursor-pointer bg-amber-500/5 hover:bg-amber-500/10"
+                >
+                  <span className="font-semibold text-xs text-amber-700 dark:text-amber-300">⚡ ตอบอัตโนมัติตามบริบท</span>
+                  <span className="text-[10px] text-muted-foreground">วิเคราะห์คำถามล่าสุดของลูกค้าและร่างคำตอบที่เหมาะสม</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {assistCategories.map((cat) => (
+                  <DropdownMenuItem
+                    key={cat.id}
+                    onClick={() => void handleAiDraftReply(cat.id)}
+                    className="flex flex-col items-start py-2 cursor-pointer"
+                  >
+                    <span className="font-medium text-xs text-foreground">{cat.icon ? `${cat.icon} ` : ''}{cat.name}</span>
+                    {cat.description && (
+                      <span className="text-[10px] text-muted-foreground line-clamp-1">{cat.description}</span>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <a
+                    href="/settings/ai/assist?tab=assist"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-between text-xs text-muted-foreground hover:text-primary cursor-pointer w-full py-1.5"
+                  >
+                    <span>⚙️ จัดการ/เทรนหมวดหมู่</span>
+                    <ExternalLink className="size-3" />
+                  </a>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
 

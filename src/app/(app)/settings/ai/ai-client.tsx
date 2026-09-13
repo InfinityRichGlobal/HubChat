@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Sparkles, Key, Bot, BookOpen, Sliders, Play, Save, Check,
   ExternalLink, Loader2, RefreshCw, AlertCircle, MessageSquare,
+  ArrowRight, Heart,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -261,6 +262,29 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
         <Button onClick={handleSave} disabled={saving} className="gap-1.5 shadow-sm">
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
           บันทึกการตั้งค่า
+        </Button>
+      </div>
+
+      {/* Quick link to Assist & Relation categories training */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-rose-500/5 to-transparent p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-full bg-amber-500/20 text-amber-600 shrink-0">
+            <Sparkles className="size-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              เทรนหมวดหมู่ AI ช่วยคิด & ข้อความสัมพันธ์
+              <Badge className="bg-rose-500 hover:bg-rose-600 text-white text-[10px]">ใหม่</Badge>
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              กำหนดหมวดหมู่และสอน AI สำหรับปุ่ม [✨ AI ช่วยคิด] และปุ่ม [❤️ สานสัมพันธ์] ในห้องแชท
+            </p>
+          </div>
+        </div>
+        <Button asChild size="sm" className="gap-1.5 shrink-0 bg-amber-600 hover:bg-amber-700 text-white">
+          <Link href="/settings/ai/assist">
+            ไปที่หน้าเทรนหมวดหมู่ <ArrowRight className="size-3.5" />
+          </Link>
         </Button>
       </div>
 
