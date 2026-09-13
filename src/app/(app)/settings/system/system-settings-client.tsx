@@ -65,6 +65,9 @@ export default function SystemSettingsClient() {
       if (!result.ok) throw new Error(result.error?.message_th ?? 'บันทึกไม่สำเร็จ');
       await load();
       toast.success('บันทึกเรียบร้อย');
+      if (key === 'AVATAR_DISPLAY_MODE' || key === 'AVATAR_ORIGIN_BADGE') {
+        window.dispatchEvent(new Event('avatar-settings-updated'));
+      }
       if (method === 'PUT' && settings.find((s) => s.key === key)?.kind === 'secret') {
         setValues((old) => ({ ...old, [key]: '' }));
       }

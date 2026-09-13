@@ -1,6 +1,6 @@
 'use client';
 /**
- * รูปโปรไฟล์ลูกค้า พร้อมตัวสำรองเมื่อไม่มีรูป
+ * รูปโปรไฟล์ลูกค้า พร้อมตัวสำรองเมื่อไม่มีรูป และรองรับการดึงการตั้งค่าจากระบบ
  * ===========================================================================
  * ⭐ ทำไมต้องมีไฟล์นี้แยก :
  *    "ไม่มีรูป" เป็นเรื่องปกติมาก (ลูกค้าตั้งค่าความเป็นส่วนตัว / สิทธิ์ไม่ครบ)
@@ -9,12 +9,70 @@
  * 🔴 กฎ :
  *    1. ขนาดต้องคงที่เสมอ ไม่ว่าจะมีรูปหรือไม่มี
  *       (ถ้าขนาดเปลี่ยน แถวในลิสต์จะกระตุกตอนรูปโหลดเสร็จ)
- *    2. รูปโหลดไม่ขึ้นต้องตกไปใช้ตัวอักษร ไม่ใช่โชว์ไอคอนรูปแตก
+ *    2. รูปโหลดไม่ขึ้นต้องตกไปใช้ตัวอักษร หรือไอคอนแพลตฟอร์ม
  *       ลิงก์รูปของ Meta หมดอายุได้ตลอดเวลา
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import PlatformIcon from '@/components/platform-icon';
+
+type AvatarSettings = {
+  mode: 'platform' | 'real_profile';
+  showBadge: boolean;
+};
+
+let cachedAvatarSettings: AvatarSettings | null = null;
+let avatarSettingsListeners: Array<(s: AvatarSettings) => void> = [];
+
+export function useAvatarSettings(): AvatarSettings {
+  const [settings, setSettings] = useState<AvatarSettings>(
+    cachedAvatarSettings ?? { mode: 'platform', showBadge: false }
+  );
+
+  useEffect(() => {
+    const handleUpdate = (s: AvatarSettings) => setSettings(s);
+    avatarSettingsListeners.push(handleUpdate);
+
+    if (!cachedAvatarSettings) {
+      void fetch('/api/settings/avatar', { cache: 'no-store' })
+        .then((res) => res.json())
+        .then((result) => {
+          if (result?.ok && result?.data) {
+            cachedAvatarSettings = {
+              mode: result.data.mode === 'real_profile' ? 'real_profile' : 'platform',
+              showBadge: Boolean(result.data.showBadge),
+            };
+            avatarSettingsListeners.forEach((fn) => fn(cachedAvatarSettings!));
+          }
+        })
+        .catch(() => {});
+    }
+
+    const onCustomEvent = () => {
+      void fetch('/api/settings/avatar', { cache: 'no-store' })
+        .then((res) => res.json())
+        .then((result) => {
+          if (result?.ok && result?.data) {
+            cachedAvatarSettings = {
+              mode: result.data.mode === 'real_profile' ? 'real_profile' : 'platform',
+              showBadge: Boolean(result.data.showBadge),
+            };
+            avatarSettingsListeners.forEach((fn) => fn(cachedAvatarSettings!));
+          }
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener('avatar-settings-updated', onCustomEvent);
+
+    return () => {
+      avatarSettingsListeners = avatarSettingsListeners.filter((fn) => fn !== handleUpdate);
+      window.removeEventListener('avatar-settings-updated', onCustomEvent);
+    };
+  }, []);
+
+  return settings;
+}
 
 /** สีพื้นหลังของตัวสำรอง — สุ่มจากชื่อ เพื่อให้คนเดิมได้สีเดิมเสมอ */
 const TONES = [
@@ -47,8 +105,8 @@ export default function CustomerAvatar({
   src,
   platform,
   size = 'md',
-  mode = 'platform',
-  showBadge = false,
+  mode,
+  showBadge,
   className,
 }: {
   name: string;
@@ -59,12 +117,15 @@ export default function CustomerAvatar({
   showBadge?: boolean;
   className?: string;
 }) {
+  const globalSettings = useAvatarSettings();
+  const effectiveMode = mode ?? globalSettings.mode;
+  const effectiveShowBadge = showBadge ?? globalSettings.showBadge;
   const [broken, setBroken] = useState(false);
 
   const box =
     size === 'sm' ? 'size-7 text-[10px]' : size === 'lg' ? 'size-12 text-base' : 'size-9 text-xs';
 
-  const showRealPic = mode === 'real_profile' && Boolean(src) && !broken;
+  const showRealPic = effectiveMode === 'real_profile' && Boolean(src) && !broken;
 
   return (
     <div className="relative inline-flex shrink-0">
@@ -97,7 +158,7 @@ export default function CustomerAvatar({
           initialsOf(name)
         )}
       </span>
-      {showBadge && platform && (
+      {effectiveShowBadge && platform && (
         <span className="absolute -bottom-1 -right-1 z-10 pointer-events-none">
           <PlatformIcon platform={platform} size="xs" />
         </span>

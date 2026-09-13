@@ -1321,10 +1321,7 @@ function ConversationItem({
         )}
       >
         <div className="relative shrink-0">
-          <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
-          <span className="absolute -bottom-1 -right-1">
-            <PlatformIcon platform={c.page.platform} size="xs" />
-          </span>
+          <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} platform={c.page.platform} size="md" />
           {!c.is_read && (
             <span
               className="absolute -top-1 -right-1 z-10 flex min-w-4.5 h-4.5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white shadow-xs ring-2 ring-background animate-in fade-in zoom-in-75 duration-200"
@@ -2324,9 +2321,9 @@ function ChatRoom({
           </Button>
           {profileUrl ? (
             <a href={profileUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="เปิดโปรไฟล์ลูกค้า">
-              <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />
+              <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} platform={c.page.platform} size="md" />
             </a>
-          ) : <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} size="md" />}
+          ) : <CustomerAvatar name={displayName(c)} src={c.profile_pic_url} platform={c.page.platform} size="md" />}
 
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-1.5">

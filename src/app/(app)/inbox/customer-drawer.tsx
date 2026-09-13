@@ -215,7 +215,7 @@ export default function CustomerDrawer({
       >
         {/* หัวแผง */}
         <div className="flex items-center gap-3 border-b px-4 pt-[max(0.875rem,calc(env(safe-area-inset-top)+0.5rem))] pb-3 sm:px-6 sm:pt-3">
-          <CustomerAvatar name={displayName} src={c?.profile_pic_url} size="lg" />
+          <CustomerAvatar name={displayName} src={c?.profile_pic_url} platform={data?.page.platform} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="break-words text-base font-semibold">{displayName}</div>
             <div className="text-xs text-muted-foreground">{c?.username ? `@${c.username} · ` : ''}{data?.page.platform === 'instagram' ? 'Instagram · ' : 'Messenger · '}{data?.page.name}</div>

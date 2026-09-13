@@ -132,10 +132,7 @@ export default async function CustomersPage({
             <Card key={customer.id} className="gap-2 py-3 shadow-sm hover:border-primary/40 transition-colors">
               <CardHeader className="flex-row items-center gap-2.5 px-4">
                 <div className="relative shrink-0">
-                  <CustomerAvatar name={name} src={customer.profile_pic_url} size="md" />
-                  <span className="absolute -bottom-1 -right-1">
-                    <PlatformIcon platform={platform} size="xs" />
-                  </span>
+                  <CustomerAvatar name={name} src={customer.profile_pic_url} platform={platform} size="md" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">

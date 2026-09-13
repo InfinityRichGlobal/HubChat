@@ -505,13 +505,9 @@ function CommentCard({
             <CustomerAvatar
               name={c.from_name || c.from_username || 'ลูกค้า'}
               src={c.from_pic_url}
+              platform={page?.platform}
               size="sm"
             />
-            {page && (
-              <span className="absolute -bottom-1 -right-1 pointer-events-none">
-                <PlatformIcon platform={page.platform} size="xs" />
-              </span>
-            )}
           </div>
 
           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
