@@ -19,9 +19,6 @@ export function dispatch(page: MetaPage, payload: MetaSendPayload): Promise<Meta
  * ลูกค้าเห็นเป็นรูปภาพปกติ ไม่เห็นลิงก์หรือ ID
  */
 export function buildMessageBody(content: SendContent): Record<string, unknown> | null {
-  if (content.text && content.text.trim()) {
-    return { text: content.text };
-  }
   const image = content.images?.[0];
   const type = image?.type ?? 'image';
   if (image?.meta_attachment_id) {
@@ -29,6 +26,9 @@ export function buildMessageBody(content: SendContent): Record<string, unknown> 
   }
   if (image?.url) {
     return { attachment: { type, payload: { url: image.url, is_reusable: true } } };
+  }
+  if (content.text && content.text.trim()) {
+    return { text: content.text };
   }
   return null;
 }

@@ -195,6 +195,12 @@ export async function processCommentAutoReply(
       const likeRes = await likeComment(page, ev.comment_id);
       if (likeRes.ok) {
         console.log(`[comment-bot] 👍 กดไลก์คอมเมนต์ ${ev.comment_id} สำเร็จ (${page.platform})`);
+        if (savedCommentRowId) {
+          await db()
+            .from('comments')
+            .update({ is_liked: true })
+            .eq('id', savedCommentRowId);
+        }
       } else {
         console.warn(`[comment-bot] กดไลก์คอมเมนต์ ${ev.comment_id} ไม่สำเร็จ:`, likeRes.error_th);
       }

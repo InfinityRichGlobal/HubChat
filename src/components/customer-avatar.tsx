@@ -14,6 +14,7 @@
  */
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import PlatformIcon from '@/components/platform-icon';
 
 /** สีพื้นหลังของตัวสำรอง — สุ่มจากชื่อ เพื่อให้คนเดิมได้สีเดิมเสมอ */
 const TONES = [
@@ -31,11 +32,6 @@ function toneFor(seed: string): string {
   return TONES[sum % TONES.length];
 }
 
-/**
- * ตัวอักษรย่อ
- * ⚠️ ต้องรองรับภาษาไทย — ใช้ [...str] ไม่ใช่ str[0]
- *    เพราะสระ/วรรณยุกต์ไทยเป็นอักขระแยก การตัดด้วย index จะได้สระลอย ๆ มาแทน
- */
 export function initialsOf(name: string): string {
   const clean = name.trim();
   if (!clean) return '?';
@@ -49,12 +45,16 @@ export function initialsOf(name: string): string {
 export default function CustomerAvatar({
   name,
   src,
+  platform,
   size = 'md',
+  mode = 'platform',
   className,
 }: {
   name: string;
   src?: string | null;
+  platform?: 'facebook' | 'instagram' | 'line' | string | null;
   size?: 'sm' | 'md' | 'lg';
+  mode?: 'platform' | 'real_profile';
   className?: string;
 }) {
   const [broken, setBroken] = useState(false);
@@ -62,32 +62,62 @@ export default function CustomerAvatar({
   const box =
     size === 'sm' ? 'size-7 text-[10px]' : size === 'lg' ? 'size-12 text-base' : 'size-9 text-xs';
 
-  const showImage = Boolean(src) && !broken;
+  const showRealPic = mode === 'real_profile' && Boolean(src) && !broken;
+
+  if (showRealPic && src) {
+    return (
+      <span
+        className={cn(
+          'relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-medium',
+          box,
+          className,
+        )}
+        aria-hidden="true"
+      >
+        <img
+          src={src}
+          alt=""
+          className="size-full object-cover"
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          onError={() => setBroken(true)}
+        />
+      </span>
+    );
+  }
+
+  // หากอยู่ในโหมด platform (หรือไม่มีรูปจริง) ให้โชว์โลโก้แพลตฟอร์มอย่างสวยงาม
+  if (platform) {
+    return (
+      <span
+        className={cn(
+          'relative inline-flex shrink-0 items-center justify-center rounded-full overflow-hidden shadow-2xs border border-border/40',
+          box,
+          className,
+        )}
+        title={name}
+        aria-hidden="true"
+      >
+        <PlatformIcon
+          platform={platform}
+          size={size === 'lg' ? 'lg' : size === 'sm' ? 'sm' : 'md'}
+          className="size-full object-cover"
+        />
+      </span>
+    );
+  }
 
   return (
     <span
       className={cn(
         'relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-medium',
         box,
-        !showImage && toneFor(name),
+        toneFor(name),
         className,
       )}
       aria-hidden="true"
     >
-      {showImage ? (
-        // eslint-disable-next-line @next/next/no-img-element -- รูปมาจากโดเมนของ Meta/Storage ที่เปลี่ยนได้ ไม่เหมาะกับ next/image
-        <img
-          src={src!}
-          alt=""
-          className="size-full object-cover"
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          // 🔴 ลิงก์รูปของ Meta หมดอายุได้ → ต้องตกไปใช้ตัวอักษร ไม่ใช่โชว์รูปแตก
-          onError={() => setBroken(true)}
-        />
-      ) : (
-        initialsOf(name)
-      )}
+      {initialsOf(name)}
     </span>
   );
 }

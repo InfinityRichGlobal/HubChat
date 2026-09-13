@@ -161,7 +161,7 @@ export async function fetchFacebookRecentComments(
   limitPosts = 5,
 ): Promise<{ ok: boolean; comments: FetchedComment[]; error_th?: string }> {
   const res = await metaGet(page, `${page.page_id}/feed`, {
-    fields: 'id,message,permalink_url,comments.order(reverse_chronological).limit(25){id,message,from,created_time,permalink_url,parent}',
+    fields: 'id,message,permalink_url,comments.order(reverse_chronological).limit(25){id,message,from{id,name,picture},created_time,permalink_url,parent}',
     limit: String(limitPosts),
   });
 
@@ -180,7 +180,7 @@ export async function fetchFacebookRecentComments(
       data?: Array<{
         id?: string;
         message?: string;
-        from?: { id?: string; name?: string };
+        from?: { id?: string; name?: string; picture?: { data?: { url?: string } } };
         created_time?: string;
         permalink_url?: string;
         parent?: { id?: string };
