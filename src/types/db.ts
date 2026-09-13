@@ -359,12 +359,17 @@ export type Comment = {
   parent_comment_id: string | null;
   from_name: string | null;
   from_id: string | null;
+  from_username?: string | null;
+  from_pic_url?: string | null;
   message: string | null;
   is_handled: boolean;
   handled_by: string | null;
   handled_at: string | null;
   replied_public: boolean;
   replied_private: boolean;
+  is_liked?: boolean;
+  is_deleted?: boolean;
+  profile_fetched_at?: string | null;
   created_at: string;
 };
 

@@ -25,7 +25,7 @@ export type MetaProfile = {
 
 /** ฟิลด์ที่ขอ — Messenger กับ Instagram ไม่เหมือนกัน ห้ามใช้ชุดเดียวกัน */
 const FIELDS: Record<'facebook' | 'instagram', string> = {
-  facebook: 'first_name,last_name,profile_pic',
+  facebook: 'first_name,last_name,profile_pic,picture.width(100).height(100)',
   instagram: 'name,username,profile_pic',
 };
 
@@ -163,7 +163,13 @@ export async function fetchCustomerProfileDetailed(
             ? d.username.trim()
             : null);
 
-  const pic = typeof d.profile_pic === 'string' && d.profile_pic.length > 0 ? d.profile_pic : null;
+  const rawPic =
+    typeof d.profile_pic === 'string' && d.profile_pic.length > 0
+      ? d.profile_pic
+      : typeof (d.picture as { data?: { url?: string } } | undefined)?.data?.url === 'string'
+        ? (d.picture as { data: { url: string } }).data.url
+        : null;
+  const pic = rawPic && rawPic.length > 0 ? rawPic : null;
   const username =
     page.platform === 'instagram' && typeof d.username === 'string' && d.username.trim().length > 0
       ? d.username.trim().replace(/^@/, '')

@@ -87,10 +87,14 @@ export type CommentEvent = {
   /** id ของคอมเมนต์ฝั่ง Meta — ใช้กันซ้ำ */
   comment_id: string;
   post_id: string | null;
+  /** media id (สำหรับ Instagram) */
+  media_id?: string | null;
   /** คอมเมนต์ที่ตอบใต้คอมเมนต์อื่น */
   parent_comment_id: string | null;
   from_id: string | null;
   from_name: string | null;
+  /** username ฝั่ง Instagram เช่น @customer_ig */
+  from_username?: string | null;
   message: string | null;
   permalink: string | null;
   attachment_url: string | null;

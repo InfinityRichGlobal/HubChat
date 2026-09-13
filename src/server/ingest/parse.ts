@@ -160,7 +160,7 @@ export function parseWebhookPayload(payload: unknown): IngestEvent[] {
      * ⚠️ entry เดียวมีได้ทั้งสองแบบ จึงไม่ใช้ continue แล้วข้าม messaging ทิ้ง
      */
     for (const changeRaw of arr(entry.changes)) {
-      events.push(...parseChange(changeRaw, platform, pageMetaId));
+      events.push(...parseChange(changeRaw, platform, pageMetaId, entry.time));
     }
 
     // `standby` = แชทที่แอปอื่นถือสิทธิ์ตอบอยู่ (handover protocol) — ไม่ยุ่ง
@@ -185,7 +185,127 @@ export function parseWebhookPayload(payload: unknown): IngestEvent[] {
 }
 
 /**
- * แกะเหตุการณ์บนฟีด (คอมเมนต์) — สเปกหัวข้อ 5.5
+ * รวมศูนย์การแกะเหตุการณ์บนฟีด/คอมเมนต์ (แยกตาม platform)
+ */
+function parseChange(
+  raw: unknown,
+  platform: Platform,
+  pageMetaId: string,
+  entryTime?: unknown,
+): IngestEvent[] {
+  if (platform === 'instagram') {
+    return parseInstagramChange(raw, pageMetaId, entryTime);
+  }
+  return parseFacebookChange(raw, pageMetaId);
+}
+
+/**
+ * แกะคอมเมนต์ Instagram (สเปก Production v1 — field = 'comments')
+ *
+ * รูปแบบจาก Meta Graph API (Instagram Webhook):
+ *   {
+ *     field: 'comments',
+ *     value: {
+ *       id: '17858843049216338',
+ *       text: 'สนใจสินค้าค่ะ',
+ *       from: { id: '17841400123456789', username: 'customer_ig' },
+ *       media: { id: '17912345678901234', media_product_type: 'FEED' },
+ *       parent_id: '17858843049216300' // (optional)
+ *     }
+ *   }
+ */
+function parseInstagramChange(
+  raw: unknown,
+  pageMetaId: string,
+  entryTime?: unknown,
+): IngestEvent[] {
+  const change = obj(raw);
+  if (!change) return [];
+
+  const field = str(change.field);
+  const value = obj(change.value);
+
+  if (field !== 'comments') {
+    return [
+      {
+        kind: 'ignored',
+        reason: `เหตุการณ์บน Instagram ชนิด "${field ?? '(ว่าง)'}" ยังไม่รองรับ`,
+        platform: 'instagram',
+        page_meta_id: pageMetaId,
+      },
+    ];
+  }
+
+  if (!value) {
+    return [
+      {
+        kind: 'ignored',
+        reason: 'เหตุการณ์คอมเมนต์ Instagram ไม่มีเนื้อข้อมูล',
+        platform: 'instagram',
+        page_meta_id: pageMetaId,
+      },
+    ];
+  }
+
+  const commentId = str(value.id);
+  if (!commentId) {
+    return [
+      {
+        kind: 'ignored',
+        reason: 'คอมเมนต์ Instagram ไม่มี id — กันซ้ำไม่ได้จึงข้าม',
+        platform: 'instagram',
+        page_meta_id: pageMetaId,
+      },
+    ];
+  }
+
+  const from = obj(value.from);
+  const fromId = str(from?.id);
+  const fromUsername = str(from?.username);
+  const fromName = str(from?.name) ?? (fromUsername ? fromUsername : null);
+
+  const media = obj(value.media);
+  const mediaId = str(media?.id) ?? str(value.media_id);
+  const parentCommentId = str(value.parent_id);
+  const message = str(value.text);
+
+  const createdRaw = value.created_time ?? entryTime;
+  let commentedAt: string;
+  if (typeof createdRaw === 'number' && Number.isFinite(createdRaw)) {
+    commentedAt = new Date(createdRaw > 1e11 ? createdRaw : createdRaw * 1000).toISOString();
+  } else if (typeof createdRaw === 'string' && createdRaw !== '') {
+    commentedAt = new Date(createdRaw).toISOString();
+  } else {
+    commentedAt = new Date().toISOString();
+  }
+
+  const isFromPage = fromId !== null && fromId === pageMetaId;
+
+  return [
+    {
+      kind: 'comment',
+      platform: 'instagram',
+      page_meta_id: pageMetaId,
+      comment_id: commentId,
+      post_id: mediaId,
+      media_id: mediaId,
+      parent_comment_id: parentCommentId,
+      from_id: fromId,
+      from_name: fromName,
+      from_username: fromUsername,
+      message,
+      permalink: null,
+      attachment_url: null,
+      is_from_page: isFromPage,
+      commented_at: commentedAt,
+      verb: 'add',
+      raw: (value as Record<string, unknown>) ?? {},
+    },
+  ];
+}
+
+/**
+ * แกะเหตุการณ์บนฟีด Facebook (คอมเมนต์) — สเปกหัวข้อ 5.5
  *
  * รูปแบบจาก Meta :
  *   { field: 'feed', value: { item: 'comment', verb: 'add', comment_id, post_id,
@@ -196,7 +316,7 @@ export function parseWebhookPayload(payload: unknown): IngestEvent[] {
  *    ทำให้ "สิ่งที่แอดมินเห็นตอนตัดสินใจ" กับ "สิ่งที่อยู่บนโพสต์" ไม่ตรงกัน
  *    ซึ่งอันตรายกว่าการไม่รู้ (ดู DEFERRED_REVIEW)
  */
-function parseChange(raw: unknown, platform: Platform, pageMetaId: string): IngestEvent[] {
+function parseFacebookChange(raw: unknown, pageMetaId: string): IngestEvent[] {
   const change = obj(raw);
   if (!change) return [];
 
@@ -204,25 +324,25 @@ function parseChange(raw: unknown, platform: Platform, pageMetaId: string): Inge
   const value = obj(change.value);
 
   if (field !== 'feed' && field !== 'comments') {
-    return [{ kind: 'ignored', reason: `เหตุการณ์บนฟีดชนิด "${field ?? '(ว่าง)'}" ยังไม่รองรับ`, platform, page_meta_id: pageMetaId }];
+    return [{ kind: 'ignored', reason: `เหตุการณ์บนฟีดชนิด "${field ?? '(ว่าง)'}" ยังไม่รองรับ`, platform: 'facebook', page_meta_id: pageMetaId }];
   }
   if (!value) {
-    return [{ kind: 'ignored', reason: 'เหตุการณ์บนฟีดไม่มีเนื้อข้อมูล', platform, page_meta_id: pageMetaId }];
+    return [{ kind: 'ignored', reason: 'เหตุการณ์บนฟีดไม่มีเนื้อข้อมูล', platform: 'facebook', page_meta_id: pageMetaId }];
   }
 
   const item = str(value.item);
   const verb = str(value.verb);
 
   if (item !== 'comment') {
-    return [{ kind: 'ignored', reason: `เหตุการณ์บนฟีดเกี่ยวกับ "${item ?? '(ว่าง)'}" ไม่ใช่คอมเมนต์`, platform, page_meta_id: pageMetaId }];
+    return [{ kind: 'ignored', reason: `เหตุการณ์บนฟีดเกี่ยวกับ "${item ?? '(ว่าง)'}" ไม่ใช่คอมเมนต์`, platform: 'facebook', page_meta_id: pageMetaId }];
   }
   if (verb !== 'add') {
-    return [{ kind: 'ignored', reason: `คอมเมนต์แบบ "${verb ?? '(ว่าง)'}" ยังไม่รองรับ (รับเฉพาะคอมเมนต์ใหม่)`, platform, page_meta_id: pageMetaId }];
+    return [{ kind: 'ignored', reason: `คอมเมนต์แบบ "${verb ?? '(ว่าง)'}" ยังไม่รองรับ (รับเฉพาะคอมเมนต์ใหม่)`, platform: 'facebook', page_meta_id: pageMetaId }];
   }
 
   const commentId = str(value.comment_id);
   if (!commentId) {
-    return [{ kind: 'ignored', reason: 'คอมเมนต์ไม่มี comment_id — กันซ้ำไม่ได้จึงข้าม', platform, page_meta_id: pageMetaId }];
+    return [{ kind: 'ignored', reason: 'คอมเมนต์ไม่มี comment_id — กันซ้ำไม่ได้จึงข้าม', platform: 'facebook', page_meta_id: pageMetaId }];
   }
 
   const from = obj(value.from);
@@ -244,7 +364,7 @@ function parseChange(raw: unknown, platform: Platform, pageMetaId: string): Inge
   return [
     {
       kind: 'comment',
-      platform,
+      platform: 'facebook',
       page_meta_id: pageMetaId,
       comment_id: commentId,
       post_id: str(value.post_id),

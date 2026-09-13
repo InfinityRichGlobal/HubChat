@@ -154,8 +154,9 @@ export async function metaPost(
   const token = pageToken(page);
 
   // เข้ารหัสทีละท่อน — ดู D-62 (เข้ารหัสทั้งเส้นจะกินเครื่องหมาย / ของ path)
-  const safePath = pathSegment.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-  const url = `${GRAPH_HOST}/${await graphVersion()}/${safePath}`;
+  const [pathname, querystring] = pathSegment.split('?');
+  const safePath = pathname.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${safePath}${querystring ? `?${querystring}` : ''}`;
 
   let res: Response;
   try {
@@ -170,6 +171,51 @@ export async function metaPost(
     });
   } catch (err) {
     // ยิงออกไปแล้วไม่รู้ผล — ผู้เรียกต้องตัดสินใจเองว่าจะทำอย่างไรต่อ
+    return {
+      ok: false,
+      http_status: 0,
+      error: classifyMetaError({ message: (err as Error).message }, 0, { networkFailure: true }),
+    };
+  }
+
+  const body = (await res.json().catch(() => null)) as
+    | (Record<string, unknown> & { error?: RawMetaError })
+    | null;
+
+  if (!res.ok || body?.error) {
+    return { ok: false, http_status: res.status, error: classifyMetaError(body?.error ?? null, res.status) };
+  }
+
+  return { ok: true, data: body ?? {}, http_status: res.status };
+}
+
+export type MetaDeleteResult =
+  | { ok: true; data: Record<string, unknown>; http_status: number }
+  | { ok: false; error: MetaErrorInfo; http_status: number };
+
+/**
+ * ยิง DELETE ไป Graph API สำหรับงานที่ต้องการลบ เช่น ลบคอมเมนต์ หรือเลิกไลก์
+ */
+export async function metaDelete(
+  page: MetaPage,
+  pathSegment: string,
+  params: Record<string, string> = {},
+): Promise<MetaDeleteResult> {
+  const token = pageToken(page);
+  const qs = new URLSearchParams(params).toString();
+  const [pathname, querystring] = pathSegment.split('?');
+  const safePath = pathname.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  const allQs = [querystring, qs].filter(Boolean).join('&');
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${safePath}${allQs ? `?${allQs}` : ''}`;
+
+  let res: Response;
+  try {
+    res = await fetcher()(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
     return {
       ok: false,
       http_status: 0,

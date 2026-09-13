@@ -101,31 +101,31 @@ META_APP_SECRET=ค่าที่คัดลอกมา
    - เลือกสิทธิ์ (permission) ให้ครบตามตารางด้านล่าง
 5. **คัดลอก token เก็บไว้ทันที** — Meta จะแสดงให้ดูครั้งเดียวเท่านั้น
 
-### สิทธิ์ที่ต้องติ๊ก (สเปกหัวข้อ 6.6)
+### สิทธิ์ที่ต้องติ๊ก (OAuth Permissions Production v1 ล็อกแล้ว 12 ตัว)
 
-| สิทธิ์ | ใช้ทำอะไร |
-|---|---|
-| `pages_messaging` | ส่ง/รับข้อความในนามเพจ |
-| `pages_manage_metadata` | ตั้งค่า webhook ของเพจ |
-| `pages_read_engagement` | อ่านข้อมูลเพจและคอมเมนต์ |
-| `pages_show_list` | มองเห็นรายชื่อเพจ |
-| `instagram_basic` | ข้อมูลพื้นฐานของ IG |
-| `instagram_manage_messages` | ส่ง/รับข้อความ IG และย้ายผู้ติดต่อ IG ไปสแปม |
-| `business_management` | จัดการทรัพย์สินใน Business Manager และใช้คำสั่งดูแลบทสนทนา |
+| ลำดับ | สิทธิ์ (Permission) | แพลตฟอร์ม | ใช้ทำอะไรใน HubChat |
+|:---:|---|---|---|
+| 1 | `pages_show_list` | Facebook | มองเห็นรายชื่อเพจทั้งหมดที่ธุรกิจเป็นเจ้าของในหน้าตั้งค่า |
+| 2 | `business_management` | รวม | จัดการทรัพย์สินใน Business Manager และย้ายแชทเข้าสแปม (Moderate Conversations) |
+| 3 | `pages_messaging` | Facebook | ส่งและรับข้อความในนามเพจ Messenger |
+| 4 | `instagram_basic` | Instagram | อ่านข้อมูลโปรไฟล์พื้นฐานและรูปภาพของบัญชี Instagram |
+| 5 | `instagram_manage_comments` | Instagram | อ่าน, ตอบกลับ, ไลก์, ซ่อน, ลบคอมเมนต์ใต้โพสต์ Instagram |
+| 6 | `instagram_manage_messages` | Instagram | ส่งและรับข้อความ DM และดึงคอมเมนต์เข้าแชท (Private Reply) |
+| 7 | `pages_read_engagement` | Facebook | อ่านข้อมูลการมีส่วนร่วมและคอมเมนต์บนโพสต์ Facebook |
+| 8 | `pages_manage_metadata` | Facebook | เชื่อมต่อและตั้งค่า Webhook Subscriptions ของเพจโดยอัตโนมัติ |
+| 9 | `pages_read_user_content` | Facebook | อ่านเนื้อหาและโพสต์ของผู้ใช้เพื่อนำมาแสดงผลในบทสนทนาและคอมเมนต์ |
+| 10 | `pages_manage_engagement` | Facebook | ไลก์, ซ่อน, ลบ, ตอบกลับคอมเมนต์สาธารณะบน Facebook |
+| 11 | `pages_utility_messaging` | Facebook | ส่งข้อความประเภท Utility (เช่น แจ้งเลขออเดอร์/สถานะพัสดุ) ผ่านเทมเพลตที่อนุมัติ |
+| 12 | `instagram_manage_engagement` | Instagram | จัดการการมีส่วนร่วมและการโต้ตอบบน Instagram |
 
-> 🟡 **สิทธิ์ `Human Agent` ต้องยื่น App Review แยกต่างหาก**
-> สเปกบอกว่าให้ยื่นตั้งแต่สัปดาห์แรก เพราะรออนุมัตินาน
-> **แต่ยังไม่ต้องรอให้อนุมัติก่อนถึงจะเริ่มใช้ระบบได้** —
-> ระบบตั้งค่าเริ่มต้นไว้ว่าช่องทางนี้ **ปิด** อยู่ จนกว่าคุณจะยืนยันว่าได้รับอนุมัติจริง
+### ฟีเจอร์ที่ต้องขอใน App Review (2 Features)
+1. **Business Asset User Profile Access** — เข้าถึงข้อมูลโปรไฟล์ผู้ใช้และรูปภาพในบัญชีธุรกิจสำหรับแสดง Avatar ลูกค้า
+2. **Human Agent** — ขยายหน้าต่างสนทนา 7 วันสำหรับแอดมินคนจริงที่พิมพ์ตอบเอง
 
-### กลุ่มแชทใดซิงก์กับ Business Suite จริง
-
-- **สแปม** — เมื่อกดจาก HubChat ระบบเรียก Moderate Conversations API ก่อน และจะบันทึกใน HubChat ต่อเมื่อ Meta ตอบว่าสำเร็จ
-- **สำคัญ / ติดตามผล / เรียบร้อย / กำหนดแล้ว / กลุ่ม AI** — เป็นกลุ่มงานของ HubChat เพราะ Meta ยังไม่มี API สาธารณะให้แอปภายนอกแก้สถานะภายใน Business Suite เหล่านี้โดยตรง
-- Meta ยังไม่มีคำสั่งสาธารณะสำหรับ **ย้ายออกจากสแปม** แอปจึงจะแจ้งให้คืนแชทใน Business Suite ก่อน แล้วกดปุ่มยืนยันใน HubChat แทนการแสดงผลว่าสำเร็จทั้งที่ไม่ได้ซิงก์
-
-> สำหรับร้านที่ใช้ Instagram กับผู้ใช้จริงนอกทีมทดสอบ ต้องขอ Advanced Access ให้
-> `instagram_manage_messages`, `instagram_basic` และ `business_management` ใน App Review ด้วย
+> 🟡 **การขอสิทธิ์ใน App Review**
+> ในช่วงแรกที่อยู่ระหว่างรอ App Review สามารถทดสอบระบบทุกฟังก์ชันได้ทันทีในโหมด Development
+> ด้วยบัญชีที่มีบทบาท (Admin/Developer/Tester) ในแอป Meta โดยไม่ต้องรอผลอนุมัติ
+> และระบบตั้งค่าปิด `HUMAN_AGENT` ไว้เป็นค่าเริ่มต้นตามหลัก Safe-by-Default
 
 ---
 
@@ -202,22 +202,40 @@ cloudflared tunnel --url http://localhost:3000
    - ✅ ผ่าน = Meta ยืนยัน URL เรียบร้อย
    - ❌ ไม่ผ่าน = ดูหัวข้อ "แก้ปัญหา" ท้ายไฟล์นี้
 
-5. กด **เพิ่มการติดตาม (Add Subscriptions)** แล้วติ๊ก :
+5. กด **เพิ่มการติดตาม (Add Subscriptions)** โดยแยกตามผลิตภัณฑ์ :
 
-   | ช่อง | ทำไมต้องติ๊ก |
+   #### 5.1 สำหรับ Facebook (Messenger & Feed)
+   ไปที่ **Messenger → Settings → Webhooks** (หรือ **Webhooks → Page**):
+   | ฟิลด์ที่ต้องติ๊ก | ทำไมต้องติ๊ก |
    |---|---|
    | `messages` | ข้อความที่ลูกค้าทักมา — **จำเป็นที่สุด** |
-   | `message_echoes` | สำเนาข้อความที่เพจส่งออก — ทำให้เห็นข้อความที่ตอบจาก Business Suite ด้วย |
-   | `messaging_postbacks` | ลูกค้ากดปุ่ม (ใช้ในรอบคีย์เวิร์ด) |
-   | `messaging_referrals` | บอกว่าลูกค้ามาจากแอดไหน |
+   | `message_echoes` | สำเนาข้อความที่แอดมินตอบจาก Business Suite หรือแอปภายนอก |
+   | `message_reads` | ลูกค้าอ่านข้อความแล้ว (Read Receipt) |
+   | `message_reactions` | ลูกค้ากดถูกใจ/แสดงอารมณ์บนข้อความ |
+   | `message_deliveries` | ข้อความส่งถึงเครื่องลูกค้าเรียบร้อยแล้ว |
+   | `messaging_postbacks` | ลูกค้ากดปุ่ม Quick Reply / เมนู |
+   | `messaging_referrals` | ข้อมูลลูกค้าที่คลิกมาจากโฆษณา (Ad ID / Referral) |
+   | `messaging_optins` | ลูกค้ายินยอมรับข้อความแจ้งเตือน |
+   | `feed` | คอมเมนต์ใหม่และการโต้ตอบใต้โพสต์เพจ — **จำเป็นสำหรับระบบคอมเมนต์** |
+
+   #### 5.2 สำหรับ Instagram (Messaging & Comments)
+   ไปที่ **Instagram → Settings → Webhooks** (หรือ **Webhooks → Instagram**):
+   | ฟิลด์ที่ต้องติ๊ก | ทำไมต้องติ๊ก |
+   |---|---|
+   | `messages` | ข้อความ DM ที่ลูกค้าส่งมา |
+   | `messaging_postbacks` | การกดปุ่มหรือโต้ตอบใน DM |
+   | `messaging_seen` | สถานะการอ่านข้อความบน Instagram |
+   | `message_reactions` | การกด Emoji Reaction บนข้อความ Instagram |
+   | `messaging_referral` | ข้อมูลลูกค้าที่ทักมาจากโฆษณา Instagram |
+   | `messaging_optins` | การยืนยันสิทธิ์รับข้อความ |
+   | `comments` | คอมเมนต์ใต้โพสต์/Reels ของ Instagram — **จำเป็นสำหรับระบบคอมเมนต์ IG** |
 
 6. เลื่อนลงหาหัวข้อ **เพจที่เชื่อมต่อ (Access Tokens / Connected Pages)**
    → กด **เพิ่มหรือลบเพจ** → เลือกเพจของคุณ → **ต้องกดสมัครรับข้อมูล (Subscribe)**
 
-   > 🔴 ขั้นย่อยนี้คนลืมบ่อยที่สุด
+   > 🔴 **ขั้นย่อยนี้คนลืมบ่อยที่สุด**
    > ถ้าไม่กด "สมัครรับข้อมูล" ให้เพจ Meta จะไม่ส่งอะไรมาเลย ทั้งที่ทุกอย่างดูถูกหมด
-
-7. (ถ้าใช้ IG) ทำแบบเดียวกันในหมวด **Instagram → Webhooks** โดยติ๊ก `messages` ด้วย
+   > *(หมายเหตุ: ใน HubChat มีปุ่ม "เชื่อมต่อ Webhook ทุกเพจ" ในหน้าตั้งค่าบอทคอมเมนต์ ซึ่งจะช่วยยิง API สั่ง Subscribe ให้ทั้ง 9 ฟิลด์ของ Facebook และ 7 ฟิลด์ของ Instagram โดยอัตโนมัติด้วย)*
 
 ---
 

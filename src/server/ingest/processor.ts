@@ -12,7 +12,7 @@ import 'server-only';
  *   4. การกันข้อความซ้ำ ให้ฐานข้อมูลเป็นคนตัดสิน ไม่ใช่โค้ดนี้
  */
 import { db } from '@/lib/supabase/admin';
-import { syncCustomerProfile } from '@/server/meta/profile-sync';
+import { syncCustomerProfile, syncCommentProfile } from '@/server/meta/profile-sync';
 import type { MetaPage } from '@/server/meta/client';
 import type { Platform } from '@/types/db';
 import { parseWebhookPayload } from './parse';
@@ -418,6 +418,8 @@ async function handleComment(
         parent_comment_id: ev.parent_comment_id,
         from_id: ev.from_id,
         from_name: ev.from_name,
+        from_username: ev.from_username ?? null,
+        from_pic_url: null,
         message: ev.message,
         permalink: ev.permalink,
         attachment_url: ev.attachment_url,
@@ -434,6 +436,11 @@ async function handleComment(
     }
 
     summary.comments_saved += 1;
+
+    // เติมข้อมูลโปรไฟล์ / Avatar ของผู้คอมเมนต์ (ถ้ามี)
+    if (saved.id && ev.from_id && !ev.is_from_page) {
+      await syncCommentProfile(page, saved.id, ev.from_id, ev.from_username, ev.from_name);
+    }
 
     // รันบอทคอมเมนต์อัตโนมัติ (ไลก์ ตอบใต้โพสต์ ทักส่วนตัว ตามที่ตั้งค่าไว้)
     await processCommentAutoReply(page, ev, saved.id);

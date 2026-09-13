@@ -22,7 +22,13 @@ import { db } from '@/lib/supabase/admin';
 import type { PublicAdmin } from '@/types/db';
 import { logActivity } from '@/lib/activity-log';
 import {
-  replyToCommentPublicly, sendPrivateReply, setCommentHidden, MetaNotConfiguredError,
+  replyToCommentPublicly,
+  sendPrivateReply,
+  setCommentHidden,
+  likeComment,
+  unlikeComment,
+  deleteComment,
+  MetaNotConfiguredError,
 } from '@/server/meta/comments';
 import type { MetaPage } from '@/server/meta/comments';
 import { CommentError, getComment, type CommentRow } from './service';
@@ -287,6 +293,144 @@ export async function hideComment(
   return {
     ok: true,
     message_th: hidden ? 'ซ่อนคอมเมนต์แล้ว' : 'เลิกซ่อนแล้ว',
+    outcome_unknown: false,
+    comment: await getComment(admin, commentRowId),
+  };
+}
+
+/* ------------------------------------------------------------------------ */
+/* 4) ไลก์คอมเมนต์                                                            */
+/* ------------------------------------------------------------------------ */
+
+export async function likeCommentAction(
+  admin: PublicAdmin,
+  commentRowId: string,
+): Promise<ActionOutcome> {
+  const comment = await getComment(admin, commentRowId);
+  const page = await loadPage(comment.page_id);
+
+  const result = await likeComment(page, comment.comment_id);
+  if (!result.ok) {
+    await db().from('comments').update({ last_error_th: result.error_th }).eq('id', commentRowId);
+    return {
+      ok: false,
+      message_th: result.error_th,
+      outcome_unknown: result.outcome_unknown,
+      comment: await getComment(admin, commentRowId),
+    };
+  }
+
+  await db()
+    .from('comments')
+    .update({
+      is_liked: true,
+      last_error_th: null,
+    })
+    .eq('id', commentRowId);
+
+  await logActivity({
+    adminId: admin.id,
+    action: 'comment.like',
+    targetType: 'comment',
+    targetId: commentRowId,
+  });
+
+  return {
+    ok: true,
+    message_th: 'กดไลก์คอมเมนต์แล้ว',
+    outcome_unknown: false,
+    comment: await getComment(admin, commentRowId),
+  };
+}
+
+/* ------------------------------------------------------------------------ */
+/* 5) ยกเลิกไลก์คอมเมนต์                                                       */
+/* ------------------------------------------------------------------------ */
+
+export async function unlikeCommentAction(
+  admin: PublicAdmin,
+  commentRowId: string,
+): Promise<ActionOutcome> {
+  const comment = await getComment(admin, commentRowId);
+  const page = await loadPage(comment.page_id);
+
+  const result = await unlikeComment(page, comment.comment_id);
+  if (!result.ok) {
+    await db().from('comments').update({ last_error_th: result.error_th }).eq('id', commentRowId);
+    return {
+      ok: false,
+      message_th: result.error_th,
+      outcome_unknown: result.outcome_unknown,
+      comment: await getComment(admin, commentRowId),
+    };
+  }
+
+  await db()
+    .from('comments')
+    .update({
+      is_liked: false,
+      last_error_th: null,
+    })
+    .eq('id', commentRowId);
+
+  await logActivity({
+    adminId: admin.id,
+    action: 'comment.unlike',
+    targetType: 'comment',
+    targetId: commentRowId,
+  });
+
+  return {
+    ok: true,
+    message_th: 'ยกเลิกไลก์คอมเมนต์แล้ว',
+    outcome_unknown: false,
+    comment: await getComment(admin, commentRowId),
+  };
+}
+
+/* ------------------------------------------------------------------------ */
+/* 6) ลบคอมเมนต์                                                              */
+/* ------------------------------------------------------------------------ */
+
+export async function deleteCommentAction(
+  admin: PublicAdmin,
+  commentRowId: string,
+): Promise<ActionOutcome> {
+  const comment = await getComment(admin, commentRowId);
+  const page = await loadPage(comment.page_id);
+
+  const result = await deleteComment(page, comment.comment_id);
+  if (!result.ok) {
+    await db().from('comments').update({ last_error_th: result.error_th }).eq('id', commentRowId);
+    return {
+      ok: false,
+      message_th: result.error_th,
+      outcome_unknown: result.outcome_unknown,
+      comment: await getComment(admin, commentRowId),
+    };
+  }
+
+  await db()
+    .from('comments')
+    .update({
+      is_deleted: true,
+      is_handled: true,
+      handled_by: admin.id,
+      handled_at: new Date().toISOString(),
+      last_error_th: null,
+    })
+    .eq('id', commentRowId);
+
+  await logActivity({
+    adminId: admin.id,
+    action: 'comment.delete',
+    targetType: 'comment',
+    targetId: commentRowId,
+  });
+
+  return {
+    ok: true,
+    message_th: 'ลบคอมเมนต์แล้ว',
     outcome_unknown: false,
     comment: await getComment(admin, commentRowId),
   };

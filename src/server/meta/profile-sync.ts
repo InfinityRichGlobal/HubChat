@@ -134,3 +134,124 @@ export async function refreshCustomerProfile(
   if (error) return { kind: 'failed', reason_th: `ล้างสถานะเดิมไม่สำเร็จ: ${error.message}` };
   return syncCustomerProfile(page, customerId, psid);
 }
+
+const COMMENT_PROFILE_CACHE_HOURS = 168;
+const COMMENT_PROFILE_CACHE_MS = COMMENT_PROFILE_CACHE_HOURS * 3600 * 1000;
+
+/**
+ * เติมข้อมูลโปรไฟล์/รูป Avatar ของผู้คอมเมนต์ (ทั้ง Facebook และ Instagram)
+ * มีระบบ Cache ตรวจสอบทั้งจากคอมเมนต์ก่อนหน้าและจากตาราง customers
+ * เพื่อไม่ให้ยิง Meta ซ้ำซ้อน และไม่โยน error ออกมาขัดขวางการทำงานของคิว
+ */
+export async function syncCommentProfile(
+  page: MetaPage,
+  commentRowId: string,
+  fromId: string,
+  fromUsername?: string | null,
+  fromName?: string | null,
+): Promise<{ ok: boolean; name: string | null; username: string | null; pic_url: string | null }> {
+  try {
+    if (!commentRowId || !fromId) {
+      return { ok: false, name: fromName ?? null, username: fromUsername ?? null, pic_url: null };
+    }
+
+    const now = Date.now();
+
+    // 1. ตรวจสอบ Cache จากคอมเมนต์ก่อนหน้าที่เคยดึงรูปมาแล้ว
+    const { data: cachedComments } = await db()
+      .from('comments')
+      .select('from_name, from_username, from_pic_url, profile_fetched_at')
+      .eq('from_id', fromId)
+      .not('from_pic_url', 'is', null)
+      .order('profile_fetched_at', { ascending: false })
+      .limit(1);
+
+    const cachedComment = cachedComments?.[0];
+    if (cachedComment?.from_pic_url && cachedComment.profile_fetched_at) {
+      const fetchedTime = new Date(cachedComment.profile_fetched_at).getTime();
+      if (now - fetchedTime < COMMENT_PROFILE_CACHE_MS) {
+        const name = cachedComment.from_name || fromName || null;
+        const username = cachedComment.from_username || fromUsername || null;
+        const pic = cachedComment.from_pic_url;
+
+        await db()
+          .from('comments')
+          .update({
+            from_name: name,
+            from_username: username,
+            from_pic_url: pic,
+            profile_fetched_at: new Date().toISOString(),
+          })
+          .eq('id', commentRowId);
+
+        return { ok: true, name, username, pic_url: pic };
+      }
+    }
+
+    // 2. ตรวจสอบ Cache จากตาราง customers (กรณีเคยคุยแชทมาก่อน)
+    const { data: cachedCustomer } = await db()
+      .from('customers')
+      .select('name, username, profile_pic_url, profile_synced_at')
+      .eq('customer_uid', fromId)
+      .not('profile_pic_url', 'is', null)
+      .maybeSingle();
+
+    if (cachedCustomer?.profile_pic_url && cachedCustomer.profile_synced_at) {
+      const fetchedTime = new Date(cachedCustomer.profile_synced_at).getTime();
+      if (now - fetchedTime < COMMENT_PROFILE_CACHE_MS) {
+        const name = cachedCustomer.name || fromName || null;
+        const username = cachedCustomer.username || fromUsername || null;
+        const pic = cachedCustomer.profile_pic_url;
+
+        await db()
+          .from('comments')
+          .update({
+            from_name: name,
+            from_username: username,
+            from_pic_url: pic,
+            profile_fetched_at: new Date().toISOString(),
+          })
+          .eq('id', commentRowId);
+
+        return { ok: true, name, username, pic_url: pic };
+      }
+    }
+
+    // 3. ถ้าไม่มี Cache หรือหมดอายุ: ดึงจาก Meta API
+    if (!page.access_token) {
+      return { ok: false, name: fromName ?? null, username: fromUsername ?? null, pic_url: null };
+    }
+
+    const result = await fetchCustomerProfileDetailed(page, fromId);
+    if (result.ok) {
+      const resolvedName = result.profile.name || fromName || null;
+      const resolvedUsername = result.profile.username || fromUsername || null;
+      const resolvedPic = result.profile.profile_pic_url;
+
+      await db()
+        .from('comments')
+        .update({
+          from_name: resolvedName,
+          from_username: resolvedUsername,
+          from_pic_url: resolvedPic,
+          profile_fetched_at: new Date().toISOString(),
+        })
+        .eq('id', commentRowId);
+
+      return { ok: true, name: resolvedName, username: resolvedUsername, pic_url: resolvedPic };
+    }
+
+    // กรณีดึงไม่สำเร็จ: บันทึก profile_fetched_at ไว้เพื่อไม่ให้วนยิงซ้ำทุกข้อความ
+    await db()
+      .from('comments')
+      .update({
+        profile_fetched_at: new Date().toISOString(),
+      })
+      .eq('id', commentRowId);
+
+    return { ok: false, name: fromName ?? null, username: fromUsername ?? null, pic_url: null };
+  } catch (err) {
+    console.warn('[profile-sync] เติมโปรไฟล์คอมเมนต์ไม่สำเร็จ (ข้ามไป):', err);
+    return { ok: false, name: fromName ?? null, username: fromUsername ?? null, pic_url: null };
+  }
+}

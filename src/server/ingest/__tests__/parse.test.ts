@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseWebhookPayload } from '../parse';
-import type { EchoMessageEvent, InboundMessageEvent } from '../types';
+import type { CommentEvent, EchoMessageEvent, InboundMessageEvent } from '../types';
 
 const PAGE = '102938475610293';
 const PSID = '7239084751029384';
@@ -21,6 +21,9 @@ function inboundOf(events: ReturnType<typeof parseWebhookPayload>): InboundMessa
 }
 function echoOf(events: ReturnType<typeof parseWebhookPayload>): EchoMessageEvent[] {
   return events.filter((e): e is EchoMessageEvent => e.kind === 'echo_message');
+}
+function commentOf(events: ReturnType<typeof parseWebhookPayload>): CommentEvent[] {
+  return events.filter((e): e is CommentEvent => e.kind === 'comment');
 }
 
 /* ================================================================== */
@@ -271,5 +274,252 @@ describe('สิ่งที่ต้องข้ามอย่างปลอ�
       ]),
     );
     expect(inboundOf(events).map((m) => m.meta_message_id)).toEqual(['ดี']);
+  });
+});
+
+/* ================================================================== */
+describe('คอมเมนต์ Facebook (feed changes)', () => {
+  it('แกะคอมเมนต์ใหม่บน Facebook ได้ครบทุกฟิลด์', () => {
+    const events = parseWebhookPayload({
+      object: 'page',
+      entry: [
+        {
+          id: PAGE,
+          time: 1755000000,
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: '102938475610293_111222333',
+                post_id: '102938475610293_999888777',
+                from: { id: 'fb_user_456', name: 'สมศรี มีทรัพย์' },
+                message: 'สนใจโปรนี้ค่ะ ขอรายละเอียดด้วยค่ะ',
+                created_time: 1755000000,
+                permalink_url: 'https://facebook.com/102938475610293/posts/999888777?comment_id=111222333',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const [c] = commentOf(events);
+    expect(c).toBeDefined();
+    expect(c.platform).toBe('facebook');
+    expect(c.page_meta_id).toBe(PAGE);
+    expect(c.comment_id).toBe('102938475610293_111222333');
+    expect(c.post_id).toBe('102938475610293_999888777');
+    expect(c.parent_comment_id).toBeNull();
+    expect(c.from_id).toBe('fb_user_456');
+    expect(c.from_name).toBe('สมศรี มีทรัพย์');
+    expect(c.message).toBe('สนใจโปรนี้ค่ะ ขอรายละเอียดด้วยค่ะ');
+    expect(c.is_from_page).toBe(false);
+    expect(c.commented_at).toBe(new Date(1755000000 * 1000).toISOString());
+  });
+
+  it('แกะคอมเมนต์ที่ตอบกลับ (reply) มี parent_comment_id', () => {
+    const events = parseWebhookPayload({
+      object: 'page',
+      entry: [
+        {
+          id: PAGE,
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'cmt_sub_1',
+                post_id: 'post_1',
+                parent_id: 'cmt_parent_1',
+                from: { id: 'user_2', name: 'ลูกค้าคนที่สอง' },
+                message: 'ตามด้วยคนค่ะ',
+                created_time: 1755000010,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const [c] = commentOf(events);
+    expect(c.parent_comment_id).toBe('cmt_parent_1');
+  });
+
+  it('คอมเมนต์จากเพจเอง → is_from_page เป็น true', () => {
+    const events = parseWebhookPayload({
+      object: 'page',
+      entry: [
+        {
+          id: PAGE,
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'cmt_page_reply',
+                post_id: 'post_1',
+                from: { id: PAGE, name: 'เพจร้านค้า' },
+                message: 'ทักข้อความไปแล้วนะคะ',
+                created_time: 1755000020,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const [c] = commentOf(events);
+    expect(c.is_from_page).toBe(true);
+  });
+});
+
+/* ================================================================== */
+describe('คอมเมนต์ Instagram (comments changes)', () => {
+  const IG_PAGE = '178414000000000';
+  const IG_COMMENT_ID = '17858843049216338';
+  const IG_MEDIA_ID = '17912345678901234';
+  const IG_USER_ID = '17841400999999999';
+
+  it('แกะคอมเมนต์ใหม่บน Instagram ได้ถูกต้องตาม contract จริง', () => {
+    const events = parseWebhookPayload({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_PAGE,
+          time: 1755000000000,
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: IG_COMMENT_ID,
+                text: 'สนใจตัวสีขาว มีของพร้อมส่งไหมคะ?',
+                from: {
+                  id: IG_USER_ID,
+                  username: 'fashion_lover_bkk',
+                },
+                media: {
+                  id: IG_MEDIA_ID,
+                  media_product_type: 'FEED',
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const [c] = commentOf(events);
+    expect(c).toBeDefined();
+    expect(c.platform).toBe('instagram');
+    expect(c.page_meta_id).toBe(IG_PAGE);
+    expect(c.comment_id).toBe(IG_COMMENT_ID);
+    expect(c.post_id).toBe(IG_MEDIA_ID);
+    expect(c.media_id).toBe(IG_MEDIA_ID);
+    expect(c.parent_comment_id).toBeNull();
+    expect(c.from_id).toBe(IG_USER_ID);
+    expect(c.from_username).toBe('fashion_lover_bkk');
+    expect(c.from_name).toBe('fashion_lover_bkk');
+    expect(c.message).toBe('สนใจตัวสีขาว มีของพร้อมส่งไหมคะ?');
+    expect(c.is_from_page).toBe(false);
+    expect(c.commented_at).toBe(new Date(1755000000000).toISOString());
+  });
+
+  it('แกะ reply บน Instagram ได้ parent_comment_id', () => {
+    const events = parseWebhookPayload({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_PAGE,
+          time: 1755000000000,
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: '17858843049219999',
+                text: 'ขอราคาด้วยคนค่ะ',
+                from: { id: '17841400888888888', username: 'another_user' },
+                media: { id: IG_MEDIA_ID },
+                parent_id: IG_COMMENT_ID,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const [c] = commentOf(events);
+    expect(c.parent_comment_id).toBe(IG_COMMENT_ID);
+    expect(c.post_id).toBe(IG_MEDIA_ID);
+  });
+
+  it('คอมเมนต์ Instagram จากเพจเอง → is_from_page เป็น true', () => {
+    const events = parseWebhookPayload({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_PAGE,
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: '17858843049210000',
+                text: 'แจ้งรายละเอียดทาง DM เรียบร้อยค่า',
+                from: { id: IG_PAGE, username: 'my_shop_official' },
+                media: { id: IG_MEDIA_ID },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const [c] = commentOf(events);
+    expect(c.is_from_page).toBe(true);
+  });
+
+  it('Instagram payload ผิดรูปแบบ (ไม่มี id) → ignored อย่างปลอดภัย ไม่ throw', () => {
+    const events = parseWebhookPayload({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_PAGE,
+          changes: [
+            {
+              field: 'comments',
+              value: { text: 'ไม่มี id' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(commentOf(events)).toEqual([]);
+    expect(events[0].kind).toBe('ignored');
+    expect((events[0] as { reason: string }).reason).toContain('ไม่มี id');
+  });
+
+  it('Instagram field ที่ไม่รู้จัก (เช่น story_insights) → ignored อย่างปลอดภัย', () => {
+    const events = parseWebhookPayload({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_PAGE,
+          changes: [
+            {
+              field: 'story_insights',
+              value: { impression_count: 100 },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(commentOf(events)).toEqual([]);
+    expect(events[0].kind).toBe('ignored');
+    expect((events[0] as { reason: string }).reason).toContain('story_insights');
   });
 });

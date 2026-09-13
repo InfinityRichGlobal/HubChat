@@ -12,7 +12,15 @@ import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { CommentError, setHandled } from '@/server/comments/service';
-import { hideComment, replyPrivate, replyPublic, MAX_REPLY_LENGTH } from '@/server/comments/actions';
+import {
+  hideComment,
+  replyPrivate,
+  replyPublic,
+  likeCommentAction,
+  unlikeCommentAction,
+  deleteCommentAction,
+  MAX_REPLY_LENGTH,
+} from '@/server/comments/actions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,6 +33,9 @@ const schema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('reply_private'), text: z.string().min(1).max(MAX_REPLY_LENGTH) }),
   z.object({ action: z.literal('hide'), hidden: z.boolean() }),
   z.object({ action: z.literal('handled'), handled: z.boolean() }),
+  z.object({ action: z.literal('like') }),
+  z.object({ action: z.literal('unlike') }),
+  z.object({ action: z.literal('delete') }),
 ]);
 
 export async function POST(req: NextRequest, ctx: Ctx) {
@@ -40,7 +51,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const outcome =
       body.action === 'reply_public' ? await replyPublic(admin, id, body.text)
       : body.action === 'reply_private' ? await replyPrivate(admin, id, body.text)
-      : await hideComment(admin, id, body.hidden);
+      : body.action === 'hide' ? await hideComment(admin, id, body.hidden)
+      : body.action === 'like' ? await likeCommentAction(admin, id)
+      : body.action === 'unlike' ? await unlikeCommentAction(admin, id)
+      : await deleteCommentAction(admin, id);
 
     const line =
       `[comments] ${body.action} id=${id} ok=${outcome.ok} unknown=${outcome.outcome_unknown}`;

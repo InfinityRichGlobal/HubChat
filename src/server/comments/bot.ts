@@ -13,7 +13,13 @@ import 'server-only';
 import { db } from '@/lib/supabase/admin';
 import type { PublicAdmin } from '@/types/db';
 import type { MetaPage } from '@/server/meta/client';
-import { likeComment, replyToCommentPublicly, sendPrivateReply, subscribePageWebhooks } from '@/server/meta/comments';
+import {
+  likeComment,
+  replyToCommentPublicly,
+  sendPrivateReply,
+  subscribePageWebhooks,
+  COMMENT_CAPABILITIES,
+} from '@/server/meta/comments';
 import { generateCommentReply } from '@/server/ai/gemini';
 import { listProducts, listPromotions } from '@/server/orders/service';
 import {
@@ -174,23 +180,33 @@ export async function processCommentAutoReply(
   }
 
   const replyMode = settings.reply_mode || 'ai';
+  const capabilities = COMMENT_CAPABILITIES[page.platform] ?? {
+    like: false,
+    unlike: false,
+    publicReply: false,
+    privateReply: false,
+    hide: false,
+    delete: false,
+  };
 
   // 1. กดไลก์อัตโนมัติ
-  if (settings.auto_like) {
+  if (settings.auto_like && capabilities.like) {
     try {
       const likeRes = await likeComment(page, ev.comment_id);
       if (likeRes.ok) {
-        console.log(`[comment-bot] 👍 กดไลก์คอมเมนต์ ${ev.comment_id} สำเร็จ`);
+        console.log(`[comment-bot] 👍 กดไลก์คอมเมนต์ ${ev.comment_id} สำเร็จ (${page.platform})`);
       } else {
         console.warn(`[comment-bot] กดไลก์คอมเมนต์ ${ev.comment_id} ไม่สำเร็จ:`, likeRes.error_th);
       }
     } catch (err) {
       console.error(`[comment-bot] เกิดข้อผิดพลาดขณะกดไลก์คอมเมนต์:`, err);
     }
+  } else if (settings.auto_like && !capabilities.like) {
+    console.info(`[comment-bot] แพลตฟอร์ม ${page.platform} ไม่รองรับการกดไลก์อัตโนมัติ`);
   }
 
   // 2. ตอบคอมเมนต์สาธารณะใต้โพสต์
-  if (settings.auto_reply_public) {
+  if (settings.auto_reply_public && capabilities.publicReply) {
     let replyText: string | null = null;
 
     // หากมีกฎเฉพาะคำที่ระบุคำตอบสาธารณะไว้ ให้ใช้กฎนั้นก่อน
@@ -242,10 +258,12 @@ export async function processCommentAutoReply(
         console.error(`[comment-bot] เกิดข้อผิดพลาดขณะตอบคอมเมนต์ใต้โพสต์:`, err);
       }
     }
+  } else if (settings.auto_reply_public && !capabilities.publicReply) {
+    console.info(`[comment-bot] แพลตฟอร์ม ${page.platform} ไม่รองรับการตอบคอมเมนต์สาธารณะ`);
   }
 
   // 3. ทักแชทส่วนตัว (Private Reply / DM)
-  if (settings.auto_reply_private && savedCommentRowId) {
+  if (settings.auto_reply_private && savedCommentRowId && capabilities.privateReply) {
     let dmText: string | null = null;
 
     // หากมีกฎเฉพาะคำที่ระบุคำตอบส่วนตัวไว้ ให้ใช้กฎนั้น
@@ -308,7 +326,7 @@ export async function processCommentAutoReply(
         } else {
           const privateRes = await sendPrivateReply(page, ev.comment_id, dmText);
           if (privateRes.ok) {
-            console.log(`[comment-bot] 💌 ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} สำเร็จ`);
+            console.log(`[comment-bot] 💌 ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} สำเร็จ (${page.platform})`);
             await db().rpc('finish_private_reply', {
               p_comment_row_id: savedCommentRowId,
               p_text: dmText,
@@ -317,7 +335,7 @@ export async function processCommentAutoReply(
             });
           } else {
             console.warn(
-              `[comment-bot] ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} ไม่สำเร็จ:`,
+              `[comment-bot] ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} ไม่สำเร็จ (${page.platform}):`,
               privateRes.error_th,
             );
             if (!privateRes.outcome_unknown) {
@@ -332,13 +350,15 @@ export async function processCommentAutoReply(
         console.error(`[comment-bot] เกิดข้อผิดพลาดขณะทักส่วนตัว:`, err);
       }
     }
+  } else if (settings.auto_reply_private && !capabilities.privateReply) {
+    console.info(`[comment-bot] แพลตฟอร์ม ${page.platform} ไม่รองรับการทักแชทส่วนตัว`);
   }
 }
 
 /**
- * สมัครรับ Webhook สำหรับคอมเมนต์ (feed) ให้ทุกเพจ Facebook ที่เปิดใช้งานอยู่
+ * สมัครรับ Webhook สำหรับข้อความและคอมเมนต์ (feed/comments) ให้ทุกเพจ Facebook และ Instagram ที่เปิดใช้งานอยู่
  */
-export async function subscribeAllFacebookPages(): Promise<{
+export async function subscribeAllPages(): Promise<{
   results: Array<{ id: string; name: string; ok: boolean; error_th: string | null }>;
   total: number;
   succeeded: number;
@@ -347,14 +367,14 @@ export async function subscribeAllFacebookPages(): Promise<{
   const { data: pages, error } = await db()
     .from('pages')
     .select('id,platform,page_id,page_name,display_name,access_token,is_active')
-    .eq('platform', 'facebook')
+    .in('platform', ['facebook', 'instagram'])
     .eq('is_active', true);
 
   if (error) throw new Error(`อ่านรายชื่อเพจไม่สำเร็จ: ${error.message}`);
 
   const list = (pages ?? []) as Array<{
     id: string;
-    platform: 'facebook';
+    platform: 'facebook' | 'instagram';
     page_id: string;
     page_name: string;
     display_name: string | null;
@@ -383,9 +403,12 @@ export async function subscribeAllFacebookPages(): Promise<{
     results,
     total: results.length,
     succeeded,
-    message_th: `เชื่อมต่อ Webhook สำหรับคอมเมนต์ (feed) ให้ ${succeeded} จาก ${results.length} เพจเรียบร้อยแล้ว`,
+    message_th: `เชื่อมต่อ Webhook สำหรับคอมเมนต์และข้อความให้ ${succeeded} จาก ${results.length} เพจเรียบร้อยแล้ว`,
   };
 }
+
+/** สำหรับ backward-compatibility */
+export const subscribeAllFacebookPages = subscribeAllPages;
 
 /**
  * ทดสอบการทำงานของบอทคอมเมนต์แบบจำลอง (Dry-run)

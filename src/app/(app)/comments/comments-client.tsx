@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, Bot, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw, Sparkles,
-  ChevronDown, Layers,
+  ChevronDown, Layers, ThumbsUp, Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import PlatformIcon from '@/components/platform-icon';
+import CustomerAvatar from '@/components/customer-avatar';
 import type { CommentRow } from '@/server/comments/service';
 import type { SafePage } from '@/server/pages/service';
 import type { CommentBotSettings } from '@/types/comment-bot';
@@ -318,6 +319,7 @@ function CommentCard({
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const oldForPrivate = tooOldForPrivate(c.commented_at);
@@ -373,75 +375,154 @@ function CommentCard({
   }
 
   return (
-    <div className={cn('flex flex-col gap-1.5 rounded-md border p-3', c.is_handled && 'opacity-60')}>
-      <div className="flex flex-wrap items-center gap-2">
-        {page && (
-          <span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-[11px] font-medium text-foreground">
-            <PlatformIcon platform={page.platform} size="xs" />
-            <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
-            <span className="max-w-[120px] truncate">{page.display_name || page.page_name}</span>
-          </span>
-        )}
-        <span className="text-sm font-semibold">{c.from_name || 'ไม่ทราบชื่อ'}</span>
-        <span className="text-[11px] text-muted-foreground">{timeAgo(c.commented_at ?? c.created_at)}</span>
-        {c.matched_keyword && (
-          <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500">
-            {c.matched_keyword}
-          </Badge>
-        )}
-        {c.is_handled && <Badge variant="secondary" className="text-[10px]">จัดการแล้ว</Badge>}
-        {c.is_hidden && <Badge variant="secondary" className="text-[10px]">ซ่อนอยู่</Badge>}
-        {c.replied_public && <Badge variant="outline" className="text-[10px]">ตอบใต้โพสต์แล้ว</Badge>}
-        {c.replied_private && <Badge variant="outline" className="text-[10px]">ทักส่วนตัวแล้ว</Badge>}
+    <div className={cn('flex flex-col gap-2 rounded-md border p-3', (c.is_handled || c.is_deleted) && 'opacity-60')}>
+      <div className="flex items-start gap-2.5">
+        <CustomerAvatar
+          name={c.from_name || c.from_username || 'ลูกค้า'}
+          src={c.from_pic_url}
+          size="sm"
+        />
+        <div className="flex flex-1 flex-col gap-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {page && (
+              <span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+                <PlatformIcon platform={page.platform} size="xs" />
+                <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+                <span className="max-w-[120px] truncate">{page.display_name || page.page_name}</span>
+              </span>
+            )}
+            <span className="text-sm font-semibold">{c.from_name || c.from_username || 'ไม่ทราบชื่อ'}</span>
+            {c.from_username && c.from_username !== c.from_name && (
+              <span className="text-xs text-muted-foreground font-mono">@{c.from_username}</span>
+            )}
+            <span className="text-[11px] text-muted-foreground">{timeAgo(c.commented_at ?? c.created_at)}</span>
+            {c.matched_keyword && (
+              <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500">
+                {c.matched_keyword}
+              </Badge>
+            )}
+            {c.is_liked && (
+              <Badge variant="secondary" className="text-[10px] text-primary border-primary/20 bg-primary/10 gap-0.5">
+                <ThumbsUp className="size-2.5 fill-current" /> ไลก์แล้ว
+              </Badge>
+            )}
+            {c.is_deleted && <Badge variant="destructive" className="text-[10px]">ลบแล้ว</Badge>}
+            {c.is_handled && <Badge variant="secondary" className="text-[10px]">จัดการแล้ว</Badge>}
+            {c.is_hidden && <Badge variant="secondary" className="text-[10px]">ซ่อนอยู่</Badge>}
+            {c.replied_public && <Badge variant="outline" className="text-[10px]">ตอบใต้โพสต์แล้ว</Badge>}
+            {c.replied_private && <Badge variant="outline" className="text-[10px]">ทักส่วนตัวแล้ว</Badge>}
+          </div>
+
+          <p className={cn('whitespace-pre-wrap text-sm', c.is_deleted && 'line-through text-muted-foreground')}>
+            {c.message || '(ไม่มีข้อความ)'}
+          </p>
+
+          {c.post_permalink && (
+            <a
+              href={c.post_permalink}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-muted-foreground underline"
+            >
+              เปิดโพสต์ต้นทาง
+            </a>
+          )}
+
+          {c.last_error_th && (
+            <p className="text-[11px] text-destructive">{c.last_error_th}</p>
+          )}
+        </div>
       </div>
 
-      <p className="whitespace-pre-wrap text-sm">{c.message || '(ไม่มีข้อความ)'}</p>
-
-      {c.post_permalink && (
-        <a
-          href={c.post_permalink}
-          target="_blank"
-          rel="noreferrer"
-          className="text-[11px] text-muted-foreground underline"
-        >
-          เปิดโพสต์ต้นทาง
-        </a>
-      )}
-
-      {c.last_error_th && (
-        <p className="text-[11px] text-destructive">{c.last_error_th}</p>
-      )}
+      {/* ---- Dialog ยืนยันการลบ ---- */}
+      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ยืนยันการลบคอมเมนต์</DialogTitle>
+            <DialogDescription>
+              คุณต้องการลบคอมเมนต์นี้ออกจาก {page?.platform === 'instagram' ? 'Instagram' : 'Facebook'} ใช่หรือไม่? การกระทำนี้ไม่สามารถเรียกคืนได้
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>
+              ยกเลิก
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={sending}
+              onClick={() => {
+                setConfirmDelete(false);
+                void act({ action: 'delete' });
+              }}
+            >
+              ลบคอมเมนต์
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ---- ปุ่ม ---- */}
       {mode === 'none' && (
         <div className="mt-1 flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => { setMode('public'); setTimeout(() => inputRef.current?.focus(), 0); }}>
-            <MessageSquare />
-            ตอบใต้โพสต์
-          </Button>
+          {!c.is_deleted && (
+            <Button size="sm" variant="outline" onClick={() => { setMode('public'); setTimeout(() => inputRef.current?.focus(), 0); }}>
+              <MessageSquare className="size-3.5" />
+              ตอบใต้โพสต์
+            </Button>
+          )}
 
           {/* ⭐ ทักส่วนตัวได้ครั้งเดียวเท่านั้น — หายไปเลยเมื่อใช้แล้ว */}
-          {!c.replied_private && !oldForPrivate && (
+          {!c.replied_private && !oldForPrivate && !c.is_deleted && (
             <Button size="sm" variant="outline" onClick={() => { setMode('private'); setTimeout(() => inputRef.current?.focus(), 0); }}>
-              <Send />
+              <Send className="size-3.5" />
               ทักส่วนตัว
             </Button>
           )}
-          {!c.replied_private && oldForPrivate && (
+          {!c.replied_private && oldForPrivate && !c.is_deleted && (
             <span className="self-center text-[11px] text-muted-foreground">
               เกิน 7 วัน — ทักส่วนตัวไม่ได้แล้ว
             </span>
           )}
 
-          <Button size="sm" variant="ghost" disabled={sending} onClick={() => void act({ action: 'hide', hidden: !c.is_hidden })}>
-            {c.is_hidden ? <Eye /> : <EyeOff />}
-            {c.is_hidden ? 'เลิกซ่อน' : 'ซ่อน'}
-          </Button>
+          {/* ไลก์ / ยกเลิกไลก์ */}
+          {!c.is_deleted && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={sending}
+              onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
+              className={c.is_liked ? 'text-primary hover:text-primary font-medium' : ''}
+            >
+              <ThumbsUp className={cn('size-3.5', c.is_liked && 'fill-current')} />
+              {c.is_liked ? 'เลิกถูกใจ' : 'ถูกใจ'}
+            </Button>
+          )}
+
+          {!c.is_deleted && (
+            <Button size="sm" variant="ghost" disabled={sending} onClick={() => void act({ action: 'hide', hidden: !c.is_hidden })}>
+              {c.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+              {c.is_hidden ? 'เลิกซ่อน' : 'ซ่อน'}
+            </Button>
+          )}
 
           <Button size="sm" variant="ghost" disabled={sending} onClick={() => void act({ action: 'handled', handled: !c.is_handled })}>
-            <Check />
+            <Check className="size-3.5" />
             {c.is_handled ? 'ยังไม่จัดการ' : 'จัดการแล้ว'}
           </Button>
+
+          {!c.is_deleted && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={sending}
+              onClick={() => setConfirmDelete(true)}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="size-3.5" />
+              ลบ
+            </Button>
+          )}
 
           {c.conversation_id && (
             <Button size="sm" variant="ghost" asChild>

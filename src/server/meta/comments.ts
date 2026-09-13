@@ -1,154 +1,149 @@
 import 'server-only';
 /**
- * คุยกับ Meta เรื่องคอมเมนต์ (รอบ 9)
+ * คุยกับ Meta เรื่องคอมเมนต์ (Platform-Aware Comment Adapter)
  * ===========================================================================
- * ⭐ อยู่ในโฟลเดอร์ server/meta/ โดยตั้งใจ
- *    กฎของโปรเจกต์ : ทุกเรื่องที่ต้องยิง HTTP หา Meta อยู่ในโฟลเดอร์นี้เท่านั้น
- *    (ทั้ง eslint และชุดทดสอบสถาปัตยกรรมบังคับข้อนี้)
- *
- * 🔴 "ตอบส่วนตัว" (private reply) ไม่ได้เดินผ่าน Send API
- *    จึงไม่ผ่าน transport ของ Message Policy Engine — และนั่นถูกต้องแล้ว
- *    เพราะเป็นคนละ endpoint ที่มีกฎของตัวเอง (สเปก 6.4) :
- *      • ทำได้ครั้งเดียวต่อคอมเมนต์ตลอดกาล
- *      • ภายใน 7 วันนับจากคอมเมนต์
- *      • และมันคือสิ่งที่ "เปิด" กรอบ 24 ชม. ให้คุยต่อได้ ไม่ใช่การส่งในกรอบ
- *    ด่านกันพลาดจึงอยู่ที่ฐานข้อมูล (claim_private_reply) แทน
- *
- * ⚠️ ข้อความหลังจากนี้ทุกข้อความต้องกลับไปผ่าน sendMessage() ตามปกติ
+ * ⭐ รวมศูนย์การจัดการคอมเมนต์ทั้ง Facebook และ Instagram:
+ *    - ตรวจสอบ Platform ของเพจ (facebook vs instagram)
+ *    - ส่งต่องานไปยัง adapter ที่ถูกต้องตาม API contract ของแต่ละแพลตฟอร์ม
+ *    - มี Platform Capability Matrix ชัดเจน
+ *    - กฎสถาปัตยกรรม: การยิง HTTP ทั้งหมดอยู่ภายใต้ server/meta เท่านั้น
  */
-import { metaPost, MetaNotConfiguredError, type MetaPage } from './client';
-import { classifyMetaError } from './errors';
+import { MetaNotConfiguredError, type MetaPage } from './client';
+import {
+  type CommentActionResult,
+  type WebhookSubscribeResult,
+  type CommentPlatformCapabilities,
+  COMMENT_CAPABILITIES,
+  explainCommentError,
+} from './comments-types';
+import {
+  replyToFacebookComment,
+  sendFacebookPrivateReply,
+  setFacebookCommentHidden,
+  likeFacebookComment,
+  deleteFacebookComment,
+  subscribeFacebookPageWebhooks,
+  FB_SUBSCRIBED_FIELDS,
+} from './facebook-comments';
+import {
+  replyToInstagramComment,
+  sendInstagramPrivateReply,
+  setInstagramCommentHidden,
+  likeInstagramComment,
+  unlikeInstagramComment,
+  deleteInstagramComment,
+  subscribeInstagramPageWebhooks,
+  IG_SUBSCRIBED_FIELDS,
+} from './instagram-comments';
 
-export type CommentActionResult =
-  | { ok: true; id: string | null }
-  | { ok: false; error_th: string; outcome_unknown: boolean };
+export type {
+  CommentActionResult,
+  WebhookSubscribeResult,
+  CommentPlatformCapabilities,
+  MetaPage,
+};
+export {
+  COMMENT_CAPABILITIES,
+  explainCommentError,
+  MetaNotConfiguredError,
+  FB_SUBSCRIBED_FIELDS,
+  IG_SUBSCRIBED_FIELDS,
+};
 
 /**
- * ตอบใต้โพสต์ (คอมเมนต์ตอบคอมเมนต์)
- * ⚠️ ทุกคนเห็นได้ — ห้ามใส่ข้อมูลส่วนตัวของลูกค้าลงไปเด็ดขาด
+ * ตอบใต้โพสต์ (Public Reply) — รองรับทั้ง Facebook และ Instagram
  */
 export async function replyToCommentPublicly(
   page: MetaPage,
   commentId: string,
   message: string,
 ): Promise<CommentActionResult> {
-  const result = await metaPost(page, `${commentId}/comments`, { message });
-
-  if (result.ok) {
-    const id = (result.data as { id?: string } | null)?.id ?? null;
-    return { ok: true, id };
+  if (page.platform === 'instagram') {
+    return replyToInstagramComment(page, commentId, message);
   }
-  return {
-    ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th),
-    outcome_unknown: result.error.kind === 'ambiguous',
-  };
+  return replyToFacebookComment(page, commentId, message);
 }
 
 /**
- * ทักส่วนตัวจากคอมเมนต์
- * 🔴 Meta อนุญาตครั้งเดียวต่อคอมเมนต์ — ต้องจองสิทธิ์กับฐานข้อมูลก่อนเรียกตัวนี้เสมอ
+ * ทักส่วนตัวจากคอมเมนต์ (Private Reply) — รองรับทั้ง Facebook และ Instagram
+ * 🔴 Meta อนุญาตครั้งเดียวต่อคอมเมนต์ภายใน 7 วัน — ต้องจองสิทธิ์กับฐานข้อมูลก่อนเรียกเสมอ
  */
 export async function sendPrivateReply(
   page: MetaPage,
   commentId: string,
   message: string,
 ): Promise<CommentActionResult> {
-  const result = await metaPost(page, `${commentId}/private_replies`, { message });
-
-  if (result.ok) {
-    const id = (result.data as { id?: string } | null)?.id ?? null;
-    return { ok: true, id };
+  if (page.platform === 'instagram') {
+    return sendInstagramPrivateReply(page, commentId, message);
   }
-  return {
-    ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th),
-    outcome_unknown: result.error.kind === 'ambiguous',
-  };
+  return sendFacebookPrivateReply(page, commentId, message);
 }
 
-/** ซ่อน / เลิกซ่อนคอมเมนต์ */
+/**
+ * ซ่อน / เลิกซ่อนคอมเมนต์ — รองรับทั้ง Facebook และ Instagram
+ */
 export async function setCommentHidden(
   page: MetaPage,
   commentId: string,
   hidden: boolean,
 ): Promise<CommentActionResult> {
-  const result = await metaPost(page, commentId, { is_hidden: hidden });
-  if (result.ok) return { ok: true, id: commentId };
-  return {
-    ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th),
-    outcome_unknown: result.error.kind === 'ambiguous',
-  };
+  if (page.platform === 'instagram') {
+    return setInstagramCommentHidden(page, commentId, hidden);
+  }
+  return setFacebookCommentHidden(page, commentId, hidden);
 }
 
 /**
- * กดไลก์คอมเมนต์
+ * กดไลก์คอมเมนต์ — รองรับทั้ง Facebook และ Instagram
  */
 export async function likeComment(
   page: MetaPage,
   commentId: string,
 ): Promise<CommentActionResult> {
-  const result = await metaPost(page, `${commentId}/likes`, {});
-  if (result.ok) return { ok: true, id: commentId };
+  if (page.platform === 'instagram') {
+    return likeInstagramComment(page, commentId);
+  }
+  return likeFacebookComment(page, commentId);
+}
+
+/**
+ * ยกเลิกไลก์คอมเมนต์ — เฉพาะ Instagram (Facebook API ไม่รองรับ unlike)
+ */
+export async function unlikeComment(
+  page: MetaPage,
+  commentId: string,
+): Promise<CommentActionResult> {
+  if (page.platform === 'instagram') {
+    return unlikeInstagramComment(page, commentId);
+  }
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th),
-    outcome_unknown: result.error.kind === 'ambiguous',
+    error_th: 'Facebook ไม่รองรับการยกเลิกไลก์คอมเมนต์ผ่าน Graph API',
+    outcome_unknown: false,
   };
 }
 
-export type WebhookSubscribeResult =
-  | { ok: true; subscribed_fields: string[] }
-  | { ok: false; error_th: string };
+/**
+ * ลบคอมเมนต์ — รองรับทั้ง Facebook และ Instagram
+ */
+export async function deleteComment(
+  page: MetaPage,
+  commentId: string,
+): Promise<CommentActionResult> {
+  if (page.platform === 'instagram') {
+    return deleteInstagramComment(page, commentId);
+  }
+  return deleteFacebookComment(page, commentId);
+}
 
 /**
- * เชื่อมต่อ Webhook สำหรับเพจ (ทั้ง messages และ feed)
- * 🔴 จำเป็นอย่างยิ่งสำหรับคอมเมนต์: ถ้าเพจไม่ได้เรียก POST /{page-id}/subscribed_apps
- *    พร้อม subscribed_fields=feed ทาง Meta จะไม่มีวันยิงคอมเมนต์มาที่ webhook เลย
+ * เชื่อมต่อ Webhook สำหรับเพจ (แยก fields ตาม Facebook และ Instagram อย่างถูกต้อง)
  */
 export async function subscribePageWebhooks(
   page: MetaPage,
 ): Promise<WebhookSubscribeResult> {
-  const fields = ['messages', 'messaging_postbacks', 'messaging_optins', 'message_deliveries', 'message_reads', 'feed'];
-  const result = await metaPost(page, `${page.page_id}/subscribed_apps`, {
-    subscribed_fields: fields.join(','),
-  });
-
-  if (result.ok) {
-    return { ok: true, subscribed_fields: fields };
+  if (page.platform === 'instagram') {
+    return subscribeInstagramPageWebhooks(page);
   }
-  return {
-    ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th),
-  };
+  return subscribeFacebookPageWebhooks(page);
 }
-
-/**
- * แปลข้อผิดพลาดของ Meta เป็นคำแนะนำที่ทำตามได้
- * 🔴 บทเรียนจาก D-31 : ข้อความกลาง ๆ ทำให้ไล่ปัญหาต่อไม่ได้เลย
- */
-export function explainCommentError(code: number | null, fallback: string): string {
-  if (code === 190) return 'token ของเพจหมดอายุหรือถูกเพิกถอน — สร้าง token ใหม่ในหน้าตั้งค่าเพจ';
-  if (code === 10903 || code === 10900) {
-    return 'ตอบส่วนตัวไม่ได้แล้ว — คอมเมนต์นี้อาจเคยถูกตอบส่วนตัวไปแล้ว หรือเกินกรอบเวลาที่ Meta กำหนด';
-  }
-  if (code === 100 || code === 200 || code === 10) {
-    return (
-      'token ยังไม่มีสิทธิ์จัดการคอมเมนต์ — ต้องมีสิทธิ์ pages_manage_engagement ' +
-      'และ pages_read_engagement แล้วสร้าง token ใหม่'
-    );
-  }
-  if (code === 4 || code === 17 || code === 32 || code === 613) {
-    return 'เรียก Meta ถี่เกินโควตาชั่วโมงนี้ — รอสัก 15-30 นาทีแล้วลองใหม่';
-  }
-  if (code === 803 || code === 2500) {
-    return 'ไม่พบคอมเมนต์นี้บน Meta แล้ว — อาจถูกลบไปโดยลูกค้าหรือเจ้าของโพสต์';
-  }
-  return fallback;
-}
-
-export { MetaNotConfiguredError };
-export type { MetaPage };
-/** ใช้ในชุดทดสอบเท่านั้น — ให้ classifyMetaError ถูกอ้างถึงจากไฟล์นี้ด้วย */
-export const __classify = classifyMetaError;

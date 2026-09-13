@@ -20,7 +20,7 @@ export class CommentError extends Error {
 }
 
 export const COMMENT_SELECTS = {
-  comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
+  comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,from_username,from_pic_url,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_liked,is_deleted,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
   setting: 'value',
 } as const;
 
@@ -64,6 +64,8 @@ export type SaveCommentInput = {
   parent_comment_id: string | null;
   from_id: string | null;
   from_name: string | null;
+  from_username?: string | null;
+  from_pic_url?: string | null;
   message: string | null;
   permalink: string | null;
   attachment_url: string | null;
@@ -96,6 +98,8 @@ export async function saveIncomingComment(
     p_is_from_page: input.is_from_page,
     p_commented_at: input.commented_at,
     p_raw: input.raw,
+    p_from_username: input.from_username ?? null,
+    p_from_pic_url: input.from_pic_url ?? null,
   });
 
   if (error) throw new CommentError(`บันทึกคอมเมนต์ไม่สำเร็จ: ${error.message}`);
@@ -119,12 +123,16 @@ export type CommentRow = {
   parent_comment_id: string | null;
   from_name: string | null;
   from_id: string | null;
+  from_username: string | null;
+  from_pic_url: string | null;
   message: string | null;
   post_permalink: string | null;
   attachment_url: string | null;
   matched_keyword: string | null;
   is_handled: boolean;
   is_hidden: boolean;
+  is_liked: boolean;
+  is_deleted: boolean;
   is_from_page: boolean;
   replied_public: boolean;
   replied_private: boolean;
