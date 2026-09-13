@@ -471,7 +471,7 @@ function CommentCard({
   return (
     <div
       className={cn(
-        'flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-xs transition',
+        'flex flex-col gap-2.5 rounded-2xl border bg-card p-3 sm:p-3.5 shadow-2xs transition',
         c.is_handled && 'bg-card/85 border-border/70',
         c.is_deleted && 'opacity-60',
       )}
@@ -479,17 +479,12 @@ function CommentCard({
       {/* แถวหัวข้อ: โปรไฟล์ลูกค้า + เวลา (จัดชิดซ้ายและขวา ไม่เบียดกัน) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="relative shrink-0">
+          <div className="shrink-0">
             <CustomerAvatar
               name={c.from_name || c.from_username || 'ลูกค้า'}
               src={c.from_pic_url}
               size="sm"
             />
-            {page && (
-              <div className="absolute -bottom-1 -right-1 rounded-full bg-background p-0.5 shadow-xs">
-                <PlatformIcon platform={page.platform} size="xs" />
-              </div>
-            )}
           </div>
 
           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
@@ -561,51 +556,49 @@ function CommentCard({
       )}
 
       {/* เนื้อหาคอมเมนต์ของลูกค้า */}
-      <div className="flex flex-col gap-2">
-        <div className="rounded-xl bg-muted/40 border border-border/40 p-3 text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-          <p className={cn(c.is_deleted && 'line-through text-muted-foreground')}>
-            {c.message || '(ไม่มีข้อความ)'}
-          </p>
-        </div>
+      <div className="flex flex-col gap-1.5 px-0.5 py-0.5">
+        <p className={cn('text-sm text-foreground whitespace-pre-wrap leading-relaxed', c.is_deleted && 'line-through text-muted-foreground')}>
+          {c.message || '(ไม่มีข้อความ)'}
+        </p>
 
         {/* ส่วนแสดงข้อความที่เคยตอบกลับไปแล้ว (ปิดตาไว้ก่อน กดดูถึงจะเปิด) */}
         {hasReplied && (
-          <div className="flex flex-col gap-1.5 pt-0.5">
+          <div className="flex flex-col gap-1 pt-0.5">
             <button
               type="button"
               onClick={() => setShowReplies(!showReplies)}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-medium transition w-fit py-0.5"
+              className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground font-medium transition w-fit py-0.5"
             >
-              {showReplies ? <EyeOff className="size-3.5 text-primary" /> : <Eye className="size-3.5" />}
+              {showReplies ? <EyeOff className="size-3 text-primary" /> : <Eye className="size-3" />}
               <span>{showReplies ? 'ซ่อนข้อความที่ตอบกลับ' : 'ดูข้อความที่ตอบกลับไปแล้ว'}</span>
             </button>
 
             {showReplies && (
-              <div className="rounded-xl border bg-muted/20 p-3 flex flex-col gap-2.5 text-xs">
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5 flex flex-col gap-2 text-xs">
                 {c.public_reply_text && (
-                  <div className="flex flex-col gap-1">
-                    <span className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1 text-[11px]">
                       <MessageSquare className="size-3" /> ข้อความที่ตอบใต้โพสต์:
                     </span>
-                    <div className="rounded-lg bg-background p-2.5 border text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                    <div className="rounded-md bg-background/90 p-2 border border-border/40 text-foreground/90 whitespace-pre-wrap leading-relaxed">
                       {c.public_reply_text}
                     </div>
                   </div>
                 )}
 
                 {c.private_reply_text && (
-                  <div className="flex flex-col gap-1">
-                    <span className="font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1 text-[11px]">
                       <Send className="size-3" /> ข้อความที่ทักแชทส่วนตัว (Messenger / IG DM):
                     </span>
-                    <div className="rounded-lg bg-background p-2.5 border text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                    <div className="rounded-md bg-background/90 p-2 border border-border/40 text-foreground/90 whitespace-pre-wrap leading-relaxed">
                       {c.private_reply_text}
                     </div>
                   </div>
                 )}
 
                 {!c.public_reply_text && !c.private_reply_text && (
-                  <p className="text-muted-foreground italic">
+                  <p className="text-muted-foreground italic text-[11px]">
                     (ระบบได้บันทึกว่าตอบกลับแล้ว แต่อาจเป็นรายการที่ตอบก่อนเปิดระบบบันทึกข้อความ)
                   </p>
                 )}
@@ -672,14 +665,14 @@ function CommentCard({
 
       {/* แถบปุ่มจัดการ (เมื่อไม่ได้เปิดฟอร์มตอบ) */}
       {mode === 'none' && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-1.5 border-t border-border/40 pt-2 mt-0.5">
           {/* แถบปุ่มหลัก (ตอบกลับ / ทักแชท / ไลก์) */}
           <div className="flex flex-wrap items-center gap-1.5">
             {!c.is_deleted && (
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 gap-1.5 text-xs font-medium rounded-lg hover:border-primary/50"
+                className="h-7.5 gap-1.5 text-xs font-medium rounded-lg hover:border-primary/50"
                 onClick={() => {
                   setMode('public');
                   setTimeout(() => textareaRef.current?.focus(), 50);
@@ -694,7 +687,7 @@ function CommentCard({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 gap-1.5 text-xs font-medium rounded-lg text-purple-700 border-purple-200 hover:bg-purple-50 dark:border-purple-900/50 dark:text-purple-400 dark:hover:bg-purple-950/30"
+                className="h-7.5 gap-1.5 text-xs font-medium rounded-lg text-purple-700 border-purple-200 hover:bg-purple-50 dark:border-purple-900/50 dark:text-purple-400 dark:hover:bg-purple-950/30"
                 onClick={() => {
                   setMode('private');
                   setTimeout(() => textareaRef.current?.focus(), 50);
@@ -706,8 +699,8 @@ function CommentCard({
             )}
 
             {!c.replied_private && oldForPrivate && !c.is_deleted && (
-              <span className="text-[11px] text-muted-foreground px-2 py-1 bg-muted/40 rounded-md">
-                เกิน 7 วัน (ทักส่วนตัวไม่ได้แล้ว)
+              <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted/40 rounded">
+                เกิน 7 วัน (ทักส่วนตัวไม่ได้)
               </span>
             )}
 
@@ -717,11 +710,18 @@ function CommentCard({
                 variant="ghost"
                 disabled={sending}
                 onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
-                className={cn('h-8 gap-1.5 text-xs rounded-lg', c.is_liked && 'text-primary font-semibold')}
+                className={cn('h-7.5 gap-1.5 text-xs rounded-lg px-2', c.is_liked && 'text-primary font-semibold')}
               >
                 <ThumbsUp className={cn('size-3.5', c.is_liked && 'fill-current text-primary')} />
                 {c.is_liked ? 'เลิกถูกใจ' : 'ถูกใจ'}
               </Button>
+            )}
+
+            {/* ถ้าตอบครบทั้งสองแบบแล้ว */}
+            {c.replied_public && c.replied_private && (
+              <span className="text-[11px] text-muted-foreground">
+                ตอบกลับครบแล้ว
+              </span>
             )}
           </div>
 
@@ -732,7 +732,7 @@ function CommentCard({
               variant="ghost"
               disabled={sending}
               onClick={() => void act({ action: 'handled', handled: !c.is_handled })}
-              className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground rounded-lg"
+              className="h-7.5 gap-1 text-xs text-muted-foreground hover:text-foreground rounded-lg px-2"
               title={c.is_handled ? 'กดเพื่อทำเครื่องหมายว่ายังไม่จัดการ' : 'กดเมื่อจัดการเสร็จแล้ว'}
             >
               <Check className={cn('size-3.5', c.is_handled && 'text-emerald-600 font-bold')} />
@@ -741,7 +741,7 @@ function CommentCard({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground">
+                <Button variant="ghost" size="icon" className="size-7.5 rounded-lg text-muted-foreground">
                   <MoreHorizontal className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
