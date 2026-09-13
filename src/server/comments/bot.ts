@@ -77,7 +77,7 @@ export async function saveCommentBotSettings(
 }
 
 /** ตรวจสอบข้อความกับกฎและคีย์เวิร์ด */
-function matchKeyword(text: string, kw: string, matchType: 'contains' | 'exact' | 'starts_with' = 'contains'): boolean {
+export function matchKeyword(text: string, kw: string, matchType: 'contains' | 'exact' | 'starts_with' = 'contains'): boolean {
   const normText = text.trim().toLowerCase();
   const normKw = kw.trim().toLowerCase();
   if (!normText || !normKw) return false;
@@ -88,7 +88,7 @@ function matchKeyword(text: string, kw: string, matchType: 'contains' | 'exact' 
 }
 
 /** แทนที่ตัวแปรในข้อความ */
-function formatMessage(template: string, name: string | null): string {
+export function formatMessage(template: string, name: string | null): string {
   const customerName = name?.trim() || 'คุณลูกค้า';
   return template.replace(/\{name\}/g, customerName).trim();
 }

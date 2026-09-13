@@ -199,7 +199,7 @@ export default function CommentsClient({
             </div>
             <p className="text-muted-foreground text-[11px] truncate sm:whitespace-normal">
               {botSettings?.auto_reply_public || botSettings?.auto_reply_private
-                ? 'ระบบจะตอบคอมเมนต์และดึงเข้าแชทให้อัตโนมัติเมื่อมีคอมเมนต์ใหม่'
+                ? 'ระบบจะตอบคอมเมนต์และดึงเข้าแชทให้อัตโนมัติตามกฎที่ตั้งไว้'
                 : 'หากปิดบอทไว้ คอมเมนต์จะรอแอดมินเข้ามาตอบด้วยตนเอง'}
               {' · '}
               <span className="text-foreground/80 font-medium">ทักส่วนตัวได้ 1 ครั้งต่อคอมเมนต์ (กฎ Meta 7 วัน)</span>
@@ -357,6 +357,7 @@ function CommentCard({
   const [sending, setSending] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showReplies, setShowReplies] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -383,6 +384,10 @@ function CommentCard({
       }
       if (json.data?.suggestion) {
         setText(json.data.suggestion);
+        if (json.data?.image_url && !selectedImage) {
+          const absUrl = toAbsoluteUrl(json.data.image_url);
+          setSelectedImage({ url: absUrl, preview_url: json.data.image_url });
+        }
         if (textareaRef.current) {
           setTimeout(() => {
             if (textareaRef.current) {
@@ -392,7 +397,7 @@ function CommentCard({
             }
           }, 50);
         }
-        toast.success('AI เสนอคำตอบแล้ว — ปรับแต่งก่อนส่งได้ครับ');
+        toast.success('AI จำลองคำตอบตามบอทที่เทรนไว้เรียบร้อยแล้ว');
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'เรียก AI ไม่สำเร็จ');
@@ -460,22 +465,25 @@ function CommentCard({
     }
   }
 
+  const hasReplied = Boolean(c.replied_public || c.replied_private || c.public_reply_text || c.private_reply_text);
+  const hasBadges = Boolean(c.is_liked || c.replied_public || c.replied_private || c.is_handled || c.is_hidden || c.is_deleted || c.matched_keyword);
+
   return (
     <div
       className={cn(
         'flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-xs transition',
-        c.is_handled && 'bg-card/75 border-border/70',
+        c.is_handled && 'bg-card/85 border-border/70',
         c.is_deleted && 'opacity-60',
       )}
     >
-      {/* แถวข้อมูลผู้คอมเมนต์ & สถานะ */}
-      <div className="flex items-start justify-between gap-2.5">
-        <div className="flex items-start gap-3 min-w-0">
+      {/* แถวหัวข้อ: โปรไฟล์ลูกค้า + เวลา (จัดชิดซ้ายและขวา ไม่เบียดกัน) */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
           <div className="relative shrink-0">
             <CustomerAvatar
               name={c.from_name || c.from_username || 'ลูกค้า'}
               src={c.from_pic_url}
-              size="md"
+              size="sm"
             />
             {page && (
               <div className="absolute -bottom-1 -right-1 rounded-full bg-background p-0.5 shadow-xs">
@@ -484,83 +492,125 @@ function CommentCard({
             )}
           </div>
 
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-sm font-semibold text-foreground truncate">
-                {c.from_name || c.from_username || 'ไม่ทราบชื่อ'}
+          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+            <span className="text-sm font-semibold text-foreground truncate max-w-[140px] sm:max-w-xs">
+              {c.from_name || c.from_username || 'ไม่ทราบชื่อ'}
+            </span>
+            {c.from_username && c.from_username !== c.from_name && (
+              <span className="text-xs text-muted-foreground font-mono truncate max-w-[100px]">
+                @{c.from_username}
               </span>
-              {c.from_username && c.from_username !== c.from_name && (
-                <span className="text-xs text-muted-foreground font-mono">@{c.from_username}</span>
-              )}
-              {page && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground">
-                  <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
-                  <span className="max-w-[100px] truncate">{page.display_name || page.page_name}</span>
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span>{timeAgo(c.commented_at ?? c.created_at)}</span>
-              {c.post_permalink && (
-                <>
-                  <span>·</span>
-                  <a
-                    href={c.post_permalink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-primary hover:underline"
-                  >
-                    <span>ดูโพสต์ต้นทาง</span>
-                    <ExternalLink className="size-2.5" />
-                  </a>
-                </>
-              )}
-            </div>
+            )}
+            {page && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground shrink-0">
+                <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+                <span className="max-w-[90px] truncate">{page.display_name || page.page_name}</span>
+              </span>
+            )}
           </div>
         </div>
 
-        {/* แถบสถานะย่อขวาบน */}
-        <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
-          {c.is_liked && (
-            <Badge variant="secondary" className="text-[10px] text-primary border-primary/20 bg-primary/10 gap-0.5 h-5">
-              <ThumbsUp className="size-2.5 fill-current" /> ไลก์แล้ว
-            </Badge>
+        {/* เวลา และ ลิงก์โพสต์ต้นทาง อยู่ขวาบน บรรทัดเดียว สบายตา */}
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+          <span className="whitespace-nowrap">{timeAgo(c.commented_at ?? c.created_at)}</span>
+          {c.post_permalink && (
+            <a
+              href={c.post_permalink}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground hover:text-primary transition p-0.5"
+              title="เปิดดูโพสต์ต้นทาง"
+            >
+              <ExternalLink className="size-3" />
+            </a>
           )}
+        </div>
+      </div>
+
+      {/* แถบป้ายสถานะ (จัดเรียงเป็นแถวเฉพาะ ไม่แย่งพื้นที่ชื่อลูกค้า) */}
+      {hasBadges && (
+        <div className="flex flex-wrap items-center gap-1.5">
           {c.replied_public && (
-            <Badge variant="outline" className="text-[10px] border-sky-500/30 text-sky-600 bg-sky-50 dark:bg-sky-950/30 gap-1 h-5">
+            <Badge variant="outline" className="text-[10px] border-sky-500/30 text-sky-600 bg-sky-50 dark:bg-sky-950/30 gap-1 h-5 font-normal">
               <MessageSquare className="size-2.5" /> ตอบแล้ว
             </Badge>
           )}
           {c.replied_private && (
-            <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-600 bg-purple-50 dark:bg-purple-950/30 gap-1 h-5">
+            <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-600 bg-purple-50 dark:bg-purple-950/30 gap-1 h-5 font-normal">
               <Send className="size-2.5" /> ทักส่วนตัวแล้ว
             </Badge>
           )}
+          {c.is_liked && (
+            <Badge variant="secondary" className="text-[10px] text-primary border-primary/20 bg-primary/10 gap-0.5 h-5 font-normal">
+              <ThumbsUp className="size-2.5 fill-current" /> ไลก์แล้ว
+            </Badge>
+          )}
           {c.is_handled && (
-            <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20 gap-0.5 h-5">
+            <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20 gap-0.5 h-5 font-normal">
               <Check className="size-2.5" /> จัดการแล้ว
             </Badge>
           )}
-          {c.is_hidden && <Badge variant="secondary" className="text-[10px] h-5">ซ่อนอยู่</Badge>}
-          {c.is_deleted && <Badge variant="destructive" className="text-[10px] h-5">ลบแล้ว</Badge>}
+          {c.is_hidden && <Badge variant="secondary" className="text-[10px] h-5 font-normal">ซ่อนอยู่</Badge>}
+          {c.is_deleted && <Badge variant="destructive" className="text-[10px] h-5 font-normal">ลบแล้ว</Badge>}
+          {c.matched_keyword && (
+            <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500 h-5 font-normal">
+              คีย์เวิร์ด: {c.matched_keyword}
+            </Badge>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* เนื้อหาคอมเมนต์ */}
-      <div className="flex flex-col gap-1.5">
+      {/* เนื้อหาคอมเมนต์ของลูกค้า */}
+      <div className="flex flex-col gap-2">
         <div className="rounded-xl bg-muted/40 border border-border/40 p-3 text-sm text-foreground whitespace-pre-wrap leading-relaxed">
           <p className={cn(c.is_deleted && 'line-through text-muted-foreground')}>
             {c.message || '(ไม่มีข้อความ)'}
           </p>
         </div>
 
-        {c.matched_keyword && (
-          <div className="flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-400 font-medium">
-            <span>ตรงคีย์เวิร์ด:</span>
-            <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500 h-4.5">
-              {c.matched_keyword}
-            </Badge>
+        {/* ส่วนแสดงข้อความที่เคยตอบกลับไปแล้ว (ปิดตาไว้ก่อน กดดูถึงจะเปิด) */}
+        {hasReplied && (
+          <div className="flex flex-col gap-1.5 pt-0.5">
+            <button
+              type="button"
+              onClick={() => setShowReplies(!showReplies)}
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-medium transition w-fit py-0.5"
+            >
+              {showReplies ? <EyeOff className="size-3.5 text-primary" /> : <Eye className="size-3.5" />}
+              <span>{showReplies ? 'ซ่อนข้อความที่ตอบกลับ' : 'ดูข้อความที่ตอบกลับไปแล้ว'}</span>
+            </button>
+
+            {showReplies && (
+              <div className="rounded-xl border bg-muted/20 p-3 flex flex-col gap-2.5 text-xs">
+                {c.public_reply_text && (
+                  <div className="flex flex-col gap-1">
+                    <span className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+                      <MessageSquare className="size-3" /> ข้อความที่ตอบใต้โพสต์:
+                    </span>
+                    <div className="rounded-lg bg-background p-2.5 border text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                      {c.public_reply_text}
+                    </div>
+                  </div>
+                )}
+
+                {c.private_reply_text && (
+                  <div className="flex flex-col gap-1">
+                    <span className="font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                      <Send className="size-3" /> ข้อความที่ทักแชทส่วนตัว (Messenger / IG DM):
+                    </span>
+                    <div className="rounded-lg bg-background p-2.5 border text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                      {c.private_reply_text}
+                    </div>
+                  </div>
+                )}
+
+                {!c.public_reply_text && !c.private_reply_text && (
+                  <p className="text-muted-foreground italic">
+                    (ระบบได้บันทึกว่าตอบกลับแล้ว แต่อาจเป็นรายการที่ตอบก่อนเปิดระบบบันทึกข้อความ)
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -770,7 +820,7 @@ function CommentCard({
                 className="h-7 gap-1 px-2.5 text-xs text-primary border-primary/30 hover:bg-primary/10 rounded-lg"
               >
                 {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3 text-amber-500" />}
-                <span>{aiLoading ? 'AI กำลังคิด...' : 'ให้ AI ช่วยคิด'}</span>
+                <span>{aiLoading ? 'AI กำลังจำลอง...' : 'ให้ AI ช่วยคิด'}</span>
               </Button>
 
               <Button
