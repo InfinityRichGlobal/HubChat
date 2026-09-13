@@ -139,34 +139,96 @@ export default function SystemSettingsClient() {
                       />
                     </div>
                   )}
-                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-                    <Input
-                      type={setting.kind === 'secret' ? 'password' : 'text'}
-                      value={values[setting.key] ?? ''}
-                      placeholder={setting.kind === 'secret' && setting.configured ? 'เว้นว่าง = ไม่เปลี่ยน' : 'กรอกค่า'}
-                      onChange={(event) => setValues((old) => ({ ...old, [setting.key]: event.target.value }))}
-                      className="min-w-0"
-                    />
-                    <Button
-                      disabled={busy === setting.key || !(values[setting.key] ?? '').trim()}
-                      onClick={() => call(setting.key, 'PUT', { key: setting.key, value: values[setting.key] ?? '' })}
-                    >
-                      บันทึก
-                    </Button>
-                    {setting.configured && (
+                  {setting.key === 'AVATAR_DISPLAY_MODE' ? (
+                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between pt-1">
+                      <div className="text-xs text-muted-foreground">
+                        เลือกรูปแบบรูปภาพประจำตัวลูกค้าในลิสต์แชทและคอมเมนต์
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button
+                          variant={(values[setting.key] ?? 'platform') === 'platform' ? 'default' : 'outline'}
+                          size="sm"
+                          disabled={busy === setting.key}
+                          onClick={() => {
+                            setValues((old) => ({ ...old, [setting.key]: 'platform' }));
+                            void call(setting.key, 'PUT', { key: setting.key, value: 'platform' });
+                          }}
+                        >
+                          ภาพแพลตฟอร์ม (FB/IG)
+                        </Button>
+                        <Button
+                          variant={(values[setting.key] ?? 'platform') === 'real_profile' ? 'default' : 'outline'}
+                          size="sm"
+                          disabled={busy === setting.key}
+                          onClick={() => {
+                            setValues((old) => ({ ...old, [setting.key]: 'real_profile' }));
+                            void call(setting.key, 'PUT', { key: setting.key, value: 'real_profile' });
+                          }}
+                        >
+                          ภาพโปรไฟล์จริง
+                        </Button>
+                      </div>
+                    </div>
+                  ) : setting.key === 'AVATAR_ORIGIN_BADGE' ? (
+                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between pt-1">
+                      <div className="text-xs text-muted-foreground">
+                        แสดงไอคอนโลโก้แพลตฟอร์ม (FB/IG) ขนาดเล็กที่มุมรูปภาพโปรไฟล์
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button
+                          variant={(values[setting.key] ?? 'off') === 'off' ? 'default' : 'outline'}
+                          size="sm"
+                          disabled={busy === setting.key}
+                          onClick={() => {
+                            setValues((old) => ({ ...old, [setting.key]: 'off' }));
+                            void call(setting.key, 'PUT', { key: setting.key, value: 'off' });
+                          }}
+                        >
+                          ซ่อนไอคอนมุมภาพ (Off)
+                        </Button>
+                        <Button
+                          variant={(values[setting.key] ?? 'off') === 'on' ? 'default' : 'outline'}
+                          size="sm"
+                          disabled={busy === setting.key}
+                          onClick={() => {
+                            setValues((old) => ({ ...old, [setting.key]: 'on' }));
+                            void call(setting.key, 'PUT', { key: setting.key, value: 'on' });
+                          }}
+                        >
+                          แสดงไอคอนมุมภาพ (On)
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                      <Input
+                        type={setting.kind === 'secret' ? 'password' : 'text'}
+                        value={values[setting.key] ?? ''}
+                        placeholder={setting.kind === 'secret' && setting.configured ? 'เว้นว่าง = ไม่เปลี่ยน' : 'กรอกค่า'}
+                        onChange={(event) => setValues((old) => ({ ...old, [setting.key]: event.target.value }))}
+                        className="min-w-0"
+                      />
                       <Button
-                        variant="destructive"
-                        disabled={busy === setting.key}
-                        onClick={() => {
-                          if (window.prompt(`พิมพ์ ${setting.key} เพื่อยืนยันการลบ`) === setting.key) {
-                            void call(setting.key, 'DELETE', { key: setting.key, confirm: setting.key });
-                          }
-                        }}
+                        disabled={busy === setting.key || !(values[setting.key] ?? '').trim()}
+                        onClick={() => call(setting.key, 'PUT', { key: setting.key, value: values[setting.key] ?? '' })}
                       >
-                        ลบ
+                        บันทึก
                       </Button>
-                    )}
-                  </div>
+                      {setting.configured && (
+                        <Button
+                          variant="destructive"
+                          disabled={busy === setting.key}
+                          onClick={() => {
+                            if (window.prompt(`พิมพ์ ${setting.key} เพื่อยืนยันการลบ`) === setting.key) {
+                              void call(setting.key, 'DELETE', { key: setting.key, confirm: setting.key });
+                            }
+                          }}
+                        >
+                          ลบ
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
           </CardContent>

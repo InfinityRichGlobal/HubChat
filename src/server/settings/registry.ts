@@ -46,6 +46,8 @@ export const SETTING_DEFINITIONS = [
   { key: 'APP_LOGO_URL', label_th: 'ลิงก์โลโก้เว็บไซต์', group: 'Application', kind: 'general', schema: url },
   { key: 'WORKER_INTERVAL_MS', label_th: 'Webhook worker interval (ms)', group: 'Application', kind: 'general', schema: positiveInt },
   { key: 'NOTIFY_INTERVAL_MS', label_th: 'Notification worker interval (ms)', group: 'Notifications', kind: 'general', schema: positiveInt },
+  { key: 'AVATAR_DISPLAY_MODE', label_th: 'โหมดแสดงภาพโปรไฟล์ลูกค้า (platform / real_profile)', group: 'Application', kind: 'general', schema: z.enum(['platform', 'real_profile']) },
+  { key: 'AVATAR_ORIGIN_BADGE', label_th: 'โหมดแสดงไอคอนมุมภาพบอกที่มา (off / on)', group: 'Application', kind: 'general', schema: z.enum(['off', 'on']) },
 ] as const satisfies readonly SettingDefinition[];
 
 export type SettingKey = (typeof SETTING_DEFINITIONS)[number]['key'];

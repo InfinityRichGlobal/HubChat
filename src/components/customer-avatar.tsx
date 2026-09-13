@@ -48,6 +48,7 @@ export default function CustomerAvatar({
   platform,
   size = 'md',
   mode = 'platform',
+  showBadge = false,
   className,
 }: {
   name: string;
@@ -55,6 +56,7 @@ export default function CustomerAvatar({
   platform?: 'facebook' | 'instagram' | 'line' | string | null;
   size?: 'sm' | 'md' | 'lg';
   mode?: 'platform' | 'real_profile';
+  showBadge?: boolean;
   className?: string;
 }) {
   const [broken, setBroken] = useState(false);
@@ -64,60 +66,42 @@ export default function CustomerAvatar({
 
   const showRealPic = mode === 'real_profile' && Boolean(src) && !broken;
 
-  if (showRealPic && src) {
-    return (
+  return (
+    <div className="relative inline-flex shrink-0">
       <span
         className={cn(
-          'relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-medium',
+          'relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-medium shadow-2xs border border-border/40',
           box,
-          className,
-        )}
-        aria-hidden="true"
-      >
-        <img
-          src={src}
-          alt=""
-          className="size-full object-cover"
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          onError={() => setBroken(true)}
-        />
-      </span>
-    );
-  }
-
-  // หากอยู่ในโหมด platform (หรือไม่มีรูปจริง) ให้โชว์โลโก้แพลตฟอร์มอย่างสวยงาม
-  if (platform) {
-    return (
-      <span
-        className={cn(
-          'relative inline-flex shrink-0 items-center justify-center rounded-full overflow-hidden shadow-2xs border border-border/40',
-          box,
+          !showRealPic && !platform && toneFor(name),
           className,
         )}
         title={name}
         aria-hidden="true"
       >
-        <PlatformIcon
-          platform={platform}
-          size={size === 'lg' ? 'lg' : size === 'sm' ? 'sm' : 'md'}
-          className="size-full object-cover"
-        />
+        {showRealPic && src ? (
+          <img
+            src={src}
+            alt=""
+            className="size-full object-cover"
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            onError={() => setBroken(true)}
+          />
+        ) : platform ? (
+          <PlatformIcon
+            platform={platform}
+            size={size === 'lg' ? 'lg' : size === 'sm' ? 'sm' : 'md'}
+            className="size-full object-cover"
+          />
+        ) : (
+          initialsOf(name)
+        )}
       </span>
-    );
-  }
-
-  return (
-    <span
-      className={cn(
-        'relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-medium',
-        box,
-        toneFor(name),
-        className,
+      {showBadge && platform && (
+        <span className="absolute -bottom-1 -right-1 z-10 pointer-events-none">
+          <PlatformIcon platform={platform} size="xs" />
+        </span>
       )}
-      aria-hidden="true"
-    >
-      {initialsOf(name)}
-    </span>
+    </div>
   );
 }
