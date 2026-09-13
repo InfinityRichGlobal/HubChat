@@ -68,9 +68,9 @@ const EMPTY: BackfillSummary = {
  *    • งานนี้รันในคำขอเดียว ถ้ายาวเกินจะ timeout กลางทาง
  *    กดซ้ำได้เรื่อย ๆ และกันซ้ำอยู่แล้ว จึงปลอดภัยกว่าดึงทีเดียวจบ
  */
-const MAX_PAGES_PER_RUN = 10;
-const CONVERSATIONS_PER_PAGE = 25;
-const MESSAGES_PER_CONVERSATION = 50;
+const MAX_PAGES_PER_RUN = 1;
+const CONVERSATIONS_PER_PAGE = 8;
+const MESSAGES_PER_CONVERSATION = 20;
 
 function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -209,7 +209,7 @@ export async function backfillPageConversations(
 
       // ถ้า Meta ส่งชื่อลูกค้ามาด้วย ให้บันทึกชื่อทันที
       if (customer.name) {
-        void db()
+        await db()
           .from('customers')
           .update({ name: customer.name, profile_synced_at: new Date().toISOString() })
           .eq('page_id', page.id)
