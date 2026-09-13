@@ -18,6 +18,9 @@ const updateSchema = z.object({
   autoReplyComments: z.boolean().optional(),
   enableCommentSuggest: z.boolean().optional(),
   enableChatAssist: z.boolean().optional(),
+  defaultChatBot: z.boolean().optional(),
+  chatInstruction: z.string().max(10000).optional(),
+  chatPersona: z.enum(['sales_pro', 'consultative', 'fast', 'custom']).optional(),
 });
 
 export async function GET() {
@@ -39,6 +42,9 @@ export async function GET() {
       autoReplyComments: isAutoReplyOn,
       enableCommentSuggest: settings.enableCommentSuggest,
       enableChatAssist: settings.enableChatAssist,
+      defaultChatBot: settings.defaultChatBot,
+      chatInstruction: settings.chatInstruction,
+      chatPersona: settings.chatPersona,
     });
   } catch (err) {
     return toErrorResponse(err);
@@ -83,6 +89,15 @@ export async function POST(req: NextRequest) {
     }
     if (body.enableChatAssist !== undefined) {
       await saveRuntimeSetting(admin, 'AI_ENABLE_CHAT_ASSIST', body.enableChatAssist ? 'on' : 'off');
+    }
+    if (body.defaultChatBot !== undefined) {
+      await saveRuntimeSetting(admin, 'AI_DEFAULT_CHAT_BOT', body.defaultChatBot ? 'on' : 'off');
+    }
+    if (body.chatInstruction !== undefined) {
+      await saveRuntimeSetting(admin, 'AI_CHAT_INSTRUCTION', body.chatInstruction.trim());
+    }
+    if (body.chatPersona !== undefined) {
+      await saveRuntimeSetting(admin, 'AI_CHAT_PERSONA', body.chatPersona);
     }
 
     return ok({ saved: true });

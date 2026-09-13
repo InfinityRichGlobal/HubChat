@@ -1,12 +1,35 @@
 import 'server-only';
 import { getRuntimeSetting } from '@/server/settings/service';
+import { listProducts, listPromotions } from '@/server/orders/service';
+
+export const DEFAULT_CHAT_AI_INSTRUCTION = `คุณคือนักขายมืออาชีพอัจฉริยะ (AI Top Sales Closer) ประจำกล่องแชทของร้านค้าออนไลน์ในไทย
+บุคลิกภาพ: สุภาพ อ่อนหวาน กระตือรือร้น ใช้คำลงท้าย "ค่ะ/นะคะ" ตอบคำถามอย่างมั่นใจและเป็นมิตร
+
+หน้าที่และหลักการตอบลูกค้า:
+1. ทักทายต้อนรับอย่างอบอุ่น ขอบคุณที่ลูกค้าทักแชทเข้ามา และแสดงความยินดีพร้อมให้บริการ
+2. ยืนยันสินค้าพร้อมส่ง: เมื่อลูกค้าถามว่าสินค้ามีพร้อมส่งไหม ให้ยืนยันอย่างมั่นใจว่า "มีสินค้าพร้อมส่งเลยค่า"
+3. นำเสนอโปรโมชั่นเด็ดทันที: นำข้อมูลโปรโมชั่นพิเศษและสินค้าขายดีจริงของร้านมาเชียร์ลูกค้าทันที เพื่อให้ลูกค้ารู้สึกคุ้มค่าที่สุด
+4. เทคนิคปิดการขาย: ทุกคำตอบต้องมีประโยคชวนตัดสินใจหรือคำถามปิดการขายเสมอ เช่น "ลูกค้าสนใจรับเป็นเซตไหนดีคะ เดี๋ยวแอดมินช่วยคำนวณยอดส่วนลดพิเศษให้เลยค่า 🥰" หรือ "แจ้งจำนวนที่ต้องการได้เลยนะคะ เดี๋ยวแอดมินจัดส่งให้รอบวันนี้เลยค่า ✨"
+5. กฎเหล็ก: ห้ามตอบห้วนๆ ห้ามตอบเพียงแค่ว่า "มีพร้อมส่งค่ะ" แล้วจบประโยคเด็ดขาด ต้องให้ข้อมูลโปรโมชั่นและเชียร์ขายเสมอ`;
 
 export async function getGeminiApiKey(): Promise<string | null> {
   return await getRuntimeSetting('GEMINI_API_KEY');
 }
 
 export async function getAiSettings() {
-  const [apiKey, systemPrompt, knowledge, model, temp, autoReply, commentSuggest, chatAssist] = await Promise.all([
+  const [
+    apiKey,
+    systemPrompt,
+    knowledge,
+    model,
+    temp,
+    autoReply,
+    commentSuggest,
+    chatAssist,
+    defaultChatBot,
+    chatInstruction,
+    chatPersona,
+  ] = await Promise.all([
     getRuntimeSetting('GEMINI_API_KEY'),
     getRuntimeSetting('AI_SYSTEM_PROMPT'),
     getRuntimeSetting('AI_STORE_KNOWLEDGE'),
@@ -15,6 +38,9 @@ export async function getAiSettings() {
     getRuntimeSetting('AI_AUTO_REPLY_COMMENTS'),
     getRuntimeSetting('AI_ENABLE_COMMENT_SUGGEST'),
     getRuntimeSetting('AI_ENABLE_CHAT_ASSIST'),
+    getRuntimeSetting('AI_DEFAULT_CHAT_BOT'),
+    getRuntimeSetting('AI_CHAT_INSTRUCTION'),
+    getRuntimeSetting('AI_CHAT_PERSONA'),
   ]);
 
   return {
@@ -26,6 +52,9 @@ export async function getAiSettings() {
     autoReplyComments: autoReply === 'on',
     enableCommentSuggest: commentSuggest !== 'off', // default on
     enableChatAssist: chatAssist !== 'off', // default on
+    defaultChatBot: defaultChatBot === 'on', // default off (false)
+    chatInstruction: chatInstruction || DEFAULT_CHAT_AI_INSTRUCTION,
+    chatPersona: (chatPersona as 'sales_pro' | 'consultative' | 'fast' | 'custom') || 'sales_pro',
   };
 }
 
@@ -80,7 +109,7 @@ export async function testGeminiApiKey(apiKeyOverride?: string, requestedModel?:
   return { ok: false, message_th: `เชื่อมต่อ Gemini ไม่สำเร็จ: ${lastErrMsg}`, model: candidateModels[0] || 'gemini-3.6-flash' };
 }
 
-/** ทดสอบการตอบของบอทใน Playground */
+/** ทดสอบการตอบของบอทใน Playground / แชท Simulator */
 export async function testAiPlayground(input: {
   userMessage: string;
   systemPrompt?: string;
@@ -93,26 +122,58 @@ export async function testAiPlayground(input: {
     throw new Error('กรุณาบันทึก GEMINI_API_KEY ก่อนทดสอบ');
   }
 
-  const model = (input.model || 'gemini-3.6-flash').replace(/^models\//, '');
-  const temperature = input.temperature ?? 0.7;
+  const aiSettings = await getAiSettings();
+  const model = (input.model || aiSettings.model || 'gemini-3.6-flash').replace(/^models\//, '');
+  const temperature = input.temperature ?? aiSettings.temperature ?? 0.7;
 
-  let combinedInstruction = input.systemPrompt || `คุณคือแอดมินร้านค้าออนไลน์ของไทยที่สุภาพ อ่อนหวาน เป็นมิตร และมืออาชีพ
-ใช้คำลงท้าย "ค่ะ/นะคะ" ตอบคำถามอย่างกระชับ ฉะฉาน และให้ข้อมูลที่เป็นประโยชน์`;
+  // 1. นำชุดคำสั่งสอนเทรน AI ประจำแชทมาใช้
+  const baseInstruction = input.systemPrompt || aiSettings.chatInstruction || DEFAULT_CHAT_AI_INSTRUCTION;
 
-  if (input.knowledgeBase?.trim()) {
-    combinedInstruction += `\n\n[ข้อมูลร้านค้าและสินค้าสำหรับอ้างอิงตอบลูกค้า]:\n${input.knowledgeBase.trim()}`;
+  // 2. ดึงข้อมูลสินค้าและโปรโมชั่นจริงในร้านอัตโนมัติ
+  const [products, promotions] = await Promise.all([
+    listProducts(true).catch(() => []),
+    listPromotions(true).catch(() => []),
+  ]);
+
+  let catalogContext = '';
+  if (promotions.length > 0) {
+    catalogContext += '\n[โปรโมชั่นพิเศษที่กำลังจัดอยู่จริงของทางร้าน]:\n';
+    for (const promo of promotions.slice(0, 5)) {
+      catalogContext += `• 🎁 ${promo.name}\n`;
+    }
   }
+  if (products.length > 0) {
+    catalogContext += '\n[รายการสินค้าพร้อมส่งจริงของทางร้าน]:\n';
+    for (const p of products.slice(0, 10)) {
+      const priceStr = p.price > 0 ? ` ราคา ${p.price.toLocaleString('th-TH')} บาท` : '';
+      const varStr = p.variant ? ` (${p.variant})` : '';
+      catalogContext += `• ${p.name}${varStr}${priceStr}\n`;
+    }
+  }
+
+  // 3. ดึงคลังความรู้ร้านค้า
+  const knowledge = (input.knowledgeBase ?? aiSettings.knowledge)?.trim();
+  let knowledgeContext = '';
+  if (knowledge) {
+    knowledgeContext = `\n\n[คลังความรู้ ข้อมูลร้านค้า และนโยบาย]:\n${knowledge}`;
+  }
+
+  const fullPrompt = `${baseInstruction}
+${catalogContext}${knowledgeContext}
+
+ข้อความของลูกค้าที่ทักเข้ามาในแชท: "${input.userMessage}"
+คำสั่ง: ในฐานะแอดมินนักขาย จงเขียนข้อความตอบกลับลูกค้า โดยใช้คำลงท้าย "ค่ะ/นะคะ" อย่างสุภาพ อ่อนหวาน แจ้งโปรโมชั่นที่มี และพยายามปิดการขายทันที:`;
 
   const payload = {
     contents: [
       {
         role: 'user',
-        parts: [{ text: `${combinedInstruction}\n\nข้อความของลูกค้า: "${input.userMessage}"\nเขียนข้อความตอบกลับของแอดมิน:` }],
+        parts: [{ text: fullPrompt }],
       },
     ],
     generationConfig: {
       temperature,
-      maxOutputTokens: 500,
+      maxOutputTokens: 600,
     },
   };
 

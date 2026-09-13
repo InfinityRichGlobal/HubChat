@@ -23,6 +23,10 @@ import type { EchoMessageEvent, IngestEvent, InboundMessageEvent } from './types
 import { getFilterWords, saveIncomingComment } from '@/server/comments/service';
 import { processCommentAutoReply } from '@/server/comments/bot';
 import { dispatchNotification, flushNotifications } from '@/server/notify/dispatch';
+import { getRuntimeSetting } from '@/server/settings/service';
+import { sendMessage } from '@/server/messaging/send-message';
+import { keywordBotProvenance } from '@/server/messaging/provenance';
+import { getGeminiApiKey, testAiPlayground } from '@/server/ai/gemini';
 
 /** สรุปผลของการทำงานหนึ่งรอบ — ใช้ตอบกลับหน้าจอและใช้ในชุดทดสอบ */
 export type ProcessSummary = {
@@ -251,14 +255,24 @@ async function maybeAutoReply(
 
   try {
     // ตรวจว่าห้องแชทนี้เปิดบอทตอบอัตโนมัติ (has_ai_reply) หรือไม่
-    // ค่าเริ่มต้นคือปิด (แอดมินคุยเอง) เพื่อป้องกันบอทตอบมั่ว
     const { data: conv } = await db()
       .from('conversations')
-      .select('has_ai_reply')
+      .select('has_ai_reply, inbox_state_updated_at')
       .eq('id', row.conversation_id)
       .maybeSingle();
 
-    if (!conv?.has_ai_reply) {
+    let isBotActive = Boolean(conv?.has_ai_reply);
+
+    // หากแอดมินยังไม่เคยตั้งค่าเฉพาะห้องนี้ ให้อิงตามค่าเริ่มต้นที่ร้านตั้งไว้ (AI_DEFAULT_CHAT_BOT)
+    if (conv && !conv.inbox_state_updated_at) {
+      const defaultSetting = await getRuntimeSetting('AI_DEFAULT_CHAT_BOT');
+      if (defaultSetting === 'on') {
+        isBotActive = true;
+        await db().from('conversations').update({ has_ai_reply: true }).eq('id', row.conversation_id);
+      }
+    }
+
+    if (!isBotActive) {
       return;
     }
 
@@ -269,8 +283,42 @@ async function maybeAutoReply(
       text: ev.text,
     });
 
-    if (outcome.kind === 'sent') summary.auto_replied += 1;
-    else if (outcome.kind === 'blocked') summary.auto_blocked += 1;
+    if (outcome.kind === 'sent') {
+      summary.auto_replied += 1;
+      return;
+    }
+    if (outcome.kind === 'blocked') {
+      summary.auto_blocked += 1;
+      return;
+    }
+
+    // ถ้าไม่มี keyword rule ตรงกัน แต่ห้องนี้เปิดบอท AI ไว้
+    // ให้ใช้ Gemini AI ตอบตามชุดเทรนนักขายอัจฉริยะ (ดึงสินค้า+โปรโมชั่นอัตโนมัติ)
+    if (outcome.kind === 'no_rule' && ev.text?.trim()) {
+      try {
+        const apiKey = await getGeminiApiKey();
+        if (apiKey) {
+          const aiReply = await testAiPlayground({ userMessage: ev.text.trim() });
+          if (aiReply?.trim()) {
+            const sendResult = await sendMessage(
+              {
+                conversation_id: row.conversation_id,
+                message_type: 'inquiry_response',
+                provenance: keywordBotProvenance(),
+                content: { text: aiReply.trim() },
+                idempotency_key: `ai_chat_reply:${row.message_id}`,
+              },
+              { maxRetries: 1 },
+            );
+            if (sendResult.sent) {
+              summary.auto_replied += 1;
+            }
+          }
+        }
+      } catch (aiErr) {
+        console.warn('[ingest] AI auto-reply error:', aiErr);
+      }
+    }
   } catch (err) {
     console.error('[ingest] ตอบอัตโนมัติล้มเหลว (ข้ามไป ข้อความลูกค้ายังอยู่ครบ):', err);
   }

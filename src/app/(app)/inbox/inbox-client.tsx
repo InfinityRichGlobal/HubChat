@@ -1469,6 +1469,7 @@ function ChatRoom({
   /** ตัวเลือกสินค้า (ข้อ 1.10) */
   const [productOpen, setProductOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [aiDrafting, setAiDrafting] = useState(false);
   const [stateBusy, setStateBusy] = useState(false);
   const [menuFor, setMenuFor] = useState<MessageRow | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
@@ -2126,6 +2127,46 @@ function ChatRoom({
     }
   }
 
+  async function handleAiDraftReply() {
+    // หาข้อความลูกค้า: จากที่เลือกตอบกลับอยู่ หรือข้อความล่าสุดของลูกค้าในห้องนี้
+    const targetText =
+      replyTarget?.direction === 'in' && replyTarget.text
+        ? replyTarget.text
+        : messages?.filter((m) => m.direction === 'in' && m.text)?.slice(-1)[0]?.text;
+
+    if (!targetText) {
+      toast.info('ไม่พบข้อความจากลูกค้าในห้องนี้เพื่อให้ AI อ้างอิง');
+      return;
+    }
+
+    setAiDrafting(true);
+    try {
+      const res = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'playground',
+          userMessage: targetText,
+        }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data?.reply) {
+        setText(json.data.reply);
+        toast.success('AI ช่วยคิดและร่างคำตอบให้แล้ว');
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 50);
+      } else {
+        toast.error(json?.error?.message_th || 'AI ไม่สามารถคิดคำตอบได้');
+      }
+    } catch (err) {
+      console.error('[inbox] AI draft error:', err);
+      toast.error('เกิดข้อผิดพลาดในการเรียก AI');
+    } finally {
+      setAiDrafting(false);
+    }
+  }
+
   const profileUrl = customerProfileUrl(c.page.platform, c.username);
   const replyHint = windowHint(c.last_customer_message_at);
 
@@ -2389,6 +2430,24 @@ function ChatRoom({
             >
               <Bot className={cn('size-3.5 shrink-0', c.has_ai_reply && 'animate-pulse')} />
               <span>{c.has_ai_reply ? 'บอท: เปิด' : 'บอท: ปิด'}</span>
+            </Button>
+
+            {/* ✨ ปุ่ม AI ช่วยคิด (ร่างคำตอบลงในกล่องพิมพ์ตามชุดเทรน) */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 px-2.5 text-xs gap-1.5 transition-colors font-medium border-amber-500/40 bg-amber-500/10 text-amber-800 hover:bg-amber-500/20 dark:text-amber-200"
+              title="✨ ให้ AI ช่วยคิดและร่างคำตอบลงในช่องพิมพ์จากข้อความล่าสุดของลูกค้า"
+              disabled={aiDrafting || sending || uploading}
+              onClick={() => void handleAiDraftReply()}
+            >
+              {aiDrafting ? (
+                <Loader2 className="size-3.5 animate-spin text-amber-600" />
+              ) : (
+                <Sparkles className="size-3.5 text-amber-500" />
+              )}
+              <span>AI ช่วยคิด</span>
             </Button>
           </div>
         )}

@@ -95,6 +95,65 @@ function statusTone(status: string): 'default' | 'secondary' | 'destructive' | '
   return 'secondary';
 }
 
+type ChatPersonaKey = 'sales_pro' | 'consultative' | 'fast' | 'custom';
+
+interface ChatPersonaDef {
+  label: string;
+  badge: string;
+  sub: string;
+  instruction: string;
+}
+
+const CHAT_PERSONA_PRESETS: Record<ChatPersonaKey, ChatPersonaDef> = {
+  sales_pro: {
+    label: '🛍️ นักขายมืออาชีพ (แนะนำ)',
+    badge: 'ปิดการขายไว',
+    sub: 'มั่นใจ เชียร์โปรโมชั่น แนะนำเซตคุ้มค่า ชวนสั่งซื้อ ปิดการขายทันที',
+    instruction: `คุณคือนักขายมืออาชีพอัจฉริยะ (AI Top Sales Closer) ประจำร้านค้าออนไลน์ในไทย
+บุคลิกภาพ: สุภาพ อ่อนหวาน กระตือรือร้น ใช้คำลงท้าย "ค่ะ/นะคะ" ตอบคำถามอย่างมั่นใจและเป็นมิตร
+
+หน้าที่และหลักการตอบลูกค้า:
+1. ทักทายต้อนรับอย่างอบอุ่น ขอบคุณที่ลูกค้าทักแชทเข้ามา และแสดงความยินดีพร้อมให้บริการ
+2. ยืนยันสินค้าพร้อมส่ง: เมื่อลูกค้าถามว่าสินค้ามีพร้อมส่งไหม ให้ยืนยันอย่างมั่นใจว่า "มีสินค้าพร้อมส่งเลยค่า"
+3. นำเสนอโปรโมชั่นเด็ดทันที: นำข้อมูลโปรโมชั่นพิเศษและสินค้าขายดีจริงของร้านมาเชียร์ลูกค้าทันที เพื่อให้ลูกค้ารู้สึกคุ้มค่าที่สุด
+4. เทคนิคปิดการขาย: ทุกคำตอบต้องมีประโยคชวนตัดสินใจหรือคำถามปิดการขายเสมอ เช่น "ลูกค้าสนใจรับเป็นเซตไหนดีคะ เดี๋ยวแอดมินช่วยคำนวณยอดส่วนลดพิเศษให้เลยค่า 🥰" หรือ "แจ้งจำนวนที่ต้องการได้เลยนะคะ เดี๋ยวแอดมินจัดส่งให้รอบวันนี้เลยค่า ✨"
+5. กฎเหล็ก: ห้ามตอบห้วนๆ ห้ามตอบเพียงแค่ว่า "มีพร้อมส่งค่ะ" แล้วจบประโยคเด็ดขาด ต้องให้ข้อมูลโปรโมชั่นและเชียร์ขายเสมอ`,
+  },
+  consultative: {
+    label: '💬 แอดมินที่ปรึกษาใจดี',
+    badge: 'อบอุ่น ใส่ใจ',
+    sub: 'สุภาพ อ่อนหวาน ใส่ใจ อธิบายละเอียด เหมาะกับสินค้าสุขภาพ ความงาม หรือสินค้าที่ต้องให้คำแนะนำ',
+    instruction: `คุณคือแอดมินที่ปรึกษาผู้เชี่ยวชาญด้านสินค้าที่ใจดี อบอุ่น และใส่ใจลูกค้าที่สุด
+บุคลิกภาพ: อบอุ่น สุภาพ นุ่มนวล รับฟังปัญหา แนะนำสินค้าที่ตรงกับความต้องการของลูกค้าจริงใจ ใช้คำลงท้าย "ค่ะ/นะคะ"
+
+หน้าที่และหลักการตอบลูกค้า:
+1. ทักทายต้อนรับอย่างเป็นกันเองและอบอุ่น
+2. ไต่ถามความต้องการหรือปัญหาที่ลูกค้าอยากให้ช่วยดูแล
+3. อธิบายจุดเด่น สรรพคุณ และวิธีการใช้งานอย่างละเอียดและเข้าใจง่าย
+4. แนะนำเซตสินค้าและโปรโมชั่นที่เหมาะสมกับลูกค้า พร้อมแจ้งความคุ้มค่า
+5. จบด้วยความพร้อมให้คำปรึกษาและดูแลตลอดการใช้งาน`,
+  },
+  fast: {
+    label: '⚡ กระชับ ฉับไว ตรงประเด็น',
+    badge: 'ปิดยอดเร็ว',
+    sub: 'ตอบเร็ว ตรงจุด สรุปราคา โปรโมชั่น และวิธีสั่งซื้อชัดเจน เหมาะกับลูกค้าที่ชอบความรวดเร็ว',
+    instruction: `คุณคือแอดมินที่ตอบเร็ว กระชับ ตรงประเด็น สื่อสารชัดเจน ไม่เวิ่นเว้อ
+บุคลิกภาพ: สุภาพ ชัดเจน มั่นใจ ตอบตรงจุด ใช้คำลงท้าย "ค่ะ/นะคะ"
+
+หน้าที่และหลักการตอบลูกค้า:
+1. ตอบคำถามลูกค้าตรงประเด็นทันที (มีของ/ราคาเท่าไหร่/ค่าส่งเท่าไหร่)
+2. สรุปโปรโมชั่นที่คุ้มที่สุด 1-2 บรรทัด
+3. แจ้งวิธีการสั่งซื้อ สรุปยอด และช่องทางการชำระเงิน (รวมถึงบริการเก็บเงินปลายทาง)
+4. ปิดการขายสั้นกระชับ เช่น "พร้อมส่งรอบวันนี้เลยค่ะ แจ้งชื่อที่อยู่เบอร์โทรได้เลยนะคะ"`,
+  },
+  custom: {
+    label: '⚙️ กำหนดเอง (Custom)',
+    badge: 'อิสระ',
+    sub: 'ปรับแต่งและเขียนคำสั่งสอน AI ตามสไตล์ของร้านคุณเองได้อย่างอิสระ',
+    instruction: '',
+  },
+};
+
 /* ================================================================== */
 
 export default function AutoReplyClient({
@@ -129,6 +188,17 @@ export default function AutoReplyClient({
   // ---------- ผู้ช่วย AI ในห้องแชท (Chat AI Assistant) ----------
   const [chatAssistEnabled, setChatAssistEnabled] = useState(true);
   const [savingChatAssist, setSavingChatAssist] = useState(false);
+
+  // ค่าเริ่มต้นบอทในแชทใหม่ (Default Off vs On)
+  const [defaultChatBotEnabled, setDefaultChatBotEnabled] = useState(false);
+  const [savingDefaultBot, setSavingDefaultBot] = useState(false);
+
+  // ชุดเทรนและคำสั่งสอน AI ประจำแชท (Heavy Training)
+  const [chatPersona, setChatPersona] = useState<ChatPersonaKey>('sales_pro');
+  const [chatInstruction, setChatInstruction] = useState(CHAT_PERSONA_PRESETS.sales_pro.instruction);
+  const [savingChatTraining, setSavingChatTraining] = useState(false);
+
+  // จำลองทดสอบ AI ประจำแชท (Simulator)
   const [chatSimInput, setChatSimInput] = useState('สวัสดีค่ะ มีสินค้าพร้อมส่งไหมคะ มีโปรโมชั่นอะไรบ้าง');
   const [chatSimOutput, setChatSimOutput] = useState('');
   const [testingChatSim, setTestingChatSim] = useState(false);
@@ -152,6 +222,13 @@ export default function AutoReplyClient({
             enableChatAssist: isAssistOn,
           });
           setChatAssistEnabled(isAssistOn);
+          setDefaultChatBotEnabled(Boolean(json.data.defaultChatBot));
+          if (json.data.chatPersona) {
+            setChatPersona(json.data.chatPersona as ChatPersonaKey);
+          }
+          if (json.data.chatInstruction) {
+            setChatInstruction(json.data.chatInstruction);
+          }
         }
       })
       .catch(() => {});
@@ -182,10 +259,87 @@ export default function AutoReplyClient({
     }
   }
 
-  async function handleSimulateChatAssist() {
-    if (!chatSimInput.trim()) {
+  async function handleToggleDefaultChatBot(nextVal: boolean) {
+    setDefaultChatBotEnabled(nextVal);
+    setSavingDefaultBot(true);
+    try {
+      const res = await fetch('/api/ai/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultChatBot: nextVal }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(
+          nextVal
+            ? 'เปิดบอทอัตโนมัติสำหรับแชทใหม่แล้ว'
+            : 'ตั้งค่าปิดบอทเป็นค่าเริ่มต้นสำหรับแชทใหม่แล้ว (ปลอดภัยสูงสุด)',
+        );
+      } else {
+        toast.error('บันทึกไม่สำเร็จ');
+        setDefaultChatBotEnabled(!nextVal);
+      }
+    } catch {
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+      setDefaultChatBotEnabled(!nextVal);
+    } finally {
+      setSavingDefaultBot(false);
+    }
+  }
+
+  async function handleSaveChatTraining() {
+    if (!chatInstruction.trim()) {
+      toast.error('กรุณาระบุชุดคำสั่งสอน AI');
+      return;
+    }
+    setSavingChatTraining(true);
+    try {
+      const res = await fetch('/api/ai/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatInstruction: chatInstruction.trim(),
+          chatPersona,
+        }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success('บันทึกชุดเทรนและคำสั่งสอน AI ประจำแชทเรียบร้อยแล้ว');
+      } else {
+        toast.error(json?.error?.message_th || 'บันทึกชุดเทรนไม่สำเร็จ');
+      }
+    } catch {
+      toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setSavingChatTraining(false);
+    }
+  }
+
+  function handleSelectPersona(presetKey: ChatPersonaKey) {
+    setChatPersona(presetKey);
+    const preset = CHAT_PERSONA_PRESETS[presetKey];
+    if (preset && preset.instruction) {
+      setChatInstruction(preset.instruction);
+      toast.info(`เลือกสไตล์: ${preset.label}`);
+    }
+  }
+
+  function handleAppendInstruction(textToAppend: string) {
+    setChatInstruction((prev) => {
+      const trimmed = prev.trim();
+      return trimmed ? `${trimmed}\n${textToAppend}` : textToAppend;
+    });
+    toast.success('เพิ่มคำสั่งสอนแล้ว');
+  }
+
+  async function handleSimulateChatAssist(overrideMsg?: string) {
+    const targetMsg = (overrideMsg ?? chatSimInput).trim();
+    if (!targetMsg) {
       toast.error('กรุณาระบุข้อความจำลองของลูกค้า');
       return;
+    }
+    if (overrideMsg) {
+      setChatSimInput(overrideMsg);
     }
     setTestingChatSim(true);
     setChatSimOutput('');
@@ -195,7 +349,8 @@ export default function AutoReplyClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'playground',
-          userMessage: chatSimInput.trim(),
+          userMessage: targetMsg,
+          systemPrompt: chatInstruction.trim() || undefined,
         }),
       });
       const json = await res.json();
@@ -445,7 +600,9 @@ export default function AutoReplyClient({
       {/* ================================================================== */}
       {activeTab === 'chat' && (
         <div className="flex flex-col gap-4">
-          {/* 🧠 ผู้ช่วย AI ในห้องแชท (Chat AI Assistant) */}
+          {/* ========================================================== */}
+          {/* 1. สวิตช์หลัก: ผู้ช่วย AI ในห้องแชท (Inbox AI Assistant)      */}
+          {/* ========================================================== */}
           <Card className="border-blue-200/60 bg-blue-50/20 dark:border-blue-900/40 dark:bg-blue-950/10">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -461,7 +618,7 @@ export default function AutoReplyClient({
                       </Badge>
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      ให้ Google Gemini ช่วยแอดมินคิดและร่างข้อความตอบลูกค้าในกล่องแชทอินบ็อกซ์
+                      ให้ Google Gemini ช่วยแอดมินคิด ร่างข้อความ และตอบลูกค้าในกล่องแชทอินบ็อกซ์
                     </CardDescription>
                   </div>
                 </div>
@@ -474,96 +631,364 @@ export default function AutoReplyClient({
                 )}
               </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3 pt-0">
-              {chatAssistEnabled ? (
-                <>
-                  <div className="rounded-lg border bg-background/80 p-3 text-xs flex flex-col gap-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 font-medium text-foreground">
-                        <Sparkles className="size-3.5 text-blue-500" />
-                        <span>หลักการทำงานของผู้ช่วย AI ในห้องแชท:</span>
-                      </div>
-                      <Link
-                        href="/settings/ai"
-                        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline font-medium"
-                      >
-                        <span>ตั้งค่าคลังความรู้ & โมเดล AI</span>
-                        <ArrowRight className="size-3" />
-                      </Link>
-                    </div>
-                    <ul className="list-disc list-inside space-y-1.5 text-muted-foreground pl-1">
-                      <li>
-                        <strong className="text-foreground">โหมดร่างข้อความแนะนำ (Recommend Draft):</strong> AI จะนำข้อความล่าสุดของลูกค้า + ข้อมูลสินค้าในคลังความรู้ มาร่างคำตอบแนะนำในกล่องพิมพ์ให้แอดมินตรวจดู
-                      </li>
-                      <li>
-                        <strong className="text-foreground">ควบคุมบอทรายห้อง (1:1 Bot Toggle):</strong> มีปุ่ม <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-medium text-foreground"><Bot className="size-3" /> บอท: เปิด/ปิด</span> ในแถบเครื่องมือข้างไอคอนวิดีโอในทุกห้องแชท
-                      </li>
-                      <li>
-                        <strong className="text-foreground">ค่าเริ่มต้นปลอดภัย (Default Off):</strong> แชทใหม่ที่เข้ามาจะปิดบอทตอบอัตโนมัติไว้ก่อนเสมอ เพื่อให้แอดมินคุยเอง ป้องกันบอทตอบผิดพลาด และแอดมินสามารถกดเปิดบอทได้ทุกเมื่อที่ต้องการ
-                      </li>
-                      <li>
-                        <strong className="text-foreground">สมองที่ใช้:</strong> {aiInfo?.model ?? 'gemini-3.6-flash'} {aiInfo?.hasKnowledge ? '(มีคลังความรู้สินค้าแล้ว)' : '(ยังไม่มีคลังความรู้สินค้า)'}
-                      </li>
-                    </ul>
-                  </div>
+          </Card>
 
-                  {/* จำลองคำตอบ AI ในแชท */}
-                  <div className="rounded-lg border bg-background p-3 flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <Play className="size-3 text-blue-500" />
-                        ทดลองให้ AI ร่างคำตอบในแชท:
-                      </span>
-                      {chatSimOutput && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-[11px] gap-1 px-2"
-                          onClick={() => void handleSimulateChatAssist()}
-                          disabled={testingChatSim}
-                        >
-                          <RefreshCw className={cn("size-2.5", testingChatSim && "animate-spin")} />
-                          ลองใหม่
-                        </Button>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        value={chatSimInput}
-                        onChange={(e) => setChatSimInput(e.target.value)}
-                        placeholder="พิมพ์ข้อความลูกค้า เช่น สนใจสินค้าตัวนี้ มีโปรส่งฟรีไหมคะ"
-                        className="text-xs h-8"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void handleSimulateChatAssist();
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        className="h-8 shrink-0 text-xs gap-1 bg-blue-600 hover:bg-blue-700 text-white"
-                        onClick={() => void handleSimulateChatAssist()}
-                        disabled={testingChatSim || !chatSimInput.trim()}
-                      >
-                        {testingChatSim ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
-                        ทดสอบ
-                      </Button>
-                    </div>
-
-                    {chatSimOutput && (
-                      <div className="mt-1 rounded-md bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200/50 p-2.5 text-xs">
-                        <span className="font-semibold text-blue-700 dark:text-blue-300 block mb-1">
-                          💬 ร่างข้อความที่ AI แนะนำให้แอดมิน:
-                        </span>
-                        <p className="whitespace-pre-wrap leading-relaxed text-foreground">
-                          {chatSimOutput}
-                        </p>
-                      </div>
-                    )}
+          {/* ========================================================== */}
+          {/* 2. สวิตช์ค่าเริ่มต้นแชทใหม่ (New Chat Default Bot Behavior)  */}
+          {/*    * สเปกความปลอดภัย: มีปุ่มให้เปิด/ปิดได้ ปิดเป็นค่าเริ่มต้น   */}
+          {/* ========================================================== */}
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5">
+                    <Bot className="size-5" />
                   </div>
-                </>
-              ) : (
-                <p className="text-xs text-muted-foreground py-1">
-                  เมื่อปิดการทำงาน แอดมินจะพิมพ์ตอบลูกค้าด้วยตนเองหรือใช้เทมเพลต Quick Reply ปกติ โดยไม่มีปุ่มให้ AI แนะนำคำตอบ
+                  <div>
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2 flex-wrap">
+                      ค่าเริ่มต้นของบอทเมื่อมีแชทใหม่เข้ามาร้าน (New Chat Default)
+                      <Badge
+                        variant={defaultChatBotEnabled ? 'default' : 'secondary'}
+                        className="text-[10px]"
+                      >
+                        {defaultChatBotEnabled ? '⚡ เปิดบอททันที' : '🔒 ปิดบอทเริ่มต้น (แนะนำ)'}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription className="text-xs mt-0.5">
+                      กำหนดว่าเมื่อมีลูกค้าใหม่ทักแชทเข้ามา จะให้บอทเริ่มตอบอัตโนมัติทันที หรือให้ปิดไว้ก่อนเพื่อให้แอดมินดูแลเอง
+                    </CardDescription>
+                  </div>
+                </div>
+                {canManage && (
+                  <Switch
+                    checked={defaultChatBotEnabled}
+                    disabled={savingDefaultBot}
+                    onCheckedChange={(val) => void handleToggleDefaultChatBot(val)}
+                  />
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0 text-xs text-muted-foreground">
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-foreground">
+                  <span className="text-sm">{defaultChatBotEnabled ? '⚡' : '🛡️'}</span>
+                  <span>
+                    สถานะปัจจุบัน:{' '}
+                    <strong className={defaultChatBotEnabled ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}>
+                      {defaultChatBotEnabled
+                        ? 'เปิดบอทตอบทันทีสำหรับทุกแชทใหม่'
+                        : 'ปิดบอทเป็นค่าเริ่มต้น (Safe Mode — แอดมินคุยเอง)'}
+                    </strong>
+                  </span>
+                </div>
+                <p className="leading-relaxed">
+                  {defaultChatBotEnabled
+                    ? 'เมื่อลูกค้าใหม่ทักเข้ามา บอท AI จะช่วยตอบอัตโนมัติตามชุดเทรนนักขายทันที (แอดมินสามารถกดปิดบอทเฉพาะห้องได้ในแถบเครื่องมือแชท)'
+                    : 'แชทใหม่ที่เข้ามาจะปิดบอทตอบอัตโนมัติไว้ก่อนเสมอ เพื่อให้แอดมินเป็นผู้คุยเอง ป้องกันบอทตอบผิดพลาด และแอดมินสามารถกดปุ่ม [🤖 บอท: เปิด/ปิด] หรือกดปุ่ม [✨ AI ช่วยคิด] ในห้องแชทนั้นๆ ได้ทุกเมื่อที่ต้องการ'}
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ========================================================== */}
+          {/* 3. ชุดเทรนและคำสั่งสอน AI ประจำแชท (Heavy Training)       */}
+          {/*    * บุคลิกนักขาย แนะนำโปรโมชั่น สินค้า และปิดการขาย        */}
+          {/* ========================================================== */}
+          <Card className="border-orange-200/60 bg-gradient-to-b from-orange-50/20 to-transparent dark:border-orange-900/40 dark:from-orange-950/10">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-orange-500/15 text-orange-600 dark:text-orange-400 shrink-0">
+                    <Sparkles className="size-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      ชุดเทรนและคำสั่งสอน AI ประจำแชท (Chat AI Sales Training)
+                      <Badge variant="outline" className="text-[10px] border-orange-400 text-orange-600 dark:text-orange-400">
+                        Top Closer
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      เทรนสมอง AI ให้ตอบแชทอย่างมืออาชีพ เชียร์ขาย แนะนำโปรโมชั่น และปิดการขายได้อย่างมีประสิทธิภาพ
+                    </CardDescription>
+                  </div>
+                </div>
+
+                {aiInfo && (
+                  <Badge variant={aiInfo.hasApiKey ? 'default' : 'destructive'} className="text-[10px] gap-1 h-5">
+                    {aiInfo.hasApiKey ? (
+                      <>
+                        <Check className="size-2.5" />
+                        สมอง: {aiInfo.model}
+                      </>
+                    ) : (
+                      'ยังไม่ตั้ง Gemini API Key'
+                    )}
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+
+            <CardContent className="flex flex-col gap-4 pt-0">
+              {/* ขั้นที่ 1: เลือกสไตล์และบุคลิกนักขาย */}
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <span>🎯 1. สไตล์ & บุคลิกภาพนักขาย (Sales Persona):</span>
+                </Label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {(Object.keys(CHAT_PERSONA_PRESETS) as ChatPersonaKey[]).map((key) => {
+                    const preset = CHAT_PERSONA_PRESETS[key];
+                    const isSelected = chatPersona === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        disabled={!canManage}
+                        onClick={() => handleSelectPersona(key)}
+                        className={cn(
+                          'flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all',
+                          isSelected
+                            ? 'border-orange-500 bg-orange-50/60 dark:bg-orange-950/30 text-foreground ring-1 ring-orange-500 font-medium'
+                            : 'border-border bg-card text-muted-foreground hover:text-foreground hover:border-border/80',
+                        )}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-semibold text-xs text-foreground">{preset.label}</span>
+                          <Badge variant="outline" className="text-[9px] px-1 py-0">
+                            {preset.badge}
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          {preset.sub}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ขั้นที่ 2: กรอบคำสั่งสอน AI อย่างละเอียด */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Sparkles className="size-3 text-orange-500" />
+                    <span>2. คำสั่งสอนและข้อความเทรน AI ในแชท (Chat Training Prompt):</span>
+                  </Label>
+                  <span className="text-[11px] text-muted-foreground">
+                    {chatInstruction.length}/10000 ตัวอักษร
+                  </span>
+                </div>
+                <Textarea
+                  value={chatInstruction}
+                  onChange={(e) => {
+                    setChatInstruction(e.target.value);
+                    if (chatPersona !== 'custom') {
+                      setChatPersona('custom');
+                    }
+                  }}
+                  placeholder="พิมพ์คำสั่งสอนบุคลิกภาพ วิธีการตอบ การเชียร์ขาย และคำถามปิดการขาย..."
+                  className="min-h-[140px] text-xs leading-relaxed bg-background font-mono sm:font-sans"
+                  disabled={!canManage}
+                />
+
+                {/* คีย์ลัดใส่เทคนิคการขายด่วน */}
+                {canManage && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-muted-foreground">
+                    <span className="font-medium text-foreground">💡 แทรกเทคนิคด่วน:</span>
+                    <button
+                      type="button"
+                      className="rounded bg-muted px-1.5 py-0.5 hover:bg-muted/80 hover:text-foreground transition"
+                      onClick={() => handleAppendInstruction('• นำเสนอโปรโมชั่น 1 แถม 1 และส่งฟรีทันทีเพื่อให้ลูกค้ารู้สึกคุ้มค่าที่สุด')}
+                    >
+                      + เชียร์โปร 1 แถม 1
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-muted px-1.5 py-0.5 hover:bg-muted/80 hover:text-foreground transition"
+                      onClick={() => handleAppendInstruction('• ยืนยันว่ามีสินค้าพร้อมส่งรอบวันนี้ทันทีอย่างมั่นใจ')}
+                    >
+                      + ยืนยันสต็อกพร้อมส่ง
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-muted px-1.5 py-0.5 hover:bg-muted/80 hover:text-foreground transition"
+                      onClick={() => handleAppendInstruction('• แจ้งว่าร้านมีบริการเก็บเงินปลายทางฟรี ไม่บวกเพิ่ม')}
+                    >
+                      + เน้นเก็บเงินปลายทาง
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-muted px-1.5 py-0.5 hover:bg-muted/80 hover:text-foreground transition"
+                      onClick={() => handleAppendInstruction('• ปิดการขายด้วยคำถามชวนตัดสินใจ เช่น "รับกี่ชิ้นดีคะ เดี๋ยวแอดมินทำรายการรอบวันนี้ให้เลยค่า 🥰"')}
+                    >
+                      + ชวนปิดยอดรอบวันนี้
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ขั้นที่ 3: แหล่งข้อมูลอัจฉริยะที่เชื่อมต่ออัตโนมัติ */}
+              <div className="rounded-lg border bg-background/80 p-3 text-xs flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-medium text-foreground">
+                    <ShoppingBag className="size-3.5 text-orange-500" />
+                    <span>3. แหล่งข้อมูลจริงที่ระบบส่งให้ AI ผสานกับชุดเทรนอัตโนมัติ:</span>
+                  </div>
+                  <Link
+                    href="/settings/ai"
+                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline font-medium"
+                  >
+                    <span>ตั้งค่าคลังความรู้ & โมเดล AI</span>
+                    <ArrowRight className="size-3" />
+                  </Link>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                  <div className="rounded-md border bg-muted/30 p-2 flex items-start gap-1.5">
+                    <span className="text-sm">📦</span>
+                    <div>
+                      <strong className="block text-foreground">สินค้าจริงในร้าน</strong>
+                      <span className="text-muted-foreground">ดึงชื่อ รุ่น ราคา และตัวเลือกสินค้าจริง</span>
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-2 flex items-start gap-1.5">
+                    <span className="text-sm">🎁</span>
+                    <div>
+                      <strong className="block text-foreground">โปรโมชั่นที่เปิดอยู่</strong>
+                      <span className="text-muted-foreground">ดึงโปรโมชั่นที่กำลังจัดอยู่จริงมาเชียร์ขาย</span>
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-2 flex items-start gap-1.5">
+                    <span className="text-sm">📚</span>
+                    <div>
+                      <strong className="block text-foreground">คลังความรู้ & นโยบาย</strong>
+                      <span className="text-muted-foreground">
+                        {aiInfo?.hasKnowledge ? 'เชื่อมต่อแล้ว' : 'ยังไม่ได้ระบุในหน้า AI'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ปุ่มบันทึกชุดเทรน */}
+              {canManage && (
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="button"
+                    onClick={() => void handleSaveChatTraining()}
+                    disabled={savingChatTraining}
+                    className="h-9 gap-1.5 text-xs bg-orange-600 hover:bg-orange-700 text-white shadow-xs font-semibold"
+                  >
+                    {savingChatTraining ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Check className="size-3.5" />
+                    )}
+                    บันทึกชุดเทรนและคำสั่งสอน AI ประจำแชท
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ========================================================== */}
+          {/* 4. กล่องจำลองทดสอบพลังการขาย AI (Chat Sales Simulator)     */}
+          {/* ========================================================== */}
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                  <Play className="size-3.5 text-blue-500" />
+                  จำลองการตอบของ AI นักขายในแชท (Chat Sales Simulator)
+                </CardTitle>
+                {chatSimOutput && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[11px] gap-1 px-2"
+                    onClick={() => void handleSimulateChatAssist()}
+                    disabled={testingChatSim}
+                  >
+                    <RefreshCw className={cn('size-2.5', testingChatSim && 'animate-spin')} />
+                    ลองใหม่อีกครั้ง
+                  </Button>
+                )}
+              </div>
+              <CardDescription className="text-xs">
+                ทดสอบว่า AI ตอบคำถามลูกค้าตามชุดเทรน สไตล์นักขาย และข้อมูลสินค้าจริงได้ดีเพียงใด
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 pt-0">
+              {/* ปุ่มคำถามทดสอบด่วน */}
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="text-muted-foreground font-medium">💬 ลองกดถามดู:</span>
+                <button
+                  type="button"
+                  className="rounded-full border bg-muted/40 px-2.5 py-1 text-foreground hover:bg-muted transition"
+                  onClick={() => void handleSimulateChatAssist('สวัสดีค่ะ มีสินค้าพร้อมส่งไหมคะ มีโปรโมชั่นอะไรบ้าง')}
+                  disabled={testingChatSim}
+                >
+                  &quot;มีสินค้าพร้อมส่งไหมคะ มีโปรอะไรบ้าง&quot;
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border bg-muted/40 px-2.5 py-1 text-foreground hover:bg-muted transition"
+                  onClick={() => void handleSimulateChatAssist('สนใจสั่งซื้อค่ะ ราคาเท่าไหร่ มีส่งฟรีไหม')}
+                  disabled={testingChatSim}
+                >
+                  &quot;สนใจสั่งซื้อค่ะ ราคาเท่าไหร่ มีส่งฟรีไหม&quot;
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border bg-muted/40 px-2.5 py-1 text-foreground hover:bg-muted transition"
+                  onClick={() => void handleSimulateChatAssist('สั่งซื้อยังไงคะ มีเก็บเงินปลายทางไหม')}
+                  disabled={testingChatSim}
+                >
+                  &quot;สั่งซื้อยังไงคะ มีเก็บเงินปลายทางไหม&quot;
+                </button>
+              </div>
+
+              {/* ช่องกรอกคำถามจำลอง */}
+              <div className="flex gap-2">
+                <Input
+                  value={chatSimInput}
+                  onChange={(e) => setChatSimInput(e.target.value)}
+                  placeholder="พิมพ์ข้อความลูกค้า เช่น สนใจสินค้าตัวนี้ มีโปรส่งฟรีไหมคะ"
+                  className="text-xs h-9"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleSimulateChatAssist();
+                  }}
+                />
+                <Button
+                  size="sm"
+                  className="h-9 shrink-0 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                  onClick={() => void handleSimulateChatAssist()}
+                  disabled={testingChatSim || !chatSimInput.trim()}
+                >
+                  {testingChatSim ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Send className="size-3.5" />
+                  )}
+                  ทดสอบพลัง AI
+                </Button>
+              </div>
+
+              {/* ผลลัพธ์ที่ AI ตอบ */}
+              {chatSimOutput && (
+                <div className="mt-1 rounded-lg bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/50 p-3 text-xs">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+                      <Sparkles className="size-3.5 text-blue-600 dark:text-blue-400" />
+                      ร่างข้อความที่ AI ตอบกลับลูกค้า (อ้างอิงสินค้าและโปรโมชั่นจริง):
+                    </span>
+                    <Badge variant="outline" className="text-[9px] border-blue-300 text-blue-700 dark:text-blue-300">
+                      ปิดการขาย
+                    </Badge>
+                  </div>
+                  <p className="whitespace-pre-wrap leading-relaxed text-foreground">
+                    {chatSimOutput}
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
