@@ -207,15 +207,6 @@ export async function backfillPageConversations(
         continue;
       }
 
-      // ถ้า Meta ส่งชื่อลูกค้ามาด้วย ให้บันทึกชื่อทันที
-      if (customer.name) {
-        await db()
-          .from('customers')
-          .update({ name: customer.name, profile_synced_at: new Date().toISOString() })
-          .eq('page_id', page.id)
-          .eq('psid', customer.id);
-      }
-
       // ⚠️ เรียงจากเก่าไปใหม่ก่อนบันทึกเสมอ
       //    Meta คืนมาใหม่ก่อน ถ้าบันทึกตามนั้น ตัวอย่างข้อความล่าสุดจะเพี้ยน
       const messages = asArray<MetaConvMessage>(conv.messages?.data)
@@ -234,6 +225,15 @@ export async function backfillPageConversations(
           summary.skipped += 1;
           console.warn(`[backfill] ข้ามข้อความ ${msg.id}:`, err);
         }
+      }
+
+      // ⭐ บันทึกชื่อลูกค้าจริง "หลังจาก" saveMessage เพื่อให้แถว customer ถูกสร้างแล้ว
+      if (customer.name) {
+        await db()
+          .from('customers')
+          .update({ name: customer.name, profile_synced_at: new Date().toISOString() })
+          .eq('page_id', page.id)
+          .eq('psid', customer.id);
       }
 
       /**
