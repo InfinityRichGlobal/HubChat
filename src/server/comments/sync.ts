@@ -15,7 +15,7 @@ import type { MetaPage } from '@/server/meta/client';
 import { getFilterWords, saveIncomingComment } from './service';
 import { processCommentAutoReply } from './bot';
 import { syncCommentProfile } from '@/server/meta/profile-sync';
-import { dispatchNotification } from '@/server/notify/dispatch';
+import { dispatchNotification, flushNotifications } from '@/server/notify/dispatch';
 
 export type CommentSyncSummary = {
   pages_checked: number;
@@ -132,6 +132,13 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
         console.warn(`[comment-sync] บันทึกคอมเมนต์ ${c.id} ไม่สำเร็จ:`, saveErr);
       }
     }
+  }
+
+  // ส่งแจ้งเตือนที่ค้างคิวทันทีถ้ามีคอมเมนต์ใหม่ถูกบันทึก
+  if (summary.comments_saved > 0) {
+    void flushNotifications().catch((err) =>
+      console.warn('[comment-sync] flushNotifications ไม่สำเร็จ:', err)
+    );
   }
 
   return summary;
