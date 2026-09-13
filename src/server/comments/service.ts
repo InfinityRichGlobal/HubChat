@@ -21,6 +21,7 @@ export class CommentError extends Error {
 
 export const COMMENT_SELECTS = {
   comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,from_username,from_pic_url,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_liked,is_deleted,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
+  legacy_comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
   setting: 'value',
 } as const;
 
@@ -84,7 +85,7 @@ export async function saveIncomingComment(
 ): Promise<{ id: string | null; duplicate: boolean; matched: string | null }> {
   const matched = input.is_from_page ? null : matchFilterWord(input.message, filterWords);
 
-  const { data, error } = await db().rpc('ingest_comment', {
+  let res = await db().rpc('ingest_comment', {
     p_page_id: input.page_id,
     p_comment_id: input.comment_id,
     p_post_id: input.post_id,
@@ -102,9 +103,28 @@ export async function saveIncomingComment(
     p_from_pic_url: input.from_pic_url ?? null,
   });
 
-  if (error) throw new CommentError(`บันทึกคอมเมนต์ไม่สำเร็จ: ${error.message}`);
+  // Fallback สำหรับ database ที่ยังไม่ได้รัน migration 20260913_instagram_comments.sql (ยังเป็น 13 params)
+  if (res.error && (res.error.message.includes('schema cache') || res.error.message.includes('ingest_comment'))) {
+    res = await db().rpc('ingest_comment', {
+      p_page_id: input.page_id,
+      p_comment_id: input.comment_id,
+      p_post_id: input.post_id,
+      p_parent_id: input.parent_comment_id,
+      p_from_id: input.from_id,
+      p_from_name: input.from_name,
+      p_message: input.message,
+      p_permalink: input.permalink,
+      p_attachment_url: input.attachment_url,
+      p_matched_keyword: matched,
+      p_is_from_page: input.is_from_page,
+      p_commented_at: input.commented_at,
+      p_raw: input.raw,
+    });
+  }
 
-  const row = (Array.isArray(data) ? data[0] : data) as
+  if (res.error) throw new CommentError(`บันทึกคอมเมนต์ไม่สำเร็จ: ${res.error.message}`);
+
+  const row = (Array.isArray(res.data) ? res.data[0] : res.data) as
     | { comment_row_id: string | null; duplicate: boolean }
     | undefined;
 
@@ -193,10 +213,38 @@ export async function listComments(
   // ⭐ ใช้ lte ไม่ใช่ lt — เวลาซ้ำกันได้ หน้าเว็บกรองตัวซ้ำที่ขอบทิ้งเอง
   if (filters.before) query = query.lte('commented_at', filters.before);
 
-  const { data, error } = await query;
-  if (error) throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${error.message}`);
+  let { data, error } = await query;
+  let rows: CommentRow[] = [];
 
-  const rows = (data ?? []) as CommentRow[];
+  if (error && error.message.includes('from_username')) {
+    // Fallback สำหรับ database ที่ยังไม่ได้รัน migration 20260913_instagram_comments.sql
+    let fallbackQuery = db()
+      .from('comments')
+      .select(COMMENT_SELECTS.legacy_comments)
+      .in('page_id', scoped)
+      .eq('is_from_page', false)
+      .order('commented_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+
+    if (filters.unhandled_only) fallbackQuery = fallbackQuery.eq('is_handled', false);
+    if (filters.keyword_only) fallbackQuery = fallbackQuery.not('matched_keyword', 'is', null);
+    if (filters.before) fallbackQuery = fallbackQuery.lte('commented_at', filters.before);
+
+    const fallbackRes = await fallbackQuery;
+    if (fallbackRes.error) throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${fallbackRes.error.message}`);
+    rows = (fallbackRes.data ?? []).map((r: any) => ({
+      ...r,
+      from_username: null,
+      from_pic_url: null,
+      is_liked: false,
+      is_deleted: false,
+    })) as CommentRow[];
+  } else if (error) {
+    throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${error.message}`);
+  } else {
+    rows = (data ?? []) as CommentRow[];
+  }
 
   const { count, error: countError } = await db()
     .from('comments')
@@ -210,7 +258,23 @@ export async function listComments(
 }
 
 export async function getComment(admin: PublicAdmin, id: string): Promise<CommentRow> {
-  const { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle();
+  let { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle();
+
+  if (error && error.message.includes('from_username')) {
+    const fallbackRes = await db().from('comments').select(COMMENT_SELECTS.legacy_comments).eq('id', id).maybeSingle();
+    if (fallbackRes.error) throw new CommentError(`อ่านคอมเมนต์ไม่สำเร็จ: ${fallbackRes.error.message}`);
+    if (fallbackRes.data) {
+      data = {
+        ...fallbackRes.data,
+        from_username: null,
+        from_pic_url: null,
+        is_liked: false,
+        is_deleted: false,
+      } as any;
+      error = null;
+    }
+  }
+
   if (error) throw new CommentError(`อ่านคอมเมนต์ไม่สำเร็จ: ${error.message}`);
   if (!data) throw new CommentError('ไม่พบคอมเมนต์นี้');
   const row = data as CommentRow;
