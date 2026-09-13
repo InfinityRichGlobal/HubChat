@@ -654,6 +654,13 @@ function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
   const stopRef = useRef(false);
 
   async function run() {
+    if (page.platform === 'instagram') {
+      toast.info('Instagram ไม่อนุญาตให้ดึงประวัติแชทย้อนหลังผ่าน API', {
+        description: 'ข้อความใหม่ของ Instagram จะไหลเข้าระบบอัตโนมัติผ่าน Webhook เมื่อมีลูกค้าทักเข้ามาครับ',
+      });
+      return;
+    }
+
     setRunning(true);
     stopRef.current = false;
     const total: SyncTally = { conversations: 0, saved: 0, duplicates: 0, rounds: 0 };
@@ -741,8 +748,7 @@ function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" disabled>
           <Loader2 className="animate-spin" />
-          กำลังดึง…
-          {tally && ` ${tally.conversations} ห้อง / ${tally.saved} ข้อความ`}
+          กำลังดึง... {tally ? `(${tally.conversations} ห้อง · ${tally.saved} ข้อความ)` : '(กำลังติดต่อ Meta...)'}
         </Button>
         <Button
           variant="ghost"
