@@ -3302,6 +3302,34 @@ function RefreshNameButton({
   );
 }
 
+function parseTextAndImageUrls(text: string | null, attachments: Array<{ url?: string | null }>) {
+  if (!text) return { displayText: null, imageUrlsFromText: [] };
+
+  const urlRegex = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif|svg)(?:\?[^\s]*)?|https?:\/\/[^\s]+\/api\/media\/[^\s]+)/gi;
+  const matches = text.match(urlRegex) || [];
+
+  const existingUrls = new Set(attachments.map((a) => a.url).filter(Boolean));
+  const imageUrlsFromText: string[] = [];
+
+  let cleanText = text;
+  for (const url of matches) {
+    if (!existingUrls.has(url)) {
+      imageUrlsFromText.push(url);
+    }
+    cleanText = cleanText.replace(
+      new RegExp(`(?:🖼️\\s*ภาพสินค้า\\/โปรโมชั่น:\\s*)?${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'),
+      ''
+    );
+  }
+
+  cleanText = cleanText.trim();
+
+  return {
+    displayText: cleanText.length > 0 ? cleanText : null,
+    imageUrlsFromText,
+  };
+}
+
 function MessageBubble({
   message: m,
   isRead = false,
@@ -3332,6 +3360,38 @@ function MessageBubble({
     // ต้องปัดขวาชัดเจน และไม่ใช่การเลื่อนขึ้นลง
     if (dx > 60 && dy < 40) onSwipeRight();
   }
+
+  const isMetaSystemReferral =
+    Boolean(m.text) &&
+    (m.text!.includes('คุณกำลังตอบกลับความคิดเห็น') ||
+      m.text!.includes("You are replying to a user's comment") ||
+      m.text!.includes('คุณได้ตอบกลับความคิดเห็น'));
+
+  if (isMetaSystemReferral) {
+    const matchUrl = m.text?.match(/https?:\/\/[^\s\)]+/);
+    const fbUrl = matchUrl ? matchUrl[0] : null;
+    return (
+      <div className="my-2.5 flex w-full justify-center">
+        <div className="inline-flex max-w-[92%] items-center gap-1.5 rounded-full bg-muted/80 px-3.5 py-1.5 text-center text-xs text-muted-foreground border shadow-2xs">
+          <span className="shrink-0 font-bold text-primary">💬</span>
+          <span className="truncate">ตอบกลับความคิดเห็นบนเพจ</span>
+          {fbUrl && (
+            <a
+              href={fbUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-primary hover:underline underline-offset-2 shrink-0 ml-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              [ดูโพสต์/คอมเมนต์ ↗]
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const { displayText, imageUrlsFromText } = parseTextAndImageUrls(m.text, m.attachments);
 
   return (
     <div className={cn('flex flex-col gap-0.5', outgoing ? 'items-end' : 'items-start')}>
@@ -3387,7 +3447,22 @@ function MessageBubble({
           </span>
         )}
 
-        {m.text && <p className="whitespace-pre-wrap">{m.text}</p>}
+        {displayText && <p className="whitespace-pre-wrap">{displayText}</p>}
+
+        {imageUrlsFromText.map((url, i) => (
+          <span key={`text-img-${i}`} className="mt-1.5 block overflow-hidden rounded-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt="รูปภาพ"
+              loading="lazy"
+              className="max-h-60 w-full rounded-lg object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          </span>
+        ))}
 
         {m.attachments.map((a, i) => {
           /**

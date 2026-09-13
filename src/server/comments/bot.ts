@@ -316,7 +316,8 @@ export async function processCommentAutoReply(
 
     // หากมีรูปภาพจากคลังสื่อสำหรับ Private Reply:
     if (settings.private_reply_image_url?.trim()) {
-      dmText = dmText ? `${dmText}\n\n🖼️ ภาพสินค้า/โปรโมชั่น: ${settings.private_reply_image_url.trim()}` : settings.private_reply_image_url.trim();
+      const imgUrl = settings.private_reply_image_url.trim();
+      dmText = dmText ? `${dmText}\n\n${imgUrl}` : imgUrl;
     }
 
     // หากเปิด auto_send_catalog (ส่งเมนูสินค้า+โปรฯ หลังดึงเข้าแชท): แนบเมนูและโปรโมชั่นเข้ากับข้อความ
