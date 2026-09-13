@@ -5,6 +5,7 @@ import { can, ROLE_LABEL_TH, ROLE_DESCRIPTION_TH } from '@/lib/auth/permissions'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { redirect } from 'next/navigation';
+import SystemMonitor from './system-monitor';
 
 /**
  * หน้าตั้งค่า — สเปกหัวข้อ 5.6
@@ -117,6 +118,9 @@ export default async function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* แผงมอนิเตอร์สถานะระบบ & ตรวจฟังก์ชันแอป พร้อมตัวตรวจจับ Meta Error */}
+      <SystemMonitor isOwner={admin.role === 'owner'} />
 
       {ready.length > 0 && (
         <Card className="py-0">
