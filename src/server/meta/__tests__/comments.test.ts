@@ -145,10 +145,10 @@ describe('Comment Adapter Dispatcher', () => {
     );
   });
 
-  it('routes Facebook private reply to /{commentId}/private_replies', async () => {
+  it('routes Facebook private reply to Send API /{page_id}/messages with recipient.comment_id', async () => {
     vi.mocked(metaClient.metaPost).mockResolvedValueOnce({
       ok: true,
-      data: { id: 'fb-dm-1' },
+      data: { message_id: 'fb-dm-1', recipient_id: 'fb-user-1' },
       http_status: 200,
     });
 
@@ -156,8 +156,11 @@ describe('Comment Adapter Dispatcher', () => {
     expect(res.ok).toBe(true);
     expect(metaClient.metaPost).toHaveBeenCalledWith(
       fbPage,
-      'fb-comm-1/private_replies',
-      { message: 'สวัสดีทางแชท' },
+      'fb-page-123/messages',
+      {
+        recipient: { comment_id: 'fb-comm-1' },
+        message: { text: 'สวัสดีทางแชท' },
+      },
     );
   });
 

@@ -27,15 +27,23 @@ export async function replyToFacebookComment(
   page: MetaPage,
   commentId: string,
   message: string,
+  attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
-  const result = await metaPost(page, `${commentId}/comments`, { message });
+  const payload: Record<string, unknown> = { message };
+  if (attachmentUrl) {
+    payload.attachment_url = attachmentUrl;
+  }
+  const result = await metaPost(page, `${commentId}/comments`, payload);
   if (result.ok) {
     const id = (result.data as { id?: string } | null)?.id ?? null;
     return { ok: true, id };
   }
+  console.error(`[fb-comments] ตอบใต้โพสต์ ${commentId} ไม่สำเร็จ:`, {
+    code: result.error.code, message: result.error.message, fbtrace: result.error.fbtrace_id,
+  });
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -48,15 +56,30 @@ export async function sendFacebookPrivateReply(
   page: MetaPage,
   commentId: string,
   message: string,
+  attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
-  const result = await metaPost(page, `${commentId}/private_replies`, { message });
+  let text = message;
+  if (attachmentUrl) {
+    text = `${message}\n\n🖼️ แนบภาพ: ${attachmentUrl}`;
+  }
+  const payload = {
+    recipient: { comment_id: commentId },
+    message: { text },
+  };
+  const result = await metaPost(page, `${page.page_id}/messages`, payload);
   if (result.ok) {
-    const id = (result.data as { id?: string } | null)?.id ?? null;
+    const id =
+      (result.data as { message_id?: string; id?: string } | null)?.message_id ??
+      (result.data as { id?: string } | null)?.id ??
+      null;
     return { ok: true, id };
   }
+  console.error(`[fb-comments] ทักส่วนตัว ${commentId} ไม่สำเร็จ:`, {
+    code: result.error.code, message: result.error.message, fbtrace: result.error.fbtrace_id,
+  });
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -73,7 +96,7 @@ export async function setFacebookCommentHidden(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -89,7 +112,7 @@ export async function likeFacebookComment(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -105,7 +128,7 @@ export async function deleteFacebookComment(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -126,6 +149,6 @@ export async function subscribeFacebookPageWebhooks(
   }
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'facebook', result.error.message),
   };
 }

@@ -34,7 +34,7 @@ export async function replyToInstagramComment(
   }
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -50,10 +50,15 @@ export async function sendInstagramPrivateReply(
   page: MetaPage,
   commentId: string,
   message: string,
+  attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
+  let text = message;
+  if (attachmentUrl) {
+    text = `${message}\n\n🖼️ แนบภาพ: ${attachmentUrl}`;
+  }
   const payload = {
     recipient: { comment_id: commentId },
-    message: { text: message },
+    message: { text },
   };
   const result = await metaPost(page, `${page.page_id}/messages`, payload);
   if (result.ok) {
@@ -90,7 +95,7 @@ export async function setInstagramCommentHidden(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -107,7 +112,7 @@ export async function likeInstagramComment(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -124,7 +129,7 @@ export async function unlikeInstagramComment(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -141,7 +146,7 @@ export async function deleteInstagramComment(
   if (result.ok) return { ok: true, id: commentId };
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
     outcome_unknown: result.error.kind === 'ambiguous',
   };
 }
@@ -162,6 +167,6 @@ export async function subscribeInstagramPageWebhooks(
   }
   return {
     ok: false,
-    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram'),
+    error_th: explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message),
   };
 }

@@ -57,11 +57,12 @@ export async function replyToCommentPublicly(
   page: MetaPage,
   commentId: string,
   message: string,
+  attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
   if (page.platform === 'instagram') {
     return replyToInstagramComment(page, commentId, message);
   }
-  return replyToFacebookComment(page, commentId, message);
+  return replyToFacebookComment(page, commentId, message, attachmentUrl);
 }
 
 /**
@@ -72,11 +73,12 @@ export async function sendPrivateReply(
   page: MetaPage,
   commentId: string,
   message: string,
+  attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
   if (page.platform === 'instagram') {
-    return sendInstagramPrivateReply(page, commentId, message);
+    return sendInstagramPrivateReply(page, commentId, message, attachmentUrl);
   }
-  return sendFacebookPrivateReply(page, commentId, message);
+  return sendFacebookPrivateReply(page, commentId, message, attachmentUrl);
 }
 
 /**

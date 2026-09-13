@@ -29,8 +29,16 @@ export const maxDuration = 60;
 type Ctx = { params: Promise<{ id: string }> };
 
 const schema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('reply_public'), text: z.string().min(1).max(MAX_REPLY_LENGTH) }),
-  z.object({ action: z.literal('reply_private'), text: z.string().min(1).max(MAX_REPLY_LENGTH) }),
+  z.object({
+    action: z.literal('reply_public'),
+    text: z.string().min(1).max(MAX_REPLY_LENGTH),
+    attachment_url: z.string().url().optional().nullable(),
+  }),
+  z.object({
+    action: z.literal('reply_private'),
+    text: z.string().min(1).max(MAX_REPLY_LENGTH),
+    attachment_url: z.string().url().optional().nullable(),
+  }),
   z.object({ action: z.literal('hide'), hidden: z.boolean() }),
   z.object({ action: z.literal('handled'), handled: z.boolean() }),
   z.object({ action: z.literal('like') }),
@@ -49,8 +57,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     const outcome =
-      body.action === 'reply_public' ? await replyPublic(admin, id, body.text)
-      : body.action === 'reply_private' ? await replyPrivate(admin, id, body.text)
+      body.action === 'reply_public' ? await replyPublic(admin, id, body.text, body.attachment_url)
+      : body.action === 'reply_private' ? await replyPrivate(admin, id, body.text, body.attachment_url)
       : body.action === 'hide' ? await hideComment(admin, id, body.hidden)
       : body.action === 'like' ? await likeCommentAction(admin, id)
       : body.action === 'unlike' ? await unlikeCommentAction(admin, id)

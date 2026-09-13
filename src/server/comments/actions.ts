@@ -74,6 +74,7 @@ export async function replyPublic(
   admin: PublicAdmin,
   commentRowId: string,
   text: string,
+  attachmentUrl?: string | null,
 ): Promise<ActionOutcome> {
   const comment = await getComment(admin, commentRowId); // ตรวจสิทธิ์เพจ
   const clean = validateText(text);
@@ -83,7 +84,7 @@ export async function replyPublic(
   }
 
   const page = await loadPage(comment.page_id);
-  const result = await replyToCommentPublicly(page, comment.comment_id, clean);
+  const result = await replyToCommentPublicly(page, comment.comment_id, clean, attachmentUrl);
 
   if (!result.ok) {
     await db().from('comments').update({ last_error_th: result.error_th }).eq('id', commentRowId);
@@ -107,7 +108,7 @@ export async function replyPublic(
     action: 'comment.reply_public',
     targetType: 'comment',
     targetId: commentRowId,
-    detail: { page_id: comment.page_id, length: clean.length },
+    detail: { page_id: comment.page_id, length: clean.length, has_attachment: Boolean(attachmentUrl) },
   });
 
   return {
@@ -126,6 +127,7 @@ export async function replyPrivate(
   admin: PublicAdmin,
   commentRowId: string,
   text: string,
+  attachmentUrl?: string | null,
 ): Promise<ActionOutcome> {
   const comment = await getComment(admin, commentRowId);
   const clean = validateText(text);
@@ -150,7 +152,7 @@ export async function replyPrivate(
   }
 
   const page = await loadPage(comment.page_id);
-  const result = await sendPrivateReply(page, comment.comment_id, clean);
+  const result = await sendPrivateReply(page, comment.comment_id, clean, attachmentUrl);
 
   if (!result.ok) {
     /**

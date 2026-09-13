@@ -3,39 +3,53 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, Bot, Eye, EyeOff, Loader2, MessageCircle, MessageSquare, Send, Check, RefreshCw, Sparkles,
-  ChevronDown, Layers, ThumbsUp, Trash2,
+  AlertTriangle,
+  Bot,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Image as ImageIcon,
+  Layers,
+  Loader2,
+  MessageCircle,
+  MessageSquare,
+  MoreHorizontal,
+  Paperclip,
+  RefreshCw,
+  Send,
+  Sparkles,
+  ThumbsUp,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import PlatformIcon from '@/components/platform-icon';
 import CustomerAvatar from '@/components/customer-avatar';
+import { MediaLibraryPicker, type LibraryItem } from '@/components/media-library-picker';
 import type { CommentRow } from '@/server/comments/service';
 import type { SafePage } from '@/server/pages/service';
 import type { CommentBotSettings } from '@/types/comment-bot';
-
-/**
- * ฟีดคอมเมนต์ (ฝั่งหน้าเว็บ) — สเปกหัวข้อ 5.5
- * ===========================================================================
- * 🔴 กฎที่หน้านี้ต้องเคารพ :
- *
- *   1. **ไม่ตอบอัตโนมัติ** — ทุกอย่างแอดมินกดเอง ไม่มีปุ่มไหนทำงานเองทั้งสิ้น
- *
- *   2. ⭐ "ทักส่วนตัว" ทำได้ครั้งเดียวต่อคอมเมนต์ตลอดกาล (กฎของ Meta)
- *      ปุ่มจึงหายไปทันทีที่ใช้แล้ว และเซิร์ฟเวอร์ก็ปฏิเสธซ้ำอีกชั้น
- *
- *   3. ⚠️ "ตอบใต้โพสต์" ทุกคนเห็น — เตือนไม่ให้พิมพ์ข้อมูลส่วนตัวของลูกค้าลงไป
- */
 
 type Feed = { comments: CommentRow[]; has_more: boolean; unhandled_count: number };
 
@@ -56,6 +70,13 @@ function timeAgo(iso: string | null): string {
 function tooOldForPrivate(iso: string | null): boolean {
   if (!iso) return false;
   return Date.now() - new Date(iso).getTime() > 7 * 24 * 3_600_000;
+}
+
+function toAbsoluteUrl(url: string): string {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
+  return url;
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T | null> {
@@ -135,41 +156,39 @@ export default function CommentsClient({
   }, []);
 
   const visible = useMemo(() => feed.comments, [feed.comments]);
-
   const selectedPage = useMemo(() => pages.find((p) => p.id === selectedPageId), [pages, selectedPageId]);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3.5 pb-12">
+      {/* ส่วนหัวหน้า */}
+      <div className="flex items-center justify-between gap-2 border-b pb-3">
         <div>
-          <h1 className="text-lg font-semibold">คอมเมนต์</h1>
-          <p className="text-sm text-muted-foreground">
-            ยังไม่จัดการ {feed.unhandled_count} รายการ
+          <h1 className="text-xl font-bold tracking-tight">คอมเมนต์</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            รวบรวมคอมเมนต์จาก Facebook และ Instagram ในที่เดียว · รอจัดการ {feed.unhandled_count} รายการ
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            รีเฟรช
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="gap-1.5 h-8 text-xs">
+          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+          รีเฟรช
+        </Button>
       </div>
 
-      {/* สถานะบอทคอมเมนต์ & ทางลัดตั้งค่า */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 rounded-xl border bg-card p-3 shadow-xs text-xs">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400 font-semibold text-base">
+      {/* กล่องสถานะบอทคอมเมนต์ & ทางลัดตั้งค่า */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border bg-card/60 backdrop-blur-xs p-3.5 shadow-xs text-xs">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400 font-semibold text-lg">
             {botSettings?.auto_reply_public || botSettings?.auto_reply_private ? '🤖' : '💬'}
           </div>
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 min-w-0">
             <div className="flex flex-wrap items-center gap-1.5 font-medium">
               <span className="font-semibold text-foreground">บอทคอมเมนต์อัตโนมัติ:</span>
               {botSettings?.auto_reply_public || botSettings?.auto_reply_private ? (
-                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600 text-[10px] h-4">
+                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600 text-[10px] h-4.5 px-2">
                   เปิดทำงาน ({botSettings.reply_mode === 'ai' ? 'สมอง AI Gemini' : 'Template'})
                 </Badge>
               ) : (
-                <Badge variant="secondary" className="text-[10px] h-4">ปิดอยู่</Badge>
+                <Badge variant="secondary" className="text-[10px] h-4.5 px-2">ปิดอยู่</Badge>
               )}
               {botSettings?.auto_like && (
                 <span className="text-[11px] text-muted-foreground hidden sm:inline">· 👍 ไลก์อัตโนมัติ</span>
@@ -178,12 +197,12 @@ export default function CommentsClient({
                 <span className="text-[11px] text-muted-foreground hidden sm:inline">· 🛍️ ส่งเมนูสินค้า</span>
               )}
             </div>
-            <p className="text-muted-foreground text-[11px]">
+            <p className="text-muted-foreground text-[11px] truncate sm:whitespace-normal">
               {botSettings?.auto_reply_public || botSettings?.auto_reply_private
-                ? 'ระบบจะตอบคอมเมนต์และดึงเข้าแชทให้อัตโนมัติตามกฎที่ตั้งไว้'
-                : 'คุณสามารถเปิดให้ AI หรือบอทตอบคำถามลูกค้าใต้คอมเมนต์และทักแชทให้อัตโนมัติ'}
+                ? 'ระบบจะตอบคอมเมนต์และดึงเข้าแชทให้อัตโนมัติเมื่อมีคอมเมนต์ใหม่'
+                : 'หากปิดบอทไว้ คอมเมนต์จะรอแอดมินเข้ามาตอบด้วยตนเอง'}
               {' · '}
-              <strong>ทักส่วนตัวทำได้ 1 ครั้งต่อคอมเมนต์ (กฎ Meta 7 วัน)</strong>
+              <span className="text-foreground/80 font-medium">ทักส่วนตัวได้ 1 ครั้งต่อคอมเมนต์ (กฎ Meta 7 วัน)</span>
             </p>
           </div>
         </div>
@@ -192,7 +211,7 @@ export default function CommentsClient({
           variant="outline"
           size="sm"
           asChild
-          className="h-7 text-xs shrink-0 gap-1 text-orange-600 border-orange-300 hover:bg-orange-50 dark:border-orange-800 dark:text-orange-400"
+          className="h-7.5 text-xs shrink-0 gap-1.5 rounded-lg border-orange-200 text-orange-700 hover:bg-orange-50 dark:border-orange-900/50 dark:text-orange-400 dark:hover:bg-orange-950/30"
         >
           <Link href="/settings/autoreply?tab=comments">
             <Bot className="size-3.5" />
@@ -201,16 +220,15 @@ export default function CommentsClient({
         </Button>
       </div>
 
-      {/* ---- ตัวกรอง ---- */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {/* ดรอปดาวน์เลือกเพจ */}
+      {/* แถบตัวกรอง */}
+      <div className="flex flex-wrap items-center gap-2">
         {pages.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant={selectedPageId !== 'all' ? 'default' : 'outline'}
                 size="sm"
-                className="h-8 gap-1.5 text-xs font-medium shrink-0"
+                className="h-8 gap-1.5 text-xs font-medium shrink-0 rounded-lg"
               >
                 {selectedPage ? (
                   <>
@@ -253,34 +271,48 @@ export default function CommentsClient({
           </DropdownMenu>
         )}
 
-        <Button
-          size="sm"
-          variant={!unhandledOnly ? 'default' : 'outline'}
-          onClick={() => setUnhandledOnly(false)}
-        >
-          ทั้งหมด
-        </Button>
-        <Button
-          size="sm"
-          variant={unhandledOnly ? 'default' : 'outline'}
-          onClick={() => setUnhandledOnly(true)}
-        >
-          ยังไม่จัดการ ({feed.unhandled_count})
-        </Button>
+        <div className="flex items-center rounded-lg border bg-muted/30 p-0.5 text-xs">
+          <button
+            type="button"
+            className={cn(
+              'rounded-md px-3 py-1 text-xs font-medium transition',
+              !unhandledOnly ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => setUnhandledOnly(false)}
+          >
+            ทั้งหมด
+          </button>
+          <button
+            type="button"
+            className={cn(
+              'rounded-md px-3 py-1 text-xs font-medium transition flex items-center gap-1',
+              unhandledOnly ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => setUnhandledOnly(true)}
+          >
+            <span>ยังไม่จัดการ</span>
+            {feed.unhandled_count > 0 && (
+              <span className="rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] px-1.5 py-0.2 font-bold">
+                {feed.unhandled_count}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* ---- ฟีด ---- */}
+      {/* รายการคอมเมนต์ */}
       {visible.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-lg border py-12 text-center">
-          <MessageCircle className="size-8 text-muted-foreground" />
-          <p className="text-sm font-medium">ยังไม่มีคอมเมนต์</p>
-          <p className="max-w-sm text-xs text-muted-foreground">
-            คอมเมนต์จะไหลเข้ามาเองเมื่อมีคนคอมเมนต์ใต้โพสต์ของเพจ —
-            ต้องเปิด webhook field &quot;feed&quot; ในหน้าตั้งค่าแอปของ Meta ก่อน
+        <div className="flex flex-col items-center justify-center gap-2.5 rounded-2xl border border-dashed py-16 text-center bg-card/30">
+          <div className="size-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
+            <MessageCircle className="size-5" />
+          </div>
+          <p className="text-sm font-semibold">ยังไม่มีรายการคอมเมนต์</p>
+          <p className="max-w-md text-xs text-muted-foreground">
+            เมื่อมีลูกค้าคอมเมนต์ใต้โพสต์ของ Facebook หรือ Instagram ระบบจะดึงเข้ามาที่นี่แบบเรียลไทม์
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           {visible.map((c) => (
             <CommentCard
               key={c.id}
@@ -294,14 +326,16 @@ export default function CommentsClient({
       )}
 
       {feed.has_more && (
-        <p className="text-center text-[11px] text-muted-foreground">
-          แสดง {visible.length} รายการล่าสุด — ใช้ตัวกรองด้านบนเพื่อดูเฉพาะที่ต้องการ
+        <p className="text-center text-[11px] text-muted-foreground pt-2">
+          แสดง {visible.length} รายการล่าสุด
         </p>
       )}
     </div>
   );
 }
 
+/* ================================================================== */
+/* คอมโพเนนต์แสดงและตอบคอมเมนต์รายรายการ                               */
 /* ================================================================== */
 
 function CommentCard({
@@ -317,12 +351,23 @@ function CommentCard({
 }) {
   const [mode, setMode] = useState<'none' | 'public' | 'private'>('none');
   const [text, setText] = useState('');
+  const [selectedImage, setSelectedImage] = useState<{ url: string; preview_url: string; id?: string } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [sending, setSending] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const oldForPrivate = tooOldForPrivate(c.commented_at);
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+  };
 
   async function askAi() {
     setAiLoading(true);
@@ -338,7 +383,16 @@ function CommentCard({
       }
       if (json.data?.suggestion) {
         setText(json.data.suggestion);
-        toast.success('AI เสนอคำตอบแล้ว — สามารถปรับแต่งก่อนกดส่งได้ค่ะ');
+        if (textareaRef.current) {
+          setTimeout(() => {
+            if (textareaRef.current) {
+              textareaRef.current.style.height = 'auto';
+              textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 260)}px`;
+              textareaRef.current.focus();
+            }
+          }, 50);
+        }
+        toast.success('AI เสนอคำตอบแล้ว — ปรับแต่งก่อนส่งได้ครับ');
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'เรียก AI ไม่สำเร็จ');
@@ -347,13 +401,45 @@ function CommentCard({
     }
   }
 
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/media-library', {
+        method: 'POST',
+        body: form,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json?.error?.message_th ?? 'อัปโหลดภาพไม่สำเร็จ');
+      const absUrl = toAbsoluteUrl(json.data.url);
+      setSelectedImage({
+        url: absUrl,
+        preview_url: json.data.url,
+        id: json.data.id,
+      });
+      toast.success('แนบรูปภาพเรียบร้อย');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'อัปโหลดภาพไม่สำเร็จ');
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
   async function act(body: Record<string, unknown>) {
     setSending(true);
     setBusy(true);
     try {
+      const payload = { ...body };
+      if (selectedImage?.url) {
+        payload.attachment_url = selectedImage.url;
+      }
       const d = await api<{ ok: boolean; message_th: string; outcome_unknown: boolean; comment: CommentRow }>(
         `/api/comments/${c.id}`,
-        { method: 'POST', body: JSON.stringify(body) },
+        { method: 'POST', body: JSON.stringify(payload) },
       );
       if (!d) return;
       onChanged(d.comment);
@@ -362,8 +448,8 @@ function CommentCard({
         toast.success(d.message_th);
         setMode('none');
         setText('');
+        setSelectedImage(null);
       } else if (d.outcome_unknown) {
-        // ⚠️ ยิงไปแล้วไม่รู้ผล — ห้ามบอกให้กดซ้ำเด็ดขาด
         toast.warning('ไม่ทราบผล', { description: d.message_th, duration: 12_000 });
       } else {
         toast.error(d.message_th, { duration: 8_000 });
@@ -375,66 +461,122 @@ function CommentCard({
   }
 
   return (
-    <div className={cn('flex flex-col gap-2 rounded-md border p-3', (c.is_handled || c.is_deleted) && 'opacity-60')}>
-      <div className="flex items-start gap-2.5">
-        <CustomerAvatar
-          name={c.from_name || c.from_username || 'ลูกค้า'}
-          src={c.from_pic_url}
-          size="sm"
-        />
-        <div className="flex flex-1 flex-col gap-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+    <div
+      className={cn(
+        'flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-xs transition',
+        c.is_handled && 'bg-card/75 border-border/70',
+        c.is_deleted && 'opacity-60',
+      )}
+    >
+      {/* แถวข้อมูลผู้คอมเมนต์ & สถานะ */}
+      <div className="flex items-start justify-between gap-2.5">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="relative shrink-0">
+            <CustomerAvatar
+              name={c.from_name || c.from_username || 'ลูกค้า'}
+              src={c.from_pic_url}
+              size="md"
+            />
             {page && (
-              <span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+              <div className="absolute -bottom-1 -right-1 rounded-full bg-background p-0.5 shadow-xs">
                 <PlatformIcon platform={page.platform} size="xs" />
-                <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
-                <span className="max-w-[120px] truncate">{page.display_name || page.page_name}</span>
-              </span>
+              </div>
             )}
-            <span className="text-sm font-semibold">{c.from_name || c.from_username || 'ไม่ทราบชื่อ'}</span>
-            {c.from_username && c.from_username !== c.from_name && (
-              <span className="text-xs text-muted-foreground font-mono">@{c.from_username}</span>
-            )}
-            <span className="text-[11px] text-muted-foreground">{timeAgo(c.commented_at ?? c.created_at)}</span>
-            {c.matched_keyword && (
-              <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500">
-                {c.matched_keyword}
-              </Badge>
-            )}
-            {c.is_liked && (
-              <Badge variant="secondary" className="text-[10px] text-primary border-primary/20 bg-primary/10 gap-0.5">
-                <ThumbsUp className="size-2.5 fill-current" /> ไลก์แล้ว
-              </Badge>
-            )}
-            {c.is_deleted && <Badge variant="destructive" className="text-[10px]">ลบแล้ว</Badge>}
-            {c.is_handled && <Badge variant="secondary" className="text-[10px]">จัดการแล้ว</Badge>}
-            {c.is_hidden && <Badge variant="secondary" className="text-[10px]">ซ่อนอยู่</Badge>}
-            {c.replied_public && <Badge variant="outline" className="text-[10px]">ตอบใต้โพสต์แล้ว</Badge>}
-            {c.replied_private && <Badge variant="outline" className="text-[10px]">ทักส่วนตัวแล้ว</Badge>}
           </div>
 
-          <p className={cn('whitespace-pre-wrap text-sm', c.is_deleted && 'line-through text-muted-foreground')}>
-            {c.message || '(ไม่มีข้อความ)'}
-          </p>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-sm font-semibold text-foreground truncate">
+                {c.from_name || c.from_username || 'ไม่ทราบชื่อ'}
+              </span>
+              {c.from_username && c.from_username !== c.from_name && (
+                <span className="text-xs text-muted-foreground font-mono">@{c.from_username}</span>
+              )}
+              {page && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                  <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
+                  <span className="max-w-[100px] truncate">{page.display_name || page.page_name}</span>
+                </span>
+              )}
+            </div>
 
-          {c.post_permalink && (
-            <a
-              href={c.post_permalink}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[11px] text-muted-foreground underline"
-            >
-              เปิดโพสต์ต้นทาง
-            </a>
-          )}
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>{timeAgo(c.commented_at ?? c.created_at)}</span>
+              {c.post_permalink && (
+                <>
+                  <span>·</span>
+                  <a
+                    href={c.post_permalink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-primary hover:underline"
+                  >
+                    <span>ดูโพสต์ต้นทาง</span>
+                    <ExternalLink className="size-2.5" />
+                  </a>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
 
-          {c.last_error_th && (
-            <p className="text-[11px] text-destructive">{c.last_error_th}</p>
+        {/* แถบสถานะย่อขวาบน */}
+        <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
+          {c.is_liked && (
+            <Badge variant="secondary" className="text-[10px] text-primary border-primary/20 bg-primary/10 gap-0.5 h-5">
+              <ThumbsUp className="size-2.5 fill-current" /> ไลก์แล้ว
+            </Badge>
           )}
+          {c.replied_public && (
+            <Badge variant="outline" className="text-[10px] border-sky-500/30 text-sky-600 bg-sky-50 dark:bg-sky-950/30 gap-1 h-5">
+              <MessageSquare className="size-2.5" /> ตอบแล้ว
+            </Badge>
+          )}
+          {c.replied_private && (
+            <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-600 bg-purple-50 dark:bg-purple-950/30 gap-1 h-5">
+              <Send className="size-2.5" /> ทักส่วนตัวแล้ว
+            </Badge>
+          )}
+          {c.is_handled && (
+            <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20 gap-0.5 h-5">
+              <Check className="size-2.5" /> จัดการแล้ว
+            </Badge>
+          )}
+          {c.is_hidden && <Badge variant="secondary" className="text-[10px] h-5">ซ่อนอยู่</Badge>}
+          {c.is_deleted && <Badge variant="destructive" className="text-[10px] h-5">ลบแล้ว</Badge>}
         </div>
       </div>
 
-      {/* ---- Dialog ยืนยันการลบ ---- */}
+      {/* เนื้อหาคอมเมนต์ */}
+      <div className="flex flex-col gap-1.5">
+        <div className="rounded-xl bg-muted/40 border border-border/40 p-3 text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+          <p className={cn(c.is_deleted && 'line-through text-muted-foreground')}>
+            {c.message || '(ไม่มีข้อความ)'}
+          </p>
+        </div>
+
+        {c.matched_keyword && (
+          <div className="flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+            <span>ตรงคีย์เวิร์ด:</span>
+            <Badge className="bg-amber-500 text-[10px] text-white hover:bg-amber-500 h-4.5">
+              {c.matched_keyword}
+            </Badge>
+          </div>
+        )}
+
+        {/* กล่องแจ้งเตือนข้อผิดพลาด (ถ้ามี) */}
+        {c.last_error_th && (
+          <div className="rounded-xl border border-red-200/80 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/30 p-2.5 text-xs text-red-700 dark:text-red-300 flex items-start gap-2">
+            <AlertTriangle className="size-4 shrink-0 mt-0.5 text-red-500" />
+            <div className="flex flex-col gap-0.5">
+              <span className="font-semibold text-red-800 dark:text-red-200">ข้อผิดพลาดในการดำเนินการ:</span>
+              <span>{c.last_error_th}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Dialog ยืนยันการลบ */}
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>
           <DialogHeader>
@@ -462,121 +604,295 @@ function CommentCard({
         </DialogContent>
       </Dialog>
 
-      {/* ---- ปุ่ม ---- */}
+      {/* Modal เลือกภาพจากคลังสื่อ */}
+      <MediaLibraryPicker
+        open={pickerOpen}
+        kind="image"
+        onClose={() => setPickerOpen(false)}
+        onSelect={(item: LibraryItem) => {
+          const fullUrl = item.public_url ? toAbsoluteUrl(item.public_url) : toAbsoluteUrl(item.preview_url);
+          setSelectedImage({
+            url: fullUrl,
+            preview_url: item.preview_url,
+            id: item.id,
+          });
+          toast.success('เลือกภาพจากคลังสื่อแล้ว');
+        }}
+      />
+
+      {/* แถบปุ่มจัดการ (เมื่อไม่ได้เปิดฟอร์มตอบ) */}
       {mode === 'none' && (
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          {!c.is_deleted && (
-            <Button size="sm" variant="outline" onClick={() => { setMode('public'); setTimeout(() => inputRef.current?.focus(), 0); }}>
-              <MessageSquare className="size-3.5" />
-              ตอบใต้โพสต์
-            </Button>
-          )}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2.5">
+          {/* แถบปุ่มหลัก (ตอบกลับ / ทักแชท / ไลก์) */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!c.is_deleted && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-xs font-medium rounded-lg hover:border-primary/50"
+                onClick={() => {
+                  setMode('public');
+                  setTimeout(() => textareaRef.current?.focus(), 50);
+                }}
+              >
+                <MessageSquare className="size-3.5 text-sky-500" />
+                ตอบใต้โพสต์
+              </Button>
+            )}
 
-          {/* ⭐ ทักส่วนตัวได้ครั้งเดียวเท่านั้น — หายไปเลยเมื่อใช้แล้ว */}
-          {!c.replied_private && !oldForPrivate && !c.is_deleted && (
-            <Button size="sm" variant="outline" onClick={() => { setMode('private'); setTimeout(() => inputRef.current?.focus(), 0); }}>
-              <Send className="size-3.5" />
-              ทักส่วนตัว
-            </Button>
-          )}
-          {!c.replied_private && oldForPrivate && !c.is_deleted && (
-            <span className="self-center text-[11px] text-muted-foreground">
-              เกิน 7 วัน — ทักส่วนตัวไม่ได้แล้ว
-            </span>
-          )}
+            {!c.replied_private && !oldForPrivate && !c.is_deleted && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-xs font-medium rounded-lg text-purple-700 border-purple-200 hover:bg-purple-50 dark:border-purple-900/50 dark:text-purple-400 dark:hover:bg-purple-950/30"
+                onClick={() => {
+                  setMode('private');
+                  setTimeout(() => textareaRef.current?.focus(), 50);
+                }}
+              >
+                <Send className="size-3.5" />
+                ทักส่วนตัว
+              </Button>
+            )}
 
-          {/* ไลก์ / ยกเลิกไลก์ */}
-          {!c.is_deleted && (
+            {!c.replied_private && oldForPrivate && !c.is_deleted && (
+              <span className="text-[11px] text-muted-foreground px-2 py-1 bg-muted/40 rounded-md">
+                เกิน 7 วัน (ทักส่วนตัวไม่ได้แล้ว)
+              </span>
+            )}
+
+            {!c.is_deleted && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={sending}
+                onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
+                className={cn('h-8 gap-1.5 text-xs rounded-lg', c.is_liked && 'text-primary font-semibold')}
+              >
+                <ThumbsUp className={cn('size-3.5', c.is_liked && 'fill-current text-primary')} />
+                {c.is_liked ? 'เลิกถูกใจ' : 'ถูกใจ'}
+              </Button>
+            )}
+          </div>
+
+          {/* ปุ่มจัดการเสริม (ซ่อน, จัดการแล้ว, ลบ, ไปที่แชท) */}
+          <div className="flex items-center gap-1">
             <Button
               size="sm"
               variant="ghost"
               disabled={sending}
-              onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
-              className={c.is_liked ? 'text-primary hover:text-primary font-medium' : ''}
+              onClick={() => void act({ action: 'handled', handled: !c.is_handled })}
+              className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground rounded-lg"
+              title={c.is_handled ? 'กดเพื่อทำเครื่องหมายว่ายังไม่จัดการ' : 'กดเมื่อจัดการเสร็จแล้ว'}
             >
-              <ThumbsUp className={cn('size-3.5', c.is_liked && 'fill-current')} />
-              {c.is_liked ? 'เลิกถูกใจ' : 'ถูกใจ'}
+              <Check className={cn('size-3.5', c.is_handled && 'text-emerald-600 font-bold')} />
+              <span>{c.is_handled ? 'จัดการแล้ว' : 'ยังไม่จัดการ'}</span>
             </Button>
-          )}
 
-          {!c.is_deleted && (
-            <Button size="sm" variant="ghost" disabled={sending} onClick={() => void act({ action: 'hide', hidden: !c.is_hidden })}>
-              {c.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-              {c.is_hidden ? 'เลิกซ่อน' : 'ซ่อน'}
-            </Button>
-          )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground">
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40 text-xs">
+                {!c.is_deleted && (
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-2"
+                    onClick={() => void act({ action: 'hide', hidden: !c.is_hidden })}
+                  >
+                    {c.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                    <span>{c.is_hidden ? 'เลิกซ่อนคอมเมนต์' : 'ซ่อนคอมเมนต์'}</span>
+                  </DropdownMenuItem>
+                )}
 
-          <Button size="sm" variant="ghost" disabled={sending} onClick={() => void act({ action: 'handled', handled: !c.is_handled })}>
-            <Check className="size-3.5" />
-            {c.is_handled ? 'ยังไม่จัดการ' : 'จัดการแล้ว'}
-          </Button>
+                {c.conversation_id && (
+                  <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                    <Link href={`/inbox?c=${c.conversation_id}`}>
+                      <MessageCircle className="size-3.5" />
+                      <span>เปิดห้องแชท</span>
+                    </Link>
+                  </DropdownMenuItem>
+                )}
 
-          {!c.is_deleted && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={sending}
-              onClick={() => setConfirmDelete(true)}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 className="size-3.5" />
-              ลบ
-            </Button>
-          )}
-
-          {c.conversation_id && (
-            <Button size="sm" variant="ghost" asChild>
-              <Link href={`/inbox?c=${c.conversation_id}`}>ไปที่แชท</Link>
-            </Button>
-          )}
+                {!c.is_deleted && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="cursor-pointer gap-2 text-destructive focus:text-destructive"
+                      onClick={() => setConfirmDelete(true)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      <span>ลบคอมเมนต์</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       )}
 
+      {/* ฟอร์มตอบกลับ (Public หรือ Private) */}
       {mode !== 'none' && (
-        <div className="mt-1 flex flex-col gap-1.5 border-t pt-2">
-          <div className="flex flex-wrap items-center justify-between gap-1">
-            <p className="text-[11px] text-muted-foreground">
-              {mode === 'public'
-                ? '⚠️ ตอบใต้โพสต์ = ทุกคนเห็น อย่าพิมพ์ข้อมูลส่วนตัวของลูกค้าลงไป'
-                : '⚠️ ทักส่วนตัวได้ครั้งเดียวต่อคอมเมนต์ ตรวจข้อความให้ดีก่อนส่ง'}
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={aiLoading || sending}
-              onClick={() => void askAi()}
-              className="h-6 gap-1 px-2 text-[11px] text-primary border-primary/30 hover:bg-primary/5"
-            >
-              {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3 text-amber-500" />}
-              <span>{aiLoading ? 'กำลังคิดคำตอบ...' : 'ให้ AI ช่วยคิด'}</span>
-            </Button>
+        <div className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/[0.02] p-3.5">
+          {/* ส่วนหัวกล่องตอบกลับ */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                {mode === 'public' ? (
+                  <>
+                    <MessageSquare className="size-3.5 text-sky-500" />
+                    ตอบกลับใต้โพสต์ (สาธารณะ)
+                  </>
+                ) : (
+                  <>
+                    <Send className="size-3.5 text-purple-600" />
+                    ทักแชทส่วนตัว (Messenger / IG DM)
+                  </>
+                )}
+              </span>
+              <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                {mode === 'public'
+                  ? '· ทุกคนบนโซเชียลจะเห็นข้อความนี้'
+                  : '· ส่งได้ 1 ครั้งต่อคอมเมนต์ (กฎ 7 วันของ Meta)'}
+              </span>
+            </div>
+
+            {/* เครื่องมือช่วยคิด/แนบสื่อ */}
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={aiLoading || sending}
+                onClick={() => void askAi()}
+                className="h-7 gap-1 px-2.5 text-xs text-primary border-primary/30 hover:bg-primary/10 rounded-lg"
+              >
+                {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3 text-amber-500" />}
+                <span>{aiLoading ? 'AI กำลังคิด...' : 'ให้ AI ช่วยคิด'}</span>
+              </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={sending || uploadingImage}
+                onClick={() => setPickerOpen(true)}
+                className="h-7 gap-1 px-2.5 text-xs rounded-lg text-muted-foreground hover:text-foreground"
+                title="เลือกรูปจากคลังสื่อ"
+              >
+                <ImageIcon className="size-3" />
+                <span className="hidden sm:inline">คลังสื่อ</span>
+              </Button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void handleFileUpload(e)}
+              />
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={sending || uploadingImage}
+                onClick={() => fileInputRef.current?.click()}
+                className="h-7 gap-1 px-2.5 text-xs rounded-lg text-muted-foreground hover:text-foreground"
+                title="อัปโหลดรูปจากอุปกรณ์"
+              >
+                {uploadingImage ? <Loader2 className="size-3 animate-spin" /> : <Paperclip className="size-3" />}
+                <span className="hidden sm:inline">แนบรูป</span>
+              </Button>
+            </div>
           </div>
-          <div className="flex items-end gap-2">
-            <Input
-              ref={inputRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={mode === 'public' ? 'ตอบใต้โพสต์…' : 'ข้อความส่วนตัว…'}
-              disabled={sending || aiLoading}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
-                  e.preventDefault();
+
+          {/* พรีวิวรูปภาพที่แนบ (ถ้ามี) */}
+          {selectedImage && (
+            <div className="flex items-center gap-2.5 rounded-lg border bg-background p-2 w-fit">
+              <div className="relative size-12 rounded-md overflow-hidden bg-muted border">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={selectedImage.preview_url} alt="แนบรูป" className="size-full object-cover" />
+              </div>
+              <div className="flex flex-col gap-0.5 text-xs pr-2">
+                <span className="font-medium text-foreground">แนบรูปภาพแล้ว</span>
+                <span className="text-[10px] text-muted-foreground truncate max-w-[180px]">
+                  จะถูกส่งไปพร้อมกับข้อความตอบกลับ
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedImage(null)}
+                className="size-5 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 transition"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          )}
+
+          {/* กล่องพิมพ์ข้อความหลายบรรทัด (Textarea ขยายได้) */}
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={handleTextChange}
+            placeholder={
+              mode === 'public'
+                ? 'พิมพ์ข้อความตอบกลับใต้คอมเมนต์... (เช่น ขอบคุณที่สนใจครับ สินค้าพร้อมส่งนะคะ)'
+                : 'พิมพ์ข้อความทักส่วนตัวเข้า Messenger / IG... (เช่น สวัสดีค่ะ แอดมินทักมาให้ข้อมูลโปรโมชั่นเพิ่มเติมนะคะ)'
+            }
+            disabled={sending || aiLoading}
+            rows={3}
+            className="w-full min-h-[84px] max-h-[260px] resize-y rounded-xl border bg-background p-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/20 transition placeholder:text-muted-foreground/60"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                if (text.trim() || selectedImage) {
                   void act({ action: mode === 'public' ? 'reply_public' : 'reply_private', text: text.trim() });
                 }
-              }}
-            />
-            <Button
-              size="sm"
-              disabled={sending || aiLoading || text.trim() === ''}
-              onClick={() => void act({ action: mode === 'public' ? 'reply_public' : 'reply_private', text: text.trim() })}
-            >
-              {sending ? <Loader2 className="animate-spin" /> : <Send />}
-              ส่ง
-            </Button>
-            <Button size="sm" variant="ghost" disabled={sending || aiLoading} onClick={() => { setMode('none'); setText(''); }}>
-              ยกเลิก
-            </Button>
+              }
+            }}
+          />
+
+          {/* แถบล่างของกล่องตอบกลับ */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-[11px] text-muted-foreground">
+              กด <kbd className="px-1 py-0.5 bg-muted rounded text-[10px] font-mono border">Ctrl</kbd> + <kbd className="px-1 py-0.5 bg-muted rounded text-[10px] font-mono border">Enter</kbd> หรือกดปุ่มส่ง
+            </span>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={sending || aiLoading}
+                onClick={() => {
+                  setMode('none');
+                  setText('');
+                  setSelectedImage(null);
+                }}
+                className="h-8 text-xs rounded-lg"
+              >
+                ยกเลิก
+              </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                disabled={sending || aiLoading || (!text.trim() && !selectedImage)}
+                onClick={() =>
+                  void act({
+                    action: mode === 'public' ? 'reply_public' : 'reply_private',
+                    text: text.trim(),
+                  })
+                }
+                className="h-8 gap-1.5 text-xs font-semibold px-4 rounded-lg shadow-xs"
+              >
+                {sending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                <span>{sending ? 'กำลังส่ง...' : mode === 'public' ? 'ส่งตอบใต้โพสต์' : 'ส่งทักส่วนตัว'}</span>
+              </Button>
+            </div>
           </div>
         </div>
       )}
