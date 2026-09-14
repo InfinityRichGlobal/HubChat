@@ -24,9 +24,10 @@ export async function GET(req: NextRequest) {
 
     try {
       const { processWebhookBatch } = await import('@/server/ingest/processor');
-      await processWebhookBatch(5);
       const { syncPageCommentsThrottled } = await import('@/server/comments/sync');
-      await syncPageCommentsThrottled(15_000);
+      // fire-and-forget: ไม่ให้ sync ทำให้ response ช้า
+      void processWebhookBatch(5).catch(() => {});
+      void syncPageCommentsThrottled(15_000).catch(() => {});
     } catch {
       // ไม่ให้กระทบการดึงรายการแชท
     }
