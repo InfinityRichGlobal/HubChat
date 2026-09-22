@@ -11,15 +11,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, verifySession } from '@/lib/auth/session';
 
-/** หน้าที่เข้าได้โดยไม่ต้อง login */
-const PUBLIC_PATHS = ['/login'];
+/** หน้า auth ที่ถ้า login แล้วจะพาไป /inbox */
+const AUTH_PATHS = ['/login'];
 
-/** เส้นทางที่ปล่อยผ่านเสมอ (ไฟล์ static, health check, webhook ของ Meta) */
+/** หน้าสาธารณะที่เข้าได้เสมอ ไม่ว่าจะ login หรือไม่ */
+const PUBLIC_PATHS = ['/privacy', '/terms'];
+
+/** เส้นทางที่ปล่อยผ่านเสมอ (ไฟล์ static, health check, webhook ของ Meta, data deletion callback) */
 function isBypassed(pathname: string): boolean {
   return (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/health') ||
     pathname.startsWith('/api/webhooks') || // Meta ยิงเข้ามาโดยไม่มี cookie
+    pathname.startsWith('/api/meta/data-deletion') || // Meta data deletion callback
     pathname === '/api/notify/flush' || // ตรวจสอบ CRON_SECRET / session เองข้างใน
     pathname === '/api/ingest/process' || // ตรวจสอบ CRON_SECRET / permission เองข้างใน
     pathname === '/favicon.ico' ||
@@ -44,12 +48,15 @@ export async function proxy(req: NextRequest) {
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token, secret) : null;
+  const isAuth = AUTH_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const isApi = pathname.startsWith('/api');
 
   // --- ยังไม่ได้ login -----------------------------------------------------
   if (!session) {
-    if (isPublic || pathname.startsWith('/api/auth/login') || pathname.startsWith('/api/auth/logout')) return NextResponse.next();
+    if (isPublic || isAuth || pathname.startsWith('/api/auth/login') || pathname.startsWith('/api/auth/logout')) {
+      return NextResponse.next();
+    }
     if (isApi) {
       return NextResponse.json(
         { ok: false, error: { code: 'no_session', message_th: 'กรุณาเข้าสู่ระบบ' } },
@@ -82,7 +89,7 @@ export async function proxy(req: NextRequest) {
   // --- login แล้ว แต่ยังอยู่หน้า login → พาเข้าระบบเลย ---------------------
   // ⚠️ ยกเว้น: ถ้ามี ?reason=... แปลว่าฝั่ง Server (AppLayout) ตรวจ DB แล้วพบว่า
   //    session ไม่ valid → ต้องลบ cookie ทิ้งแล้วให้ล็อกอินใหม่ ไม่ใช่เด้งกลับ /inbox
-  if (isPublic) {
+  if (isAuth) {
     const hasAuthError = req.nextUrl.searchParams.has('reason');
     if (hasAuthError) {
       const res = NextResponse.next();
