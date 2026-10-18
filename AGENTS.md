@@ -34,7 +34,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
    - Remote: `https://github.com/InfinityRichGlobal/HubChat.git` (กิ่งหลัก: `main`)
 3. **Production (Vercel):**
    - URL หลัก: `https://hubchat-omega.vercel.app`
-   - Cron Job ตั้งไว้ใน `vercel.json` (`/api/notify/flush`)
+   - Cron งานกู้คิว/แจ้งเตือนตั้งบน Supabase (`pg_cron` + `pg_net` + Vault) ตาม `docs/RUNTIME_OPERATIONS_TH.md`; `vercel.json` ไม่ตั้ง cron ซ้ำ
 4. **Meta Webhook & Public Compliance Endpoints:**
    - Webhook รับข้อมูลแชท/คอมเมนต์: `/api/webhooks/meta`
    - Data Deletion Callback (Meta บังคับ): `/api/webhooks/meta/data-deletion` และหน้าตรวจสอบสถานะ `/api/compliance/data-deletion-status`

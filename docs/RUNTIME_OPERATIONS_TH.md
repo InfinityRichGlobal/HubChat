@@ -4,11 +4,11 @@
 
 ## งานเบื้องหลังบน Production
 
-ระบบรับ webhook แล้วแยกเป็นงานละเหตุการณ์ บันทึกครบก่อนตอบ Meta และประมวลผลหลังตอบ HTTP ตัวกู้คิวบน Supabase เรียก `/api/ingest/process` ทุกนาที ส่วน `/api/notify/flush` ทำงานทุก 5 นาที ไม่ต้องเปิดเครื่องผู้พัฒนาค้างไว้ Vercel cron เดิมเป็นทางสำรอง
+ระบบรับ webhook แล้วแยกเป็นงานละเหตุการณ์ บันทึกครบก่อนตอบ Meta และประมวลผลหลังตอบ HTTP ตัวกู้คิวบน Supabase เรียก `/api/ingest/process` ทุกนาที ส่วน `/api/notify/flush` ทำงานทุก 5 นาที ไม่ต้องเปิดเครื่องผู้พัฒนาค้างไว้ ยกเลิก Vercel cron รายวันเดิมเพื่อไม่ให้ซ้อนกับตารางนี้หรือใช้ token เก่าจาก deployment
 
 - Migration: `20261019_runtime_reliability.sql`, `20261019_worker_schedule.sql`
 - ต้องมี `pg_cron`, `pg_net`, `supabase_vault` บน Supabase
-- ตั้งครั้งแรกผ่าน RPC `configure_worker_schedule(p_app_url,p_token)` ด้วย service role จากสคริปต์ที่อ่าน `CRON_SECRET` ในหน่วยความจำ ห้ามใส่ค่าจริงใน SQL Editor, Git, เอกสาร หรือข้อความแชท
+- ตั้งครั้งแรกหรือเมื่อเปลี่ยนคีย์ผ่าน Settings → “เชื่อมตารางเวลาอัตโนมัติ” บนโดเมน production เซิร์ฟเวอร์อ่าน `CRON_SECRET` ของ deployment แล้วบันทึกใน Vault ผ่าน RPC `configure_worker_schedule(p_app_url,p_token)` ไม่ส่งคีย์กลับ browser และไม่ใช้คีย์ของเครื่อง local ซึ่งอาจต่างกัน ห้ามใส่ค่าจริงใน SQL Editor, Git, เอกสาร หรือข้อความแชท
 - ปลายทางใช้ HTTPS origin ของ deployment จริง Token ต้องตรงกับค่าที่ API ใช้ เมื่อเปลี่ยน token หรือโดเมน ให้เรียกตั้งค่าใหม่
 - Token เก็บใน Vault ชื่อ `hubchat_worker_token`; URL ชื่อ `hubchat_worker_url` ตาราง `cron.job` มีเพียงคำสั่งเรียกฟังก์ชัน
 - `worker_schedule_status()` คืนชื่อ/ตารางเวลา/สถานะ ไม่มีความลับ
