@@ -19,7 +19,7 @@ import type { DashboardData, RangeKey } from '@/server/dashboard/service';
  *    ถ้าหน้าเว็บคำนวณเอง จะมีวันที่ตัวเลขบนจอกับในรายงานไม่ตรงกัน
  *
  * ⭐ ตารางที่มีค่าที่สุดคือ "แยกตามแอด" — เอาไปเทียบกับค่าแอดที่จ่ายจริง
- *    แล้วรู้ว่าแอดตัวไหนกำไร ตัวไหนควรปิด
+ *    ใช้ดูรายได้จากแต่ละแอด โดยยังไม่ใช่กำไรสุทธิ
  */
 
 const baht = (n: number) =>
@@ -166,7 +166,7 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
               แยกตามแอด
             </CardTitle>
             <CardDescription>
-              เอาช่อง &quot;ยอดขาย&quot; ไปเทียบกับค่าแอดที่จ่ายจริง = รู้ว่าแอดไหนกำไร
+              เปรียบเทียบยอดขายจากแต่ละโฆษณา · ยังไม่หักค่าโฆษณา ต้นทุนสินค้า และค่าจัดส่ง
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -174,7 +174,7 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
               <p className="py-6 text-center text-xs text-muted-foreground">
                 ยังไม่มีแชทที่มาจากแอดในช่วงนี้
                 <span className="mt-1 block">
-                  (ต้องตั้งค่า Ice Breakers / ref ในแอดก่อน ระบบถึงจะรู้ว่าลูกค้ามาจากแอดไหน)
+                  ระบบจะแสดงเมื่อแชทที่เข้ามามีข้อมูลระบุโฆษณาต้นทาง
                 </span>
               </p>
             ) : (

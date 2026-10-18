@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Search, ShoppingBag, UserRound, Filter } from 'lucide-react';
+import { Search, ShoppingBag, UserRound } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { canSeePage } from '@/lib/auth/permissions';
 import { db } from '@/lib/supabase/admin';
@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import CustomerAvatar from '@/components/customer-avatar';
-import PlatformIcon from '@/components/platform-icon';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,16 +63,16 @@ export default async function CustomersPage({
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold">ข้อมูลลูกค้า (Customer CRM)</h1>
+        <h1 className="text-2xl font-bold tracking-tight">ลูกค้า</h1>
         <p className="text-sm text-muted-foreground">บันทึกรายชื่อ ที่อยู่ และประวัติการสรุปยอดคำสั่งซื้อของลูกค้า</p>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <form className="flex flex-1 gap-2">
+      <div className="flex flex-col gap-3">
+        <form className="flex w-full max-w-2xl gap-2">
           <input type="hidden" name="filter" value={filter} />
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input name="q" defaultValue={q} className="pl-9" placeholder="ค้นหาชื่อ, ผู้รับ, เบอร์โทร..." />
+            <Input aria-label="ค้นหาลูกค้าจากชื่อ ผู้รับ หรือเบอร์โทร" name="q" defaultValue={q} className="pl-9" placeholder="ค้นหาชื่อ, ผู้รับ, เบอร์โทร..." />
           </div>
           <Button type="submit">ค้นหา</Button>
         </form>
@@ -123,6 +122,7 @@ export default async function CustomersPage({
         </div>
       </div>
 
+      <p className="text-xs text-muted-foreground">แสดง {customers.length} รายการ{customers.length === 200 ? 'ล่าสุด · จำกัด 200 รายการ ใช้คำค้นหาเพื่อเจาะจงลูกค้า' : ''}</p>
       <div className="grid gap-2 md:grid-cols-2">
         {customers.map((customer) => {
           const conversationId = conversationByCustomer.get(customer.id);
@@ -177,4 +177,3 @@ export default async function CustomersPage({
     </div>
   );
 }
-

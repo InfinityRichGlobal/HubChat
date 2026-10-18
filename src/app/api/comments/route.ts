@@ -5,7 +5,7 @@
 import { NextRequest } from 'next/server';
 import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, toErrorResponse } from '@/lib/api';
-import { listComments, getFilterWords } from '@/server/comments/service';
+import { listComments, getFilterWords, commentFiltersSchema } from '@/server/comments/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,13 +16,16 @@ export async function GET(req: NextRequest) {
 
     const sp = req.nextUrl.searchParams;
 
-    const result = await listComments(admin, {
+    const result = await listComments(admin, commentFiltersSchema.parse({
       unhandled_only: sp.get('unhandled') === '1',
       keyword_only: sp.get('keyword') === '1',
       page_id: sp.get('page_id') ?? undefined,
       before: sp.get('before'),
+      cursor: sp.get('cursor'),
+      status: sp.get('status') ?? undefined,
+      search: sp.get('q') ?? undefined,
       limit: sp.get('limit') ? Number(sp.get('limit')) : undefined,
-    });
+    }));
 
     return ok({ ...result, filter_words: await getFilterWords() });
   } catch (err) {

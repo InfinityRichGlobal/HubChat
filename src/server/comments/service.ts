@@ -7,6 +7,7 @@ import 'server-only';
  *    ไฟล์นี้จึงไม่มีฟังก์ชันไหนที่ถูกเรียกจากสายรับข้อมูลอัตโนมัติเลย
  *    (มีแต่ saveIncomingComment ที่ "บันทึก" เฉย ๆ ไม่ตอบอะไร)
  */
+import { z } from 'zod';
 import { db } from '@/lib/supabase/admin';
 import { canSeePage } from '@/lib/auth/permissions';
 import type { PublicAdmin } from '@/types/db';
@@ -169,16 +170,25 @@ export type CommentRow = {
 
 const COLUMNS = COMMENT_SELECTS.comments;
 
-export type CommentFilters = {
-  /** เฉพาะที่ยังไม่จัดการ */
-  unhandled_only?: boolean;
-  /** เฉพาะที่เข้าคำกรอง */
-  keyword_only?: boolean;
-  page_id?: string;
-  limit?: number;
-  /** cursor — เวลาของคอมเมนต์ที่เก่าที่สุดที่หน้าเว็บถืออยู่ */
-  before?: string | null;
+export const commentFiltersSchema = z.object({
+  unhandled_only: z.boolean().optional(),
+  keyword_only: z.boolean().optional(),
+  page_id: z.string().uuid().optional(),
+  limit: z.number().int().min(1).max(200).default(30),
+  before: z.string().datetime({ offset: true }).nullish(),
+  cursor: z.string().max(500).nullish(),
+  status: z.enum(['all', 'pending', 'review', 'handled', 'deleted']).default('all'),
+  search: z.string().trim().max(200).default(''),
+});
+export type CommentFilters = z.input<typeof commentFiltersSchema>;
+export type CommentFeed = {
+  comments: CommentRow[];
+  has_more: boolean;
+  next_cursor: string | null;
+  unhandled_count: number;
+  review_count: number;
 };
+const cursorSchema = z.object({ at: z.string().datetime({ offset: true }).nullable(), id: z.string().uuid() });
 
 async function visiblePageIds(admin: PublicAdmin): Promise<string[]> {
   const { data, error } = await db().from('pages').select('id');
@@ -188,76 +198,58 @@ async function visiblePageIds(admin: PublicAdmin): Promise<string[]> {
     .filter((id) => canSeePage(admin.role, admin.allowed_page_ids, id));
 }
 
-export async function listComments(
-  admin: PublicAdmin,
-  filters: CommentFilters = {},
-): Promise<{ comments: CommentRow[]; has_more: boolean; unhandled_count: number }> {
-  const pageIds = await visiblePageIds(admin);
-  if (pageIds.length === 0) return { comments: [], has_more: false, unhandled_count: 0 };
-
-  const scoped =
-    filters.page_id && pageIds.includes(filters.page_id) ? [filters.page_id] : pageIds;
-
-  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
-
-  let query = db()
-    .from('comments')
-    .select(COLUMNS)
-    .in('page_id', scoped)
-    // คอมเมนต์ของเพจเราเองไม่ต้องอยู่ในฟีดให้รก
-    .eq('is_from_page', false)
-    .order('commented_at', { ascending: false })
-    // ⭐ ตัวตัดสินตอนเวลาเท่ากัน — คอมเมนต์รัว ๆ มีเวลาซ้ำกันได้ (บทเรียน D-61)
-    .order('id', { ascending: false })
-    .limit(limit);
-
-  if (filters.unhandled_only) query = query.eq('is_handled', false);
-  if (filters.keyword_only) query = query.not('matched_keyword', 'is', null);
-  // ⭐ ใช้ lte ไม่ใช่ lt — เวลาซ้ำกันได้ หน้าเว็บกรองตัวซ้ำที่ขอบทิ้งเอง
-  if (filters.before) query = query.lte('commented_at', filters.before);
-
-  const { data, error } = await query;
-  let rows: CommentRow[] = [];
-
-  if (error && error.message.includes('from_username')) {
-    // Fallback สำหรับ database ที่ยังไม่ได้รัน migration 20260913_instagram_comments.sql
-    let fallbackQuery = db()
-      .from('comments')
-      .select(COMMENT_SELECTS.legacy_comments)
-      .in('page_id', scoped)
-      .eq('is_from_page', false)
-      .order('commented_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(limit);
-
-    if (filters.unhandled_only) fallbackQuery = fallbackQuery.eq('is_handled', false);
-    if (filters.keyword_only) fallbackQuery = fallbackQuery.not('matched_keyword', 'is', null);
-    if (filters.before) fallbackQuery = fallbackQuery.lte('commented_at', filters.before);
-
-    const fallbackRes = await fallbackQuery;
-    if (fallbackRes.error) throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${fallbackRes.error.message}`);
-    rows = (fallbackRes.data as Array<Omit<CommentRow, 'from_username' | 'from_pic_url' | 'is_liked' | 'is_deleted'>> ?? []).map((r) => ({
-      ...r,
-      from_username: null,
-      from_pic_url: null,
-      is_liked: false,
-      is_deleted: false,
-    })) as CommentRow[];
-  } else if (error) {
-    throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${error.message}`);
-  } else {
-    rows = (data ?? []) as CommentRow[];
+export async function listComments(admin: PublicAdmin, input: CommentFilters = {}): Promise<CommentFeed> {
+  const filters = commentFiltersSchema.parse(input);
+  let cursor: z.infer<typeof cursorSchema> | null = null;
+  if (filters.cursor) {
+    let decoded: unknown;
+    try { decoded = JSON.parse(Buffer.from(filters.cursor, 'base64url').toString()); } catch { decoded = null; }
+    cursor = cursorSchema.parse(decoded);
   }
+  const pageIds = await visiblePageIds(admin);
+  const scoped = filters.page_id ? pageIds.filter((id) => id === filters.page_id) : pageIds;
+  if (!scoped.length) return { comments: [], has_more: false, next_cursor: null, unhandled_count: 0, review_count: 0 };
 
-  const { count, error: countError } = await db()
-    .from('comments')
-    .select('id', { count: 'exact', head: true })
-    .in('page_id', scoped)
-    .eq('is_from_page', false)
-    .eq('is_handled', false);
-
-  if (countError) throw new CommentError(`นับคอมเมนต์ค้างไม่สำเร็จ: ${countError.message}`);
-  return { comments: rows, has_more: rows.length === limit, unhandled_count: count ?? 0 };
+  const queryFor = (columns: string) => {
+    let query = db().from('comments').select(columns).in('page_id', scoped).eq('is_from_page', false)
+      .order('commented_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
+      .limit(filters.limit + 1);
+    if (filters.status === 'deleted') query = query.eq('is_deleted', true);
+    else if (filters.status !== 'all' || filters.unhandled_only) query = query.eq('is_deleted', false);
+    if (filters.status === 'pending') query = query.eq('is_handled', false).is('last_error_th', null);
+    if (filters.status === 'review') query = query.not('last_error_th', 'is', null);
+    if (filters.status === 'handled') query = query.eq('is_handled', true).is('last_error_th', null);
+    if (filters.unhandled_only) query = query.eq('is_handled', false);
+    if (filters.keyword_only) query = query.not('matched_keyword', 'is', null);
+    if (cursor) {
+      if (cursor.at === null) query = query.is('commented_at', null).lt('id', cursor.id);
+      else query = query.or(`commented_at.lt.${cursor.at},and(commented_at.eq.${cursor.at},id.lt.${cursor.id}),commented_at.is.null`);
+    } else if (filters.before) query = query.lt('commented_at', filters.before);
+    if (filters.search) {
+      // Quote PostgREST values, then escape SQL pattern characters for a literal substring search.
+      const literal = filters.search.replace(/[\\%_*]/g, (c) => `\\${c}`);
+      const pattern = JSON.stringify(`%${literal}%`);
+      query = query.or(['message', 'from_name', 'from_username'].map((col) => `${col}.ilike.${pattern}`).join(','));
+    }
+    return query.returns<CommentRow[]>();
+  };
+  // A modern migration is required: do not silently hide schema errors or misreport statuses.
+  const pending = db().from('comments').select('id', { count: 'exact', head: true })
+    .in('page_id', scoped).eq('is_from_page', false).eq('is_deleted', false).eq('is_handled', false).is('last_error_th', null);
+  const review = db().from('comments').select('id', { count: 'exact', head: true })
+    .in('page_id', scoped).eq('is_from_page', false).eq('is_deleted', false).not('last_error_th', 'is', null);
+  const [result, pendingResult, reviewResult] = await Promise.all([queryFor(COLUMNS), pending, review]);
+  if (result.error) throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${result.error.message}`);
+  if (pendingResult.error || reviewResult.error) throw new CommentError('นับสถานะคอมเมนต์ไม่สำเร็จ');
+  const allRows = result.data ?? [];
+  const rows = allRows.slice(0, filters.limit);
+  const hasMore = allRows.length > filters.limit;
+  const last = rows.at(-1);
+  return {
+    comments: rows, has_more: hasMore,
+    next_cursor: hasMore && last ? Buffer.from(JSON.stringify({ at: last.commented_at, id: last.id })).toString('base64url') : null,
+    unhandled_count: pendingResult.count ?? 0, review_count: reviewResult.count ?? 0,
+  };
 }
 
 export async function getComment(admin: PublicAdmin, id: string): Promise<CommentRow> {

@@ -126,7 +126,10 @@ function splitTop(input: string): string[] {
   let depth = 0;
   let quoted = false;
   let cur = '';
+  let escaped = false;
   for (const ch of input) {
+    if (escaped) { cur += ch; escaped = false; continue; }
+    if (quoted && ch === '\\') { cur += ch; escaped = true; continue; }
     if (ch === '"') quoted = !quoted;
     if (!quoted && ch === '(') depth += 1;
     if (!quoted && ch === ')') depth -= 1;
@@ -256,8 +259,8 @@ async function handle(
       const parts = v
         .split(',')
         .map((one) => {
-          const [col, dir] = one.split('.');
-          return `${q(col)} ${dir === 'desc' ? 'desc' : 'asc'}`;
+          const [col, dir, nulls] = one.split('.');
+          return `${q(col)} ${dir === 'desc' ? 'desc' : 'asc'}${nulls === 'nullslast' ? ' nulls last' : nulls === 'nullsfirst' ? ' nulls first' : ''}`;
         })
         .filter(Boolean);
       if (parts.length > 0) order = ` order by ${parts.join(', ')}`;
@@ -267,20 +270,20 @@ async function handle(
     if (k === 'offset') continue;
 
     /* ---- or=(cond,cond) : ใช้ในช่องค้นหาของอินบ็อกซ์ ---- */
-    if (k === 'or') {
-      const parts = splitTop(v.replace(/^\(|\)$/g, ''));
-      const ors: string[] = [];
-      for (const part of parts) {
-        const d = part.indexOf('.');
-        const col = part.slice(0, d);
-        const rest = part.slice(d + 1);
-        const d2 = rest.indexOf('.');
-        const op2 = rest.slice(0, d2);
-        if (!OPS[op2]) continue;
-        params.push(rest.slice(d2 + 1));
-        ors.push(`${q(col)} ${OPS[op2]} $${params.length}`);
-      }
-      if (ors.length > 0) where.push(`(${ors.join(' or ')})`);
+    if (k === 'or' || k === 'and') {
+      const expression = (part: string): string => {
+        const nested = /^(and|or)\((.*)\)$/.exec(part);
+        if (nested) return `(${splitTop(nested[2]).map(expression).join(` ${nested[1]} `)})`;
+        const condition = /^([a-z_]+)\.([a-z]+)\.(.*)$/.exec(part);
+        if (!condition) throw new Error(`Unsupported logical filter: ${part}`);
+        const [, col, op, raw] = condition;
+        if (op === 'is' && raw === 'null') return `${q(col)} is null`;
+        if (!OPS[op]) throw new Error(`Unsupported logical operator: ${op}`);
+        const value = raw.startsWith('"') ? JSON.parse(raw) : raw;
+        params.push(op === 'ilike' || op === 'like' ? value.replace(/\*/g, '%') : value);
+        return `${q(col)} ${OPS[op]} $${params.length}`;
+      };
+      where.push(`(${splitTop(v.slice(1, -1)).map(expression).join(` ${k} `)})`);
       continue;
     }
 

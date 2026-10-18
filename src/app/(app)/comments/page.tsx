@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
 import { can } from '@/lib/auth/permissions';
-import { getFilterWords, listComments, type CommentRow } from '@/server/comments/service';
+import { listComments, type CommentFeed } from '@/server/comments/service';
 import { listPagesFor, type SafePage } from '@/server/pages/service';
 import CommentsClient from './comments-client';
 
@@ -13,24 +13,25 @@ export default async function CommentsPage() {
   if (!result.ok) redirect('/login');
   if (!can(result.admin.role, 'chat.reply')) redirect('/inbox');
 
-  let feed: { comments: CommentRow[]; has_more: boolean; unhandled_count: number } = {
+  let feed: CommentFeed = {
     comments: [],
     has_more: false,
     unhandled_count: 0,
+    review_count: 0,
+    next_cursor: null,
   };
-  let words: string[] = [];
+  let initialError: string | null = null;
   let pages: SafePage[] = [];
 
   try {
-    const [f, w, p] = await Promise.all([
-      listComments(result.admin, {}),
-      getFilterWords(),
+    const [f, p] = await Promise.all([
+      listComments(result.admin, { status: 'pending' }),
       listPagesFor(result.admin),
     ]);
     feed = f;
-    words = w;
     pages = p;
   } catch (err) {
+    initialError = 'โหลดคอมเมนต์ไม่สำเร็จ กรุณาลองใหม่';
     console.error('[CommentsPage] โหลดข้อมูลคอมเมนต์เริ่มต้นไม่สำเร็จ:', err);
     try {
       pages = await listPagesFor(result.admin);
@@ -40,9 +41,9 @@ export default async function CommentsPage() {
   return (
     <CommentsClient
       initial={feed}
-      initialWords={words}
+      initialError={initialError}
       pages={pages}
-      canManageWords={can(result.admin.role, 'content.manage')}
+      canManageBot={can(result.admin.role, 'content.manage')}
     />
   );
 }

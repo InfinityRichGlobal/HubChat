@@ -313,6 +313,61 @@ describe.skipIf(!available)('PostgreSQL จริง — ฟีดคอมเ�
     expect((await listComments(OWNER)).unhandled_count).toBe(1);
   });
 
+  it('paginates equal timestamps and null dates exactly once, with an accurate final page', async () => {
+    for (let i = 0; i < 7; i++) await saveIncomingComment(comment({ comment_id: `page_${i}`, commented_at: '2026-10-18T10:00:00.000Z' }), []);
+    await pool.query("update comments set commented_at = null where comment_id in ('page_5', 'page_6')");
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 4; page++) {
+      const feed = await listComments(OWNER, { limit: 2, cursor });
+      seen.push(...feed.comments.map((c) => c.comment_id));
+      expect(feed.has_more).toBe(page < 3);
+      cursor = feed.next_cursor;
+    }
+    expect(new Set(seen).size).toBe(7);
+    expect(seen).toHaveLength(7);
+    expect(cursor).toBeNull();
+    const exact = await listComments(OWNER, { limit: 7 });
+    expect(exact.has_more).toBe(false);
+  });
+
+  it('combines search, status and cursor without widening the result set', async () => {
+    for (let i = 0; i < 5; i++) await saveIncomingComment(comment({ comment_id: `find_${i}`, message: i === 4 ? 'อื่น' : 'สนใจ, (ราคา) 100%_ "ดี"', commented_at: '2026-10-18T10:00:00.000Z' }), []);
+    await pool.query("update comments set is_handled = true where comment_id = 'find_3'");
+    const first = await listComments(OWNER, { search: ', (ราคา) 100%_ "ดี"', status: 'pending', limit: 2 });
+    const second = await listComments(OWNER, { search: ', (ราคา) 100%_ "ดี"', status: 'pending', limit: 2, cursor: first.next_cursor });
+    expect(first.has_more).toBe(true);
+    expect(second.has_more).toBe(false);
+    expect(new Set([...first.comments, ...second.comments].map((c) => c.comment_id))).toEqual(new Set(['find_0', 'find_1', 'find_2']));
+    expect((await listComments(OWNER, { search: 'not-present' })).comments).toHaveLength(0);
+  });
+
+  it('keeps failed work out of handled and deleted work out of pending counts', async () => {
+    for (const id of ['pending', 'failed', 'handled', 'deleted']) await saveIncomingComment(comment({ comment_id: id }), []);
+    await pool.query("update comments set is_handled = true where comment_id in ('failed', 'handled')");
+    await pool.query("update comments set last_error_th = 'ส่งไม่สำเร็จ' where comment_id = 'failed'");
+    await pool.query("update comments set is_deleted = true where comment_id = 'deleted'");
+    for (const [status, expected] of [['pending', 'pending'], ['review', 'failed'], ['handled', 'handled'], ['deleted', 'deleted']] as const) {
+      const result = await listComments(OWNER, { status });
+      expect(result.comments.map((c) => c.comment_id)).toEqual([expected]);
+      expect(result.unhandled_count).toBe(1);
+      expect(result.review_count).toBe(1);
+    }
+  });
+
+  it('does not silently show all permitted pages when requesting an inaccessible page', async () => {
+    await saveIncomingComment(comment(), []);
+    const result = await listComments(who(ids.admin, 'admin', [ids.page]), { page_id: ids.otherPage });
+    expect(result.comments).toHaveLength(0);
+    expect(result.unhandled_count).toBe(0);
+  });
+
+  it('rejects malformed pagination before querying comments', async () => {
+    await expect(listComments(OWNER, { cursor: 'invalid' })).rejects.toThrow();
+    const cursor = Buffer.from(JSON.stringify({ at: '2026-10-18T00:00:00Z', id: 'bad),id.gt.0' })).toString('base64url');
+    await expect(listComments(OWNER, { cursor })).rejects.toThrow();
+  });
+
   it('🔴 แตะคอมเมนต์ของเพจที่ไม่มีสิทธิ์ไม่ได้', async () => {
     const other = await saveIncomingComment(
       comment({ page_id: ids.otherPage }),

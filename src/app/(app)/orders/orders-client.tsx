@@ -336,13 +336,14 @@ export default function OrdersClient({
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="ค้นหาออเดอร์จากเลขออเดอร์ ชื่อ เบอร์โทร หรือเลขพัสดุ"
             placeholder="เลขออเดอร์ / ชื่อ / เบอร์ / เลขพัสดุ"
             className="pl-8"
           />
         </div>
 
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="กรองสถานะออเดอร์" className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">ทุกสถานะ</SelectItem>
             {(Object.keys(STATUS_LABEL) as OrderStatus[]).map((s) => (
@@ -352,7 +353,7 @@ export default function OrdersClient({
         </Select>
 
         <Select value={payment} onValueChange={setPayment}>
-          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="กรองการชำระเงิน" className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">ทุกการจ่ายเงิน</SelectItem>
             {(Object.keys(PAYMENT_LABEL) as PaymentStatus[]).map((s) => (

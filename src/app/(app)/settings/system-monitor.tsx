@@ -52,7 +52,7 @@ function StatusBadge({ status, score }: { status: DiagnosticItemStatus; score: n
     return (
       <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 gap-1.5 py-0.5 px-2.5">
         <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-        พร้อมทำงานสมบูรณ์ ({score}/100)
+        ผ่านรายการตรวจเบื้องต้น ({score}/100)
       </Badge>
     );
   }
@@ -148,7 +148,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle className="text-base sm:text-lg font-bold">แผงมอนิเตอร์สถานะระบบ & ตรวจสอบแอป</CardTitle>
+                  <CardTitle className="text-base sm:text-lg font-bold">สถานะการตั้งค่าและการเชื่อมต่อ</CardTitle>
                   <StatusBadge status={overallStatus} score={overallScore} />
                 </div>
                 <CardDescription className="text-xs mt-0.5 flex items-center gap-1.5 text-muted-foreground">
@@ -199,6 +199,9 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
 
         {/* Quick Functional Chips (Always Visible) */}
         <CardContent className="px-4 pb-4 pt-0 sm:px-6">
+          <p className="mb-4 rounded-lg border bg-background/60 p-3 text-sm leading-relaxed text-muted-foreground">
+            คะแนนนี้มาจากรายการตรวจการตั้งค่าและการเชื่อมต่อที่ระบบตรวจได้ ยังไม่ยืนยันว่าแชทหรือคอมเมนต์จากลูกค้าจริงเข้าถึงและตอบกลับสำเร็จ ต้องทดสอบรับ–ส่งจริงแยกต่างหาก
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {/* 1. Meta */}
             <div className={cn(
@@ -331,9 +334,9 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
               <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-800 dark:text-emerald-200">
                 <CheckCircle2 className="size-5 text-emerald-600 shrink-0" />
                 <div className="text-xs leading-relaxed">
-                  <span className="font-semibold">ไม่พบข้อผิดพลาดหรือบั๊กจาก Meta ในรอบ 24 ชั่วโมงที่ผ่านมา</span>
+                  <span className="font-semibold">ไม่พบข้อผิดพลาด Meta ที่บันทึกไว้ในรอบ 24 ชั่วโมงที่ผ่านมา</span>
                   <p className="text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
-                    การรับ Webhook ขาเข้า และการส่งข้อความผ่าน Graph API ตอบกลับ 200 OK ปกติ 100%
+                    ไม่พบปัญหาจากรายการตรวจที่มี ขณะนี้ยังไม่ได้ยืนยันการรับ Webhook และการตอบลูกค้าจริงครบวงจรจากหน้านี้
                   </p>
                 </div>
               </div>

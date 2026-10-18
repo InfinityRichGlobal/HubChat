@@ -10,7 +10,8 @@ vi.mock('@/lib/auth/current-admin', async (importOriginal) => ({
   requireAdmin: vi.fn(async () => mocks.admin),
   requirePermission: vi.fn(async () => mocks.admin),
 }));
-vi.mock('@/server/comments/service', () => ({
+vi.mock('@/server/comments/service', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/server/comments/service')>(),
   listComments: mocks.comments, getFilterWords: vi.fn(async () => []),
 }));
 vi.mock('@/server/inbox/service', () => ({ listConversations: mocks.conversations }));
@@ -39,6 +40,11 @@ describe('feed routes do not trigger delivery and imports respect page permissio
     }
     expect(mocks.process).not.toHaveBeenCalled();
     expect(mocks.sync).not.toHaveBeenCalled();
+  });
+
+  it.each(['limit=abc', 'limit=0', 'limit=201', 'page_id=invalid', 'status=wrong', 'before=invalid'])('rejects malformed feed filters: %s', async (query) => {
+    expect((await getComments(new NextRequest(`http://localhost/api/comments?${query}`))).status).toBe(422);
+    expect(mocks.comments).not.toHaveBeenCalled();
   });
 
   const request = (body: unknown) => new NextRequest('http://localhost/api/comments/sync', {
