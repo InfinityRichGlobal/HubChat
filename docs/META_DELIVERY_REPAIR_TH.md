@@ -34,6 +34,17 @@ Migration ลงผ่าน SQL Editor บนโปรเจกต์ Supabase 
 - Instagram เชื่อมกับ Facebook Page ถูกบัญชี แต่ `subscribed_apps` เดิมว่าง จึงเรียก `subscribeInstagramPageWebhooks` ของโปรเจกต์สำเร็จ และอ่านยืนยันว่ามี subscription ของ messages, messaging_postbacks, messaging_seen, message_reactions, messaging_referral, messaging_optins และ comments แล้ว
 - ยังรอทดสอบ DM/คอมเมนต์จากบัญชีจริง และเข้าตรวจ App Mode/สิทธิ์ใน Meta for Developers จึงยังไม่ระบุว่าการรับจากผู้ใช้ทั่วไปผ่าน end-to-end
 
+### ผลทดสอบจากบัญชีจริงเพิ่มเติม
+
+ผู้ใช้ยืนยันว่าส่งแชทและคอมเมนต์ด้วย Facebook ชื่อ Papleng Pimlaphat ไปยัง Blisse Thailand แล้ว:
+
+- Conversations API พบแชทขาเข้าของบัญชีนี้เวลา 22:25:57 น. (Asia/Bangkok) วันที่ 18 ตุลาคม 2026 แต่คิว webhook ไม่มีรายการใหม่หลัง diagnostic #87
+- Vercel Request Logs ช่วง 22:05–22:35 พบ `/api/webhooks/meta` เพียงสองรายการเวลา 22:23:24 (200) และ 22:23:27 (403) ซึ่งเป็นการทดสอบลายเซ็นถูก/ผิดของเราเอง ไม่มีคำขอในช่วงข้อความจริง จึงยังไม่ใช่ปัญหาที่ worker หรือหน้าจอซ่อนข้อมูล
+- เรียก `subscribeFacebookPageWebhooks` ซ้ำสำเร็จและอ่านยืนยัน HubChat app พร้อม fields messages และ feed แล้ว ต้องทดสอบเหตุการณ์ใหม่หลังการเชื่อมซ้ำและตรวจ App Mode/Advanced Access ใน Meta
+- นำเข้าประวัติหน้าแรกด้วย `backfillPageConversations` เพื่อกู้ข้อมูลที่ตกหล่น: 3 ห้อง, 26 ข้อความใหม่, 2 ซ้ำ, ไม่ข้ามรายการ แชท Papleng เวลา 22:25:57 อยู่ใน HubChat แล้ว การนำเข้าครั้งนี้ไม่ส่งข้อความออก
+- Comments API พบคอมเมนต์ใหม่เวลา 22:26:44 น. แต่ไม่ส่ง `from.id` หรือ `from.name` จึงยังยืนยันผู้เขียนจาก API ไม่ได้ นำเข้าคอมเมนต์นี้โดยคงผู้เขียนว่าง ไม่เดาว่าเป็น Papleng; เรียกบันทึกซ้ำแล้วได้ `duplicate: true` และ row id เดิม ไม่มีการเรียกบอทตอบย้อนหลัง
+- ยังติดการเข้าสู่ระบบ Meta for Developers ในเบราว์เซอร์ของงานนี้ เพื่อดูข้อจำกัดการส่ง webhook ฝั่ง Meta; ห้ามสรุปว่า real-time ผ่านแล้วจากผลนำเข้าประวัติ
+
 ## การทดสอบฐานข้อมูลแบบแยกจาก production
 
 ใช้ PostgreSQL เฉพาะทดสอบที่ user มีสิทธิ์สร้าง/ลบฐานข้อมูล ชุดทดสอบจะสร้างใหม่และลบฐานข้อมูลชื่อ `hubchat_pgtest` ทุกชุด ห้ามชี้ไป production
