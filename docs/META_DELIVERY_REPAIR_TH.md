@@ -26,6 +26,14 @@
 
 Migration ลงผ่าน SQL Editor บนโปรเจกต์ Supabase ที่ตรงกับ `.env.local` แล้วในวันที่ 18 ตุลาคม 2026 และ `check-db` ผ่าน ไม่ได้บันทึกประวัติลงตาราง migration ของ Supabase CLI; การรันซ้ำไม่มีผลเสีย
 
+### สถานะหลังนำขึ้นจริง
+
+- โค้ดแก้ไข commit `c0ab12c` ขึ้น `main` และ Vercel Production สำเร็จที่ `https://hubchat-omega.vercel.app` วันที่ 18 ตุลาคม 2026
+- ตรวจ HTTP หลัง deploy: inbox, comments, orders, orders/tracking, dashboard, settings, API รายการแชท/คอมเมนต์, health, privacy และ terms ได้ 200
+- webhook ว่างที่ลงลายเซ็นถูกต้องได้ 200 และคิวหมายเลข 87 เป็น `done` ใน attempt 1 ไม่มี error; ลายเซ็นผิดถูกปฏิเสธ 403 ไม่มีข้อความทดสอบส่งไปหาลูกค้า
+- Instagram เชื่อมกับ Facebook Page ถูกบัญชี แต่ `subscribed_apps` เดิมว่าง จึงเรียก `subscribeInstagramPageWebhooks` ของโปรเจกต์สำเร็จ และอ่านยืนยันว่ามี subscription ของ messages, messaging_postbacks, messaging_seen, message_reactions, messaging_referral, messaging_optins และ comments แล้ว
+- ยังรอทดสอบ DM/คอมเมนต์จากบัญชีจริง และเข้าตรวจ App Mode/สิทธิ์ใน Meta for Developers จึงยังไม่ระบุว่าการรับจากผู้ใช้ทั่วไปผ่าน end-to-end
+
 ## การทดสอบฐานข้อมูลแบบแยกจาก production
 
 ใช้ PostgreSQL เฉพาะทดสอบที่ user มีสิทธิ์สร้าง/ลบฐานข้อมูล ชุดทดสอบจะสร้างใหม่และลบฐานข้อมูลชื่อ `hubchat_pgtest` ทุกชุด ห้ามชี้ไป production
