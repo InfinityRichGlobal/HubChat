@@ -128,7 +128,10 @@ export async function saveIncomingComment(
     | { comment_row_id: string | null; duplicate: boolean }
     | undefined;
 
-  return { id: row?.comment_row_id ?? null, duplicate: Boolean(row?.duplicate), matched };
+  if (!row?.comment_row_id || typeof row.duplicate !== 'boolean') {
+    throw new CommentError('ฐานข้อมูลไม่คืนผลการบันทึกคอมเมนต์ กรุณาตรวจ migration');
+  }
+  return { id: row.comment_row_id, duplicate: row.duplicate, matched };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -213,7 +216,7 @@ export async function listComments(
   // ⭐ ใช้ lte ไม่ใช่ lt — เวลาซ้ำกันได้ หน้าเว็บกรองตัวซ้ำที่ขอบทิ้งเอง
   if (filters.before) query = query.lte('commented_at', filters.before);
 
-  let { data, error } = await query;
+  const { data, error } = await query;
   let rows: CommentRow[] = [];
 
   if (error && error.message.includes('from_username')) {
@@ -233,7 +236,7 @@ export async function listComments(
 
     const fallbackRes = await fallbackQuery;
     if (fallbackRes.error) throw new CommentError(`อ่านฟีดคอมเมนต์ไม่สำเร็จ: ${fallbackRes.error.message}`);
-    rows = (fallbackRes.data ?? []).map((r: any) => ({
+    rows = (fallbackRes.data as Array<Omit<CommentRow, 'from_username' | 'from_pic_url' | 'is_liked' | 'is_deleted'>> ?? []).map((r) => ({
       ...r,
       from_username: null,
       from_pic_url: null,
@@ -258,10 +261,11 @@ export async function listComments(
 }
 
 export async function getComment(admin: PublicAdmin, id: string): Promise<CommentRow> {
-  let { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle();
+  let { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle<CommentRow>();
 
   if (error && error.message.includes('from_username')) {
-    const fallbackRes = await db().from('comments').select(COMMENT_SELECTS.legacy_comments).eq('id', id).maybeSingle();
+    const fallbackRes = await db().from('comments').select(COMMENT_SELECTS.legacy_comments).eq('id', id)
+      .maybeSingle<Omit<CommentRow, 'from_username' | 'from_pic_url' | 'is_liked' | 'is_deleted'>>();
     if (fallbackRes.error) throw new CommentError(`อ่านคอมเมนต์ไม่สำเร็จ: ${fallbackRes.error.message}`);
     if (fallbackRes.data) {
       data = {
@@ -270,7 +274,7 @@ export async function getComment(admin: PublicAdmin, id: string): Promise<Commen
         from_pic_url: null,
         is_liked: false,
         is_deleted: false,
-      } as any;
+      };
       error = null;
     }
   }

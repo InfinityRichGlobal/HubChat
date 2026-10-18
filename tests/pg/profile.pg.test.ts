@@ -54,11 +54,17 @@ const igPage = (): Page => ({
 
 /** Meta ปลอม — จำ URL ที่ถูกเรียกไว้ตรวจได้ */
 function fakeMeta(handler: (n: number, url: string) => Response) {
-  const state = { calls: 0, urls: [] as string[] };
+  const state = { calls: 0, fallbackCalls: 0, urls: [] as string[] };
   __setFetcherForTests((async (input: RequestInfo | URL) => {
-    state.calls += 1;
     const url = String(input);
     state.urls.push(url);
+    // A profile attempt can fall back to conversation participants. Count it
+    // separately so retry/backoff assertions still measure claimed attempts.
+    if (new URL(url).pathname.endsWith('/conversations')) {
+      state.fallbackCalls += 1;
+      return okProfile({ data: [] });
+    }
+    state.calls += 1;
     return handler(state.calls, url);
   }) as typeof fetch);
   return state;

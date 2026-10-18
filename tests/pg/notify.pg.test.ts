@@ -510,7 +510,8 @@ describe.skipIf(!available)('PostgreSQL จริง — ระบบแจ้�
     it('ยังไม่เคยตั้งค่า = เปิดทุกเหตุการณ์', async () => {
       const view = await getPrefs(who(ids.admin, 'admin', [ids.page]));
       expect(view.enabled_events).toHaveLength(5);
-      expect(view.quiet_hours_start).toBe('22:00');
+      expect(view.quiet_hours_start).toBeNull();
+      expect(view.quiet_hours_end).toBeNull();
     });
 
     it('🔴 ยัด id ของเพจที่ไม่มีสิทธิ์มา → ต้องถูกตัดทิ้ง', async () => {

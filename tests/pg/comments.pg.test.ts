@@ -32,6 +32,7 @@ const {
   getFilterWords, saveFilterWords, CommentError,
 } = await import('@/server/comments/service');
 const { replyPrivate, replyPublic } = await import('@/server/comments/actions');
+const { processCommentAutoReply, saveCommentBotSettings } = await import('@/server/comments/bot');
 const { __setFetcherForTests } = await import('@/server/meta/client');
 const { encryptSecret } = await import('@/lib/crypto');
 const { DEFAULT_FILTER_WORDS } = await import('@/server/comments/filter');
@@ -130,7 +131,7 @@ describe.skipIf(!available)('PostgreSQL จริง — ฟีดคอมเ�
     await pool.query('delete from customers');
     await pool.query('delete from pages');
     await pool.query('delete from admins');
-    await pool.query(`delete from app_settings where key = 'comment_filter_words'`);
+    await pool.query(`delete from app_settings where key in ('comment_filter_words', 'comment_bot_settings')`);
 
     await pool.query(
       `insert into admins (id, name, email, password_hash, role)
@@ -160,6 +161,91 @@ describe.skipIf(!available)('PostgreSQL จริง — ฟีดคอมเ�
 
     const { rows } = await pool.query('select count(*)::int n from comments');
     expect(rows[0].n).toBe(1);
+  });
+
+  it('webhook และ sync พร้อมกัน 8 ครั้ง → รายงานรายการใหม่ครั้งเดียวและเติมโปรไฟล์ได้', async () => {
+    const results = await Promise.all(Array.from({ length: 8 }, () => saveIncomingComment(comment(), [])));
+    expect(results.filter((r) => !r.duplicate)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    const enriched = await saveIncomingComment({ ...comment(), from_username: 'customer', from_pic_url: 'https://example.com/avatar.png' }, []);
+    expect(enriched.duplicate).toBe(true);
+    const { rows } = await pool.query('select from_username, from_pic_url from comments');
+    expect(rows[0]).toEqual({ from_username: 'customer', from_pic_url: 'https://example.com/avatar.png' });
+  });
+
+  async function setupBot(extra: Record<string, unknown> = {}) {
+    await saveCommentBotSettings(OWNER, {
+      reply_mode: 'template', auto_reply_public: true,
+      public_reply_template: 'ขอบคุณค่ะ {name}', ...extra,
+    });
+    const saved = await saveIncomingComment(comment(), []);
+    const page = { id: ids.page, platform: 'facebook' as const, page_id: PAGE_META_ID, access_token: encryptSecret('EAA-fake') };
+    const event = { comment_id: 'cmt_1', message: 'สนใจ', from_name: 'ลูกค้าตัวจริง', is_from_page: false };
+    return { saved, run: () => processCommentAutoReply(page, event, saved.id) };
+  }
+
+  it('บอทหลายตัวตอบคอมเมนต์พร้อมกันและเรียกซ้ำ → ส่งสาธารณะครั้งเดียว', async () => {
+    const bot = await setupBot();
+    const meta = fakeMeta(() => okResponse('reply-1'));
+    await Promise.all(Array.from({ length: 8 }, () => bot.run()));
+    await bot.run();
+    expect(meta.calls).toBe(1);
+    const { rows } = await pool.query('select replied_public, bot_public_claimed_at from comments');
+    expect(rows[0].replied_public).toBe(true);
+    expect(rows[0].bot_public_claimed_at).not.toBeNull();
+  });
+
+  it('บอทส่งแล้ว timeout → ไม่ส่งซ้ำและแสดงเหตุผลให้แอดมิน', async () => {
+    const bot = await setupBot();
+    const meta = fakeMeta(() => { throw new Error('connection reset after sending'); });
+    await bot.run();
+    await bot.run();
+    expect(meta.calls).toBe(1);
+    const { rows } = await pool.query('select replied_public, last_error_th from comments');
+    expect(rows[0].replied_public).toBe(false);
+    expect(rows[0].last_error_th).toContain('ไม่ทราบผล');
+  });
+
+  it('public ล้มเหลวแล้ว private สำเร็จในรอบถัดไป → ยังแสดงข้อผิดพลาด public และไม่ส่ง public ซ้ำ', async () => {
+    const bot = await setupBot({ auto_reply_private: true, private_reply_template: 'สวัสดีค่ะ' });
+    const meta = fakeMeta((n) => n <= 2 ? errorResponse(10, 'Permission denied') : okResponse('private-1'));
+    await bot.run();
+    await bot.run();
+    await bot.run();
+    expect(meta.calls).toBe(3);
+    const { rows } = await pool.query('select replied_public, replied_private, last_error_th from comments');
+    expect(rows[0].replied_public).toBe(false);
+    expect(rows[0].replied_private).toBe(true);
+    expect(rows[0].last_error_th).toBeTruthy();
+  });
+
+  it('Meta ตอบรับแล้ว แต่บันทึกผลล้มเหลว → เก็บสิทธิ์ไว้ ป้องกันการส่งซ้ำ', async () => {
+    const bot = await setupBot();
+    const meta = fakeMeta(() => okResponse('reply-1'));
+    await pool.query(`create function fail_comment_finish() returns trigger language plpgsql as $$
+      begin if new.replied_public then raise exception 'simulated DB outage'; end if; return new; end $$;
+      create trigger fail_comment_finish before update on comments for each row execute function fail_comment_finish();`);
+    try {
+      await bot.run();
+    } finally {
+      await pool.query('drop trigger fail_comment_finish on comments; drop function fail_comment_finish()');
+    }
+    await bot.run();
+    expect(meta.calls).toBe(1);
+    const { rows } = await pool.query('select replied_public, last_error_th from comments');
+    expect(rows[0].replied_public).toBe(false);
+    expect(rows[0].last_error_th).toContain('Meta รับคำตอบแล้ว');
+  });
+
+  it('เคยตอบสาธารณะแล้ว ยังทำ private reply แยกได้ โดยไม่เปลี่ยนชื่อลูกค้าตามห้องล่าสุด', async () => {
+    const bot = await setupBot({ auto_reply_private: true, private_reply_template: 'สวัสดีค่ะ' });
+    await pool.query('update comments set replied_public = true');
+    const meta = fakeMeta(() => okResponse('private-1'));
+    await bot.run();
+    await bot.run();
+    expect(meta.calls).toBe(1);
+    const { rows } = await pool.query('select replied_private, from_name from comments');
+    expect(rows[0]).toEqual({ replied_private: true, from_name: 'คุณสมชาย' });
   });
 
   it('ติดป้ายคำกรองให้ตอนบันทึก', async () => {

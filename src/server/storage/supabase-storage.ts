@@ -96,4 +96,3 @@ export async function fetchAndStore(
 
   return putObject(key, body, mime);
 }
-export function __setStorageFetcherForTests(f: any): void {}

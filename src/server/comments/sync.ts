@@ -7,13 +7,12 @@ import 'server-only';
  *      จะส่งเฉพาะเหตุการณ์จากผู้ใช้ที่เป็นบทบาทของแอปเท่านั้น (Admins/Testers)
  *      ลูกค้าทั่วไปหรือเพจอื่นมาคอมเมนต์ Meta จะไม่ส่ง Webhook เข้ามา
  *   2. การดึงผ่าน Graph API ช่วยให้คอมเมนต์ทั้งหมดบนโพสต์ไหลเข้าระบบได้ครบถ้วน
- *   3. ทุกคอมเมนต์ใหม่ที่ดึงเข้ามา จะวิ่งผ่านบอทตอบอัตโนมัติ (CommentBot) และแจ้งเตือนทันที
+ *   3. การนำเข้าประวัติไม่สั่งบอทตอบย้อนหลัง — การตอบอัตโนมัติมาจาก webhook เท่านั้น
  */
 import { db } from '@/lib/supabase/admin';
 import { fetchPageRecentComments } from '@/server/meta/comments';
 import type { MetaPage } from '@/server/meta/client';
 import { getFilterWords, saveIncomingComment } from './service';
-import { processCommentAutoReply } from './bot';
 import { syncCommentProfile } from '@/server/meta/profile-sync';
 import { dispatchNotification, flushNotifications } from '@/server/notify/dispatch';
 
@@ -24,7 +23,7 @@ export type CommentSyncSummary = {
   errors: Array<{ page_id: string; error_th: string }>;
 };
 
-export async function syncPageComments(targetPageId?: string): Promise<CommentSyncSummary> {
+export async function syncPageComments(targetPageId?: string, allowedPageIds?: string[]): Promise<CommentSyncSummary> {
   let query = db()
     .from('pages')
     .select('id,platform,page_id,page_name,display_name,access_token,is_active')
@@ -34,6 +33,7 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
   if (targetPageId) {
     query = query.eq('id', targetPageId);
   }
+  if (allowedPageIds) query = query.in('id', allowedPageIds);
 
   const { data: pages, error } = await query;
   if (error) {
@@ -69,9 +69,10 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
     summary.comments_seen += res.comments.length;
 
     for (const c of res.comments) {
-      const isFromPage =
-        (c.from_id !== null && c.from_id === p.page_id) ||
-        (c.from_name !== null && (c.from_name === p.page_name || c.from_name === p.display_name));
+      // ใช้ชื่อเป็น fallback เฉพาะเมื่อ Meta ไม่ส่ง id มา ป้องกันลูกค้าชื่อเหมือนเพจถูกซ่อน
+      const isFromPage = c.from_id !== null
+        ? c.from_id === p.page_id
+        : c.from_name !== null && (c.from_name === p.page_name || c.from_name === p.display_name);
 
       try {
         const saved = await saveIncomingComment(
@@ -98,22 +99,10 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
 
           // ดึงรูปโปรไฟล์/ข้อมูลลูกค้าถ้ามี
           if (c.from_id && !isFromPage) {
-            void syncCommentProfile(metaPage, saved.id, c.from_id, c.from_username ?? null, c.from_name);
+            await syncCommentProfile(metaPage, saved.id, c.from_id, c.from_username ?? null, c.from_name);
           }
 
-          // รันบอทคอมเมนต์อัตโนมัติ (ไลก์, ตอบใต้โพสต์, ทักแชทส่วนตัว)
           if (!isFromPage) {
-            await processCommentAutoReply(
-              metaPage,
-              {
-                comment_id: c.id,
-                message: c.message,
-                from_name: c.from_name,
-                is_from_page: false,
-              },
-              saved.id,
-            );
-
             // ส่ง Notification เข้าเครื่องแอดมิน
             const title = saved.matched
               ? `💭 คอมเมนต์เข้าคำว่า "${saved.matched}"`
@@ -132,27 +121,17 @@ export async function syncPageComments(targetPageId?: string): Promise<CommentSy
         }
       } catch (saveErr) {
         console.warn(`[comment-sync] บันทึกคอมเมนต์ ${c.id} ไม่สำเร็จ:`, saveErr);
+        summary.errors.push({ page_id: p.id, error_th: saveErr instanceof Error ? saveErr.message : 'บันทึกคอมเมนต์ไม่สำเร็จ' });
       }
     }
   }
 
   // ส่งแจ้งเตือนที่ค้างคิวทันทีถ้ามีคอมเมนต์ใหม่ถูกบันทึก
   if (summary.comments_saved > 0) {
-    void flushNotifications().catch((err) =>
+    await flushNotifications().catch((err) =>
       console.warn('[comment-sync] flushNotifications ไม่สำเร็จ:', err)
     );
   }
 
   return summary;
-}
-
-let lastSyncTimestamp = 0;
-
-export async function syncPageCommentsThrottled(minIntervalMs = 15_000): Promise<CommentSyncSummary | null> {
-  const now = Date.now();
-  if (now - lastSyncTimestamp < minIntervalMs) {
-    return null;
-  }
-  lastSyncTimestamp = now;
-  return syncPageComments();
 }

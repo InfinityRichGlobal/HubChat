@@ -103,7 +103,8 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
   }, []);
 
   useEffect(() => {
-    void fetchDiagnostics(false);
+    const timer = setTimeout(() => void fetchDiagnostics(false), 0);
+    return () => clearTimeout(timer);
   }, [fetchDiagnostics]);
 
   if (loading && !report) {

@@ -177,7 +177,7 @@ npm run dev
 | `npm start` | รันเวอร์ชันจริง |
 | `npm run typecheck` | ตรวจว่าโค้ดไม่มีที่ผิดชนิดข้อมูล |
 | `npm test` | รันชุดทดสอบ (531 ข้อ — ไม่ต้องมีฐานข้อมูล) |
-| `npm run test:pg` | รันชุดทดสอบกับ PostgreSQL จริง (213 ข้อ — ⚠️ ต้องลง PostgreSQL ก่อน ไม่งั้นข้ามทั้งหมด) |
+| `npm run test:pg` | รันชุดทดสอบกับ PostgreSQL จริง — ต้องเปิดฐานข้อมูลทดสอบก่อน ถ้าต่อไม่ได้จะ fail ไม่ข้ามเงียบ ๆ (ดู `docs/META_DELIVERY_REPAIR_TH.md`) |
 | `npm run worker` | ตัวกวาดคิว webhook (ตาข่ายกันพลาด — ปกติไม่ต้องรัน) |
 | `npm run vapid` | สร้างกุญแจแจ้งเตือน PWA (ทำครั้งเดียวตอนติดตั้ง) |
 | `npm run notify` | ตัวเดินตรวจแชทค้าง + ส่งแจ้งเตือน (🔴 ต้องรัน ไม่งั้นขาดแจ้งเตือน 2 อย่าง) |
@@ -872,4 +872,3 @@ HubChat พร้อมใช้งานบน Production ผ่าน Vercel �
 - [x] Message Policy Engine ผ่านการทดสอบ Idempotency ป้องกันส่งซ้ำ 100%
 - [x] ผ่านการทดสอบ Unit & Architectural Tests ครบถ้วน **608 ข้อ (100% Pass)**
 - [x] พร้อม Deploy และใช้งานจริงบน Vercel (https://hubchat-omega.vercel.app)
-

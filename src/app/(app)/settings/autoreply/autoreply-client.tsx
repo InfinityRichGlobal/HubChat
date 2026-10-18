@@ -2127,6 +2127,7 @@ export default function AutoReplyClient({
 
       {/* ---------- ไดอะล็อกเลือกรูปภาพจากคลังสื่อสำหรับ Private Reply ---------- */}
       <MediaImagePickerDialog
+        key={String(mediaPickerOpen)}
         open={mediaPickerOpen}
         onClose={() => setMediaPickerOpen(false)}
         onSelect={(url, name) => {
@@ -2477,12 +2478,11 @@ function MediaImagePickerDialog({
   onClose: () => void;
   onSelect: (url: string, name: string) => void;
 }) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(open);
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
     fetch('/api/media-library?for_picker=1', { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => {

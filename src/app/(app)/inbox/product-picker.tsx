@@ -9,6 +9,7 @@
  *    มีช่องตัวอย่างข้อความแบบแก้ไขได้ ให้แอดมินพิมพ์ข้อความเพิ่มหรือแก้คำได้อิสระก่อนใส่ลงแชท
  */
 import { useEffect, useState, useCallback } from 'react';
+import { useLocalPreference } from '@/lib/use-local-preference';
 import { Loader2, Minus, Plus, RefreshCw, Search, Settings, Tag, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -68,7 +69,9 @@ export default function ProductPicker({
   const [showAmount, setShowAmount] = useState(true);
 
   // ปะหัว-ปะท้าย snippets ที่ปรับแต่ง เพิ่ม ลบ แก้ไขได้เอง
-  const [snippets, setSnippets] = useState<SnippetItem[]>(DEFAULT_SNIPPETS);
+  const [snippets, setSnippets] = useLocalPreference('hubchat_product_snippets', DEFAULT_SNIPPETS,
+    (value): value is SnippetItem[] => Array.isArray(value) && value.length > 0 && value.every((v) =>
+      v && typeof v === 'object' && typeof v.id === 'string' && typeof v.label === 'string' && typeof v.text === 'string'));
   const [snippetsDialogOpen, setSnippetsDialogOpen] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newText, setNewText] = useState('');
@@ -78,24 +81,9 @@ export default function ProductPicker({
   const [previewText, setPreviewText] = useState('');
   const [isManualEdited, setIsManualEdited] = useState(false);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('hubchat_product_snippets');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setSnippets(parsed);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const saveSnippets = (next: SnippetItem[]) => {
-    setSnippets(next);
     try {
-      localStorage.setItem('hubchat_product_snippets', JSON.stringify(next));
+      setSnippets(next);
     } catch {
       // ignore
     }

@@ -272,6 +272,7 @@ export default function InboxClient({
   initialConversations,
   initialHasMore,
   initialConversationId,
+  initialSearch = '',
   pages,
   admins = [],
 }: {
@@ -282,6 +283,7 @@ export default function InboxClient({
   initialHasMore: boolean;
   /** เปิดห้องนี้ทันที — มาจาก /inbox?c=... ที่หน้าออเดอร์ลิงก์มา */
   initialConversationId?: string | null;
+  initialSearch?: string;
   pages: InboxPage[];
   admins?: Array<{ id: string; name: string }>;
 }) {
@@ -295,14 +297,9 @@ export default function InboxClient({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const sp = new URLSearchParams(window.location.search);
-      const q = sp.get('search');
-      if (q) setSearch(q);
-    }
     const handleCustomSearch = (e: Event) => {
       const customEvent = e as CustomEvent<string>;
       setSearch(customEvent.detail ?? '');
@@ -348,35 +345,13 @@ export default function InboxClient({
   };
   const router = useRouter();
   const searchParams = useSearchParams();
-  const cParam = searchParams?.get('c') ?? initialConversationId ?? null;
-
-  const [activeId, setActiveId] = useState<string | null>(initialConversationId ?? null);
-
-  // อัปเดต activeId เมื่อ query param เปลี่ยน (เช่น กดมาจากแจ้งเตือน, กด back เบราว์เซอร์ หรือปัดขวาบนมือถือ)
-  useEffect(() => {
-    const currentC = searchParams?.get('c') ?? null;
-    setActiveId(currentC);
-  }, [searchParams]);
+  const activeId = searchParams ? searchParams.get('c') : initialConversationId ?? null;
 
   // แจ้ง app-shell ทันทีเมื่อเปิด/ปิดแชท 1:1 เพื่อซ่อนหรือแสดงเมนูล่างและหัวแอป
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('hubchat:1on1-chat', { detail: { open: Boolean(activeId) } }));
   }, [activeId]);
-
-  // ดักฟัง popstate ของเบราว์เซอร์ (เช่น ปัดขอบจอย้อนกลับบน iOS / Safari PWA หรือกดปุ่ม Back)
-  // ให้สลับ activeId ทันทีแบบ synchronous 0ms ไม่ต้องรอ transition ของ Next.js router
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onPopState = () => {
-      try {
-        const sp = new URLSearchParams(window.location.search);
-        setActiveId(sp.get('c'));
-      } catch (_) {}
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
 
   // ดักฟังข้อความจาก Service Worker เมื่อกด Push Notification ขณะเปิดแอปอยู่
   useEffect(() => {
@@ -387,7 +362,6 @@ export default function InboxClient({
           const url = new URL(event.data.link, window.location.origin);
           const c = url.searchParams.get('c');
           if (c) {
-            setActiveId(c);
             router.replace(`/inbox?c=${c}`);
           }
         } catch (_) {}
@@ -1040,8 +1014,9 @@ export default function InboxClient({
                   meId={me.id}
                   tagById={tagById}
                   onSelect={() => {
-                    setActiveId(c.id);
-                    router.push(`/inbox?c=${c.id}`);
+                    const params = new URLSearchParams(searchParams.toString());
+                    params.set('c', c.id);
+                    window.history.pushState(null, '', `/inbox?${params}`);
                   }}
                 />
               ))}
@@ -1070,8 +1045,7 @@ export default function InboxClient({
             meId={me.id}
             tags={tags}
             onBack={() => {
-              setActiveId(null);
-              router.push('/inbox');
+              window.history.pushState(null, '', '/inbox');
             }}
             onChanged={loadList}
             onStateChanged={() => {
@@ -1092,8 +1066,7 @@ export default function InboxClient({
               variant="outline"
               size="sm"
               onClick={() => {
-                setActiveId(null);
-                router.push('/inbox');
+                window.history.pushState(null, '', '/inbox');
               }}
             >
               <ArrowLeft className="mr-1.5 size-4" />
@@ -2955,6 +2928,7 @@ function ChatRoom({
       />
 
       <MediaLibraryPicker
+        key={libraryKind ?? 'closed'}
         kind={libraryKind}
         onClose={() => setLibraryKind(null)}
         onSelectMultiple={(items) => {
@@ -3042,8 +3016,6 @@ function MediaLibraryPicker({
   useEffect(() => {
     if (!kind) return;
     let alive = true;
-    setSelectedIds(new Set());
-    setSelectedAlbum('ทั้งหมด');
     void fetch('/api/media-library?for_picker=1', { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => {
@@ -3102,7 +3074,7 @@ function MediaLibraryPicker({
     if (kind === 'video') return [];
     const filtered = loaded.albums.filter((a) => a !== 'ทั้งหมด' && a !== 'วิดีโอ' && a !== 'ระบบ');
     return ['ทั้งหมด', ...filtered];
-  }, [loaded?.albums, kind]);
+  }, [loaded, kind]);
 
   return (
     <Dialog open={kind !== null} onOpenChange={(open) => { if (!open) onClose(); }}>

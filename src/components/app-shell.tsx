@@ -18,6 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
+import { useLocalPreference } from '@/lib/use-local-preference';
 import { can } from '@/lib/auth/permissions';
 import { ROLE_LABEL_TH } from '@/lib/auth/permissions';
 import type { PublicAdmin } from '@/types/db';
@@ -74,7 +75,8 @@ export default function AppShell({
     unread_chats: 0,
     unhandled_comments: 0,
   });
-  const [primaryHrefs, setPrimaryHrefs] = useState<string[]>(DEFAULT_PRIMARY);
+  const [primaryHrefs, setPrimaryHrefs] = useLocalPreference('hubchat_mobile_nav_primary', DEFAULT_PRIMARY,
+    (value): value is string[] => Array.isArray(value) && value.length >= 1 && value.length <= 4 && value.every((v) => typeof v === 'string'));
   const [navCustomizeOpen, setNavCustomizeOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState('');
@@ -91,24 +93,9 @@ export default function AppShell({
     return () => window.removeEventListener('hubchat:1on1-chat', handler);
   }, []);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('hubchat_mobile_nav_primary');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 1 && parsed.length <= 4) {
-          setPrimaryHrefs(parsed);
-        }
-      }
-    } catch {
-      // ใช้ค่าเริ่มต้น
-    }
-  }, []);
-
   const savePrimaryHrefs = (hrefs: string[]) => {
-    setPrimaryHrefs(hrefs);
     try {
-      localStorage.setItem('hubchat_mobile_nav_primary', JSON.stringify(hrefs));
+      setPrimaryHrefs(hrefs);
       toast.success('บันทึกการจัดปุ่มเมนูล่างแล้ว');
     } catch {
       // ข้าม

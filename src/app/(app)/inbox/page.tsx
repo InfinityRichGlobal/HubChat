@@ -16,7 +16,7 @@ import { db } from '@/lib/supabase/admin';
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ c?: string }>;
+  searchParams: Promise<{ c?: string; search?: string }>;
 }) {
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
@@ -34,6 +34,7 @@ export default async function InboxPage({
       initialConversations={conversations}
       initialHasMore={has_more}
       initialConversationId={sp.c ?? null}
+      initialSearch={sp.search ?? ''}
       pages={pages}
       admins={adminRows ?? []}
     />

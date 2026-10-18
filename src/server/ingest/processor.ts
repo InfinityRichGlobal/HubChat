@@ -45,7 +45,7 @@ export type ProcessSummary = {
   media_stored: number;
   /** ไฟล์แนบที่เก็บไม่ได้ — รวมกรณีลิงก์หมดอายุ ซึ่งกู้ไม่ได้ */
   media_failed: number;
-  /** คอมเมนต์ที่บันทึกใหม่ (รอบ 9) — ⚠️ ไม่มีการตอบอัตโนมัติใด ๆ */
+  /** คอมเมนต์ที่บันทึกใหม่ (บอททำงานตามการตั้งค่าหลังบันทึก) */
   comments_saved: number;
   /** คอมเมนต์ที่เข้าคำกรอง — ใช้ตัดสินว่าจะแจ้งเตือนไหม */
   comments_flagged: number;
@@ -393,14 +393,10 @@ async function maybeNotifyInbound(
 /* คอมเมนต์ (รอบ 9)                                                           */
 /* ------------------------------------------------------------------------ */
 
-/** คำกรองอ่านครั้งเดียวต่อการประมวลผลหนึ่งรอบ ไม่ใช่ต่อคอมเมนต์ */
-let filterWordsCache: string[] | null = null;
-
 /**
  * บันทึกคอมเมนต์ที่เข้ามา
  *
- * ⚠️ ต้องไม่โยน error ออกไป — คอมเมนต์พังต้องไม่ทำให้ข้อความของลูกค้าในคิวเดียวกันพัง
- * 🔴 และต้องไม่ตอบอะไรกลับไปทั้งสิ้น
+ * หากบันทึกไม่สำเร็จต้องให้คิวลองใหม่ ส่วน runJob จะทำเหตุการณ์อื่นต่อให้ครบ
  */
 async function handleComment(
   page: PageRow,
@@ -408,7 +404,7 @@ async function handleComment(
   summary: ProcessSummary,
 ): Promise<void> {
   try {
-    if (filterWordsCache === null) filterWordsCache = await getFilterWords();
+    const filterWords = await getFilterWords();
 
     const saved = await saveIncomingComment(
       {
@@ -427,11 +423,14 @@ async function handleComment(
         commented_at: ev.commented_at,
         raw: ev.raw,
       },
-      filterWordsCache,
+      filterWords,
     );
 
     if (saved.duplicate) {
       summary.duplicates += 1;
+      // อาจบันทึกสำเร็จก่อน worker ตาย แต่ยังไม่ถึงขั้นตอบ บอทจองสิทธิ์แต่ละ
+      // ช่องทางใน DB จึงกู้ขั้นที่ยังไม่เริ่มได้โดยไม่ส่งช่องทางเดิมซ้ำ
+      await processCommentAutoReply(page, ev, saved.id);
       return;
     }
 
@@ -470,8 +469,8 @@ async function handleComment(
       summary.notifications_queued += result.queued;
     }
   } catch (err) {
-    summary.ignored += 1;
-    console.error('[ingest] บันทึกคอมเมนต์ไม่สำเร็จ (ข้ามไป ข้อความอื่นยังทำงานต่อ):', err);
+    // ห้ามปิดงานเป็น done เมื่อฐานข้อมูลไม่รับคอมเมนต์
+    throw err;
   }
 }
 
@@ -479,64 +478,71 @@ async function handleComment(
 /* ทำงานหนึ่งชิ้น                                                              */
 /* ------------------------------------------------------------------------ */
 
-async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary): Promise<void> {
-  const events = parseWebhookPayload(job.payload);
+async function runEvent(ev: IngestEvent, cache: PageCache, summary: ProcessSummary): Promise<void> {
+  if (ev.kind === 'ignored') {
+    summary.ignored += 1;
+    return;
+  }
 
-  for (const ev of events) {
-    if (ev.kind === 'ignored') {
-      summary.ignored += 1;
-      continue;
-    }
+  const page = await findPage(cache, ev.platform, ev.page_meta_id);
 
-    const page = await findPage(cache, ev.platform, ev.page_meta_id);
+  if (!page) {
+    // Meta ยิงมาจากเพจที่เรายังไม่ได้เชื่อม — ลองใหม่ไปก็เหมือนเดิม
+    summary.unknown_page += 1;
+    console.warn(
+      `[ingest] ได้รับข้อความจากเพจที่ยังไม่ได้เชื่อมในระบบ (${ev.platform} id=${ev.page_meta_id}) — ข้ามไป`,
+    );
+    return;
+  }
 
-    if (!page) {
-      // Meta ยิงมาจากเพจที่เรายังไม่ได้เชื่อม — ลองใหม่ไปก็เหมือนเดิม
-      summary.unknown_page += 1;
-      console.warn(
-        `[ingest] ได้รับข้อความจากเพจที่ยังไม่ได้เชื่อมในระบบ (${ev.platform} id=${ev.page_meta_id}) — ข้ามไป`,
-      );
-      continue;
-    }
+  if (!page.is_active) {
+    summary.ignored += 1;
+    return;
+  }
 
-    if (!page.is_active) {
-      summary.ignored += 1;
-      continue;
-    }
+  /**
+   * คอมเมนต์มีตัวกันตอบซ้ำของตัวเอง แยกจาก Message Policy Engine
+   */
+  if (ev.kind === 'comment') {
+    await handleComment(page, ev, summary);
+    return;
+  }
 
+  const row = ev.kind === 'inbound_message' ? await saveInbound(page, ev) : await saveEcho(page, ev);
+
+  if (row.duplicate) {
+    summary.duplicates += 1;
+    return;
+  }
+
+  if (ev.kind === 'inbound_message') {
+    summary.inbound_saved += 1;
+    await syncProfileIfNeeded(page, row.customer_id, ev.psid);
+    // ⭐ เก็บไฟล์ "ก่อน" ทำอย่างอื่น เพราะลิงก์ของ Meta เดินนาฬิกาหมดอายุอยู่
+    await maybeCaptureMedia(page, row, ev, summary);
+    await maybeAutoReply(page, row, ev, summary);
     /**
-     * ⭐ คอมเมนต์เดินคนละสายกับข้อความโดยสิ้นเชิง
-     *    🔴 บันทึกอย่างเดียว ไม่ตอบอัตโนมัติเด็ดขาด (สเปก 5.5)
-     *       แอดมินต้องกดเองทุกครั้ง ทั้งตอบใต้โพสต์และทักส่วนตัว
+     * ⭐ แจ้งเตือน "หลัง" ตอบอัตโนมัติโดยตั้งใจ
+     *    ถ้าบอทตอบไปแล้ว แอดมินก็ยังควรรู้ว่ามีคนทักอยู่ดี
+     *    แต่ต้องไม่ให้แจ้งเตือนไปขวางการตอบอัตโนมัติที่ต้องเร็ว
      */
-    if (ev.kind === 'comment') {
-      await handleComment(page, ev, summary);
-      continue;
-    }
+    await maybeNotifyInbound(page, row, ev, summary);
+  } else {
+    summary.echo_saved += 1;
+  }
+}
 
-    const row = ev.kind === 'inbound_message' ? await saveInbound(page, ev) : await saveEcho(page, ev);
-
-    if (row.duplicate) {
-      summary.duplicates += 1;
-      continue;
-    }
-
-    if (ev.kind === 'inbound_message') {
-      summary.inbound_saved += 1;
-      await syncProfileIfNeeded(page, row.customer_id, ev.psid);
-      // ⭐ เก็บไฟล์ "ก่อน" ทำอย่างอื่น เพราะลิงก์ของ Meta เดินนาฬิกาหมดอายุอยู่
-      await maybeCaptureMedia(page, row, ev, summary);
-      await maybeAutoReply(page, row, ev, summary);
-      /**
-       * ⭐ แจ้งเตือน "หลัง" ตอบอัตโนมัติโดยตั้งใจ
-       *    ถ้าบอทตอบไปแล้ว แอดมินก็ยังควรรู้ว่ามีคนทักอยู่ดี
-       *    แต่ต้องไม่ให้แจ้งเตือนไปขวางการตอบอัตโนมัติที่ต้องเร็ว
-       */
-      await maybeNotifyInbound(page, row, ev, summary);
-    } else {
-      summary.echo_saved += 1;
+async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary): Promise<void> {
+  let failure: unknown;
+  for (const ev of parseWebhookPayload(job.payload)) {
+    try {
+      await runEvent(ev, cache, summary);
+    } catch (err) {
+      // ทำทุกเหตุการณ์ต่อ แม้รายการก่อนหน้าพัง และลองใหม่ได้หากมีข้อผิดพลาดชั่วคราว
+      if (!failure || !(err instanceof PermanentJobError)) failure = err;
     }
   }
+  if (failure) throw failure;
 }
 
 /* ------------------------------------------------------------------------ */

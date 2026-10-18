@@ -22,16 +22,6 @@ export async function GET(req: NextRequest) {
   try {
     const admin = await requireAdmin();
 
-    try {
-      const { processWebhookBatch } = await import('@/server/ingest/processor');
-      const { syncPageCommentsThrottled } = await import('@/server/comments/sync');
-      // fire-and-forget: ไม่ให้ sync ทำให้ response ช้า
-      void processWebhookBatch(5).catch(() => {});
-      void syncPageCommentsThrottled(15_000).catch(() => {});
-    } catch {
-      // ไม่ให้กระทบการดึงรายการแชท
-    }
-
     const params = req.nextUrl.searchParams;
     const requestedGroup = params.get('group') as InboxGroup | null;
     const group = requestedGroup && INBOX_GROUPS.has(requestedGroup) ? requestedGroup : 'all';

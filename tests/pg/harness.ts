@@ -40,8 +40,8 @@ export async function postgresAvailable(): Promise<boolean> {
     await c.connect();
     await c.end();
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    throw new Error('ต้องเปิด PostgreSQL สำหรับ test:pg ก่อนรัน (ตั้ง PGHOST/PGPORT/PGUSER/PGPASSWORD) — จะไม่ข้ามชุดทดสอบเงียบ ๆ', { cause: error });
   }
 }
 
@@ -89,6 +89,16 @@ export async function resetDatabase(): Promise<void> {
         create role service_role nologin noinherit bypassrls;
       end if;
     end $$;
+  `);
+
+  // Supabase provides this schema before application migrations. These tests
+  // exercise database logic, not the external Storage HTTP service.
+  await c.query(`
+    create schema storage;
+    create table storage.buckets (
+      id text primary key, name text not null, public boolean not null default false,
+      file_size_limit bigint
+    );
   `);
 
   for (const f of files) {
@@ -301,6 +311,12 @@ async function handle(
       if (OPS[innerOp]) {
         params.push(innerVal);
         where.push(`not (${q(k)} ${OPS[innerOp]} $${params.length})`);
+        continue;
+      }
+      if (innerOp === 'in') {
+        const items = splitTop(innerVal.replace(/^\(|\)$/g, '')).map((x) => x.replace(/^"|"$/g, ''));
+        params.push(items);
+        where.push(`not (${q(k)}::text = any($${params.length}::text[]))`);
         continue;
       }
       // ไม่รู้จัก = ต้องดังทันที ห้ามเมินเงียบ ๆ

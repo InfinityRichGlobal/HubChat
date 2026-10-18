@@ -433,8 +433,8 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
 
   // 8. คำนวณคะแนนและสถานะรวม (Overall Score)
   const statuses = [metaStatus, dbStatus, storageStatus, aiStatus, notifyStatus, messagingStatus];
-  let errorCount = statuses.filter((s) => s === 'error').length;
-  let warningCount = statuses.filter((s) => s === 'warning').length;
+  const errorCount = statuses.filter((s) => s === 'error').length;
+  const warningCount = statuses.filter((s) => s === 'warning').length;
 
   let overallStatus: DiagnosticItemStatus = 'healthy';
   if (errorCount > 0) {

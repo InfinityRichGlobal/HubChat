@@ -123,27 +123,27 @@ export default function CommentsClient({
     });
   }, []);
 
-  const load = useCallback(async (sync = false): Promise<void> => {
+  const load = useCallback(async (): Promise<boolean> => {
     const params = new URLSearchParams();
     if (unhandledOnly) params.set('unhandled', '1');
     if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
-    if (sync) params.set('sync', '1');
     const d = await api<Feed & { filter_words: string[] }>(`/api/comments?${params.toString()}`);
     if (d) {
       setFeed({ comments: d.comments, has_more: d.has_more, unhandled_count: d.unhandled_count });
       setWords(d.filter_words);
     }
+    return Boolean(d);
   }, [unhandledOnly, selectedPageId]);
 
-  /* ---- ดึงและซิงค์สดจาก Meta Graph API อัตโนมัติทุก 15 วินาที ---- */
+  /* ---- อ่านฟีดจากฐานข้อมูล งานรับ webhook ทำแยกจากการเปิดหน้า ---- */
   useEffect(() => {
     let alive = true;
     const apply = () => {
       if (!alive) return;
-      void load(true);
+      void load();
     };
-    const first = setTimeout(() => void load(true), 0);
-    const timer = setInterval(apply, 15_000);
+    const first = setTimeout(() => void load(), 0);
+    const timer = setInterval(apply, POLL_MS);
     return () => {
       alive = false;
       clearTimeout(first);
@@ -154,8 +154,17 @@ export default function CommentsClient({
   const handleManualRefresh = async () => {
     setSyncing(true);
     try {
-      await load(true);
-      toast.success('ดึงและซิงค์คอมเมนต์ล่าสุดจาก Facebook / Instagram แล้ว');
+      const result = await api<{ summary: { comments_saved: number; errors: Array<{ error_th: string }> } }>('/api/comments/sync', {
+        method: 'POST',
+        body: JSON.stringify(selectedPageId === 'all' ? {} : { page_id: selectedPageId }),
+      });
+      if (!result) return;
+      const loaded = await load();
+      if (result.summary.errors.length) {
+        toast.error('ซิงค์คอมเมนต์ได้ไม่ครบ', { description: result.summary.errors.map((e) => e.error_th).join(' · ') });
+      } else if (loaded) {
+        toast.success(`ซิงค์แล้ว เพิ่ม ${result.summary.comments_saved} คอมเมนต์ — ไม่ตอบย้อนหลังอัตโนมัติ`);
+      }
     } catch {
       toast.error('รีเฟรชข้อมูลไม่สำเร็จ');
     } finally {

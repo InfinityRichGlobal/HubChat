@@ -137,6 +137,38 @@ describe.skipIf(!available)('PostgreSQL จริง — ทางเข้า�
     expect(job.rows[0].status).toBe('done');
   });
 
+  it('บันทึกคอมเมนต์พัง → เก็บแชทอื่นใน webhook เดียวกัน และคิวลองคอมเมนต์ใหม่ได้', async () => {
+    const payload = inbound('mid.with-comment', 'แชทต้องไม่หาย');
+    const mixed = {
+      ...payload,
+      entry: payload.entry.map((entry) => ({
+        ...entry,
+        changes: [{ field: 'feed', value: {
+          item: 'comment', verb: 'add', comment_id: 'comment-retry',
+          post_id: 'post-1', from: { id: 'commenter-1' }, message: 'สนใจ',
+          created_time: Math.floor(T / 1000),
+        } }],
+      })),
+    };
+    await pool.query(`create function fail_comment_ingest() returns trigger language plpgsql as $$
+      begin raise exception 'simulated temporary outage'; end $$;
+      create trigger fail_comment_ingest before insert on comments for each row execute function fail_comment_ingest();`);
+    await enqueueWebhook(mixed);
+    try {
+      const first = await processWebhookBatch();
+      expect(first.failed_jobs).toBe(1);
+      expect(first.inbound_saved).toBe(1);
+      expect((await pool.query('select status from webhook_queue')).rows[0].status).toBe('pending');
+    } finally {
+      await pool.query('drop trigger fail_comment_ingest on comments; drop function fail_comment_ingest()');
+    }
+    const retry = await processWebhookBatch();
+    expect(retry.comments_saved).toBe(1);
+    expect(retry.duplicates).toBe(1);
+    expect(await count('messages')).toBe(1);
+    expect((await pool.query('select status from webhook_queue')).rows[0].status).toBe('done');
+  });
+
   /* -------------------------------------------------------------- */
   it('⭐ Meta ยิงก้อนเดิมซ้ำ 5 ครั้ง → ได้ข้อความเดียว', async () => {
     const payload = inbound('mid.dup', 'ข้อความเดียวกัน');

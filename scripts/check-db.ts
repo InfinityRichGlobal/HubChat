@@ -41,9 +41,23 @@ async function main() {
 
   console.log('──────────────────────────────────────────');
   if (missing.length) {
-    console.log(`\n❌ ยังขาด ${missing.length} ตาราง — เปิด Supabase → SQL Editor แล้วรัน supabase/migrations/0001_init.sql ให้ครบ\n`);
+    console.log(`\n❌ ยังขาด ${missing.length} ตาราง — เปิด Supabase → SQL Editor แล้วรันไฟล์ supabase/migrations/ ตามลำดับให้ครบ\n`);
     process.exit(1);
   }
+
+  // Reading table names alone cannot detect an outdated RPC or missing column.
+  const { error: columnError } = await supabase.from('comments')
+    .select('bot_public_claimed_at', { head: true }).limit(1);
+  // NULL can never match a row: verify the RPC without claiming any real comment.
+  const { data: claim, error: claimError } = await supabase.rpc('claim_comment_public_reply', {
+    p_comment_row_id: null,
+  });
+  if (columnError || claimError || claim?.[0]?.won !== false) {
+    console.log('\n❌ ฐานข้อมูลยังไม่พร้อมสำหรับระบบกันตอบคอมเมนต์ซ้ำ');
+    console.log('   รัน supabase/migrations/20261018_comment_delivery_hardening.sql ก่อน deploy แล้วตรวจอีกครั้ง\n');
+    process.exit(1);
+  }
+  console.log('✅ คอลัมน์และ RPC กันตอบคอมเมนต์ซ้ำพร้อมใช้งาน');
 
   const { count: owners } = await supabase
     .from('admins')

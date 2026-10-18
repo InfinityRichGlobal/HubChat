@@ -142,27 +142,22 @@ export async function processCommentAutoReply(
   savedCommentRowId: string | null,
 ): Promise<void> {
   // คอมเมนต์ของเพจเราเอง ไม่ต้องตอบ
-  if (ev.is_from_page) return;
-
-  // ป้องกันการตอบซ้ำ: หากคอมเมนต์นี้เคยตอบสาธารณะไปแล้ว ให้ข้ามทันที
-  if (savedCommentRowId) {
-    const { data: existing } = await db()
-      .from('comments')
-      .select('replied_public')
-      .eq('id', savedCommentRowId)
-      .maybeSingle();
-
-    if (existing?.replied_public) {
-      console.log(`[comment-bot] คอมเมนต์ ${ev.comment_id} เคยตอบสาธารณะไปแล้ว ข้ามการตอบซ้ำ`);
-      return;
-    }
-  }
+  if (ev.is_from_page || !savedCommentRowId) return;
 
   const settings = await getCommentBotSettings();
 
   // ถ้าไม่ได้เปิดฟีเจอร์ใดเลย ไม่ต้องทำต่อ
   const anyEnabled = settings.auto_like || settings.auto_reply_public || settings.auto_reply_private;
   if (!anyEnabled) return;
+
+  const { data: saved, error: savedError } = await db().from('comments')
+    .select('page_id,is_deleted,replied_public,replied_private,bot_public_claimed_at,is_liked,last_error_th')
+    .eq('id', savedCommentRowId).maybeSingle();
+  if (savedError) throw new Error(`อ่านสถานะบอทคอมเมนต์ไม่สำเร็จ: ${savedError.message}`);
+  if (!saved) throw new Error('ไม่พบคอมเมนต์ที่บันทึกไว้ จึงไม่ส่งคำตอบ');
+  if (saved.page_id !== page.id || saved.is_deleted) return;
+  let publicError: string | null = saved.bot_public_claimed_at && !saved.replied_public
+    ? saved.last_error_th : null;
 
   const msg = (ev.message ?? '').trim();
 
@@ -204,7 +199,7 @@ export async function processCommentAutoReply(
   };
 
   // 1. กดไลก์อัตโนมัติ
-  if (settings.auto_like && capabilities.like) {
+  if (settings.auto_like && capabilities.like && !saved.is_liked) {
     try {
       const likeRes = await likeComment(page, ev.comment_id);
       if (likeRes.ok) {
@@ -226,7 +221,7 @@ export async function processCommentAutoReply(
   }
 
   // 2. ตอบคอมเมนต์สาธารณะใต้โพสต์
-  if (settings.auto_reply_public && capabilities.publicReply) {
+  if (settings.auto_reply_public && capabilities.publicReply && !saved.replied_public && !saved.bot_public_claimed_at) {
     let replyText: string | null = null;
 
     // หากมีกฎเฉพาะคำที่ระบุคำตอบสาธารณะไว้ ให้ใช้กฎนั้นก่อน
@@ -254,28 +249,46 @@ export async function processCommentAutoReply(
     }
 
     if (replyText) {
+      // DB failures before claiming are safe to retry via the webhook queue.
+      const { data: claims, error: claimError } = await db().rpc('claim_comment_public_reply', {
+        p_comment_row_id: savedCommentRowId,
+      });
+      if (claimError) throw new Error(`จองสิทธิ์ตอบคอมเมนต์ไม่สำเร็จ: ${claimError.message}`);
+      const claim = (Array.isArray(claims) ? claims[0] : claims) as { won: boolean } | null;
       try {
-        const publicRes = await replyToCommentPublicly(page, ev.comment_id, replyText);
-        if (publicRes.ok) {
-          console.log(`[comment-bot] ↩️ ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} สำเร็จ (${replyMode})`);
-          if (savedCommentRowId) {
-            await db().rpc('finish_public_reply', {
-              p_comment_row_id: savedCommentRowId,
-              p_admin_id: null,
-              p_text: replyText,
-            });
-          }
-        } else {
-          console.warn(`[comment-bot] ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} ไม่สำเร็จ:`, publicRes.error_th);
-          if (savedCommentRowId) {
-            await db()
-              .from('comments')
-              .update({ last_error_th: publicRes.error_th })
-              .eq('id', savedCommentRowId);
+        // จองด้วย UPDATE เดียวในฐานข้อมูลก่อนส่ง ป้องกัน webhook/sync/worker
+        // ตอบชนกัน และไม่เปิดสิทธิ์ใหม่เมื่อ Meta อาจรับข้อความไปแล้ว
+        if (claim?.won) {
+          const publicRes = await replyToCommentPublicly(page, ev.comment_id, replyText);
+          if (publicRes.ok) {
+            console.log(`[comment-bot] ↩️ ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} สำเร็จ (${replyMode})`);
+            if (savedCommentRowId) {
+              const { error } = await db().rpc('finish_public_reply', {
+                p_comment_row_id: savedCommentRowId,
+                p_admin_id: null,
+                p_text: replyText,
+              });
+              if (error) throw new Error(`Meta รับคำตอบแล้ว แต่บันทึกผลไม่สำเร็จ: ${error.message}`);
+            }
+          } else {
+            console.warn(`[comment-bot] ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} ไม่สำเร็จ:`, publicRes.error_th);
+            publicError = publicRes.outcome_unknown
+              ? 'ไม่ทราบผลการตอบคอมเมนต์ — ระบบจะไม่ส่งซ้ำ กรุณาตรวจบน Meta'
+              : publicRes.error_th;
+            if (savedCommentRowId) {
+              await db()
+                .from('comments')
+                .update({ last_error_th: publicError })
+                .eq('id', savedCommentRowId);
+            }
           }
         }
       } catch (err) {
         console.error(`[comment-bot] เกิดข้อผิดพลาดขณะตอบคอมเมนต์ใต้โพสต์:`, err);
+        publicError = err instanceof Error ? err.message : 'ตอบคอมเมนต์ไม่สำเร็จ กรุณาตรวจบน Meta ก่อนตอบเอง';
+        await db().from('comments').update({
+          last_error_th: publicError,
+        }).eq('id', savedCommentRowId);
       }
     }
   } else if (settings.auto_reply_public && !capabilities.publicReply) {
@@ -283,7 +296,7 @@ export async function processCommentAutoReply(
   }
 
   // 3. ทักแชทส่วนตัว (Private Reply / DM)
-  if (settings.auto_reply_private && savedCommentRowId && capabilities.privateReply) {
+  if (settings.auto_reply_private && capabilities.privateReply && !saved.replied_private) {
     let dmText: string | null = null;
 
     // หากมีกฎเฉพาะคำที่ระบุคำตอบส่วนตัวไว้ ให้ใช้กฎนั้น
@@ -348,38 +361,13 @@ export async function processCommentAutoReply(
           const privateRes = await sendPrivateReply(page, ev.comment_id, dmText);
           if (privateRes.ok) {
             console.log(`[comment-bot] 💌 ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} สำเร็จ (${page.platform})`);
-            await db().rpc('finish_private_reply', {
+            const { error } = await db().rpc('finish_private_reply', {
               p_comment_row_id: savedCommentRowId,
               p_text: dmText,
               p_conversation_id: null,
               p_customer_id: null,
             });
-
-            try {
-              const { data: latestConv } = await db()
-                .from('conversations')
-                .select('customer_id, customers(name, profile_pic_url)')
-                .eq('page_id', page.id)
-                .order('last_message_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-              const cust = (Array.isArray(latestConv?.customers) ? latestConv?.customers[0] : latestConv?.customers) as { name?: string; profile_pic_url?: string } | null;
-              const customerName = cust?.name;
-              const customerPic = cust?.profile_pic_url;
-
-              if (customerName || customerPic) {
-                await db()
-                  .from('comments')
-                  .update({
-                    ...(customerName ? { from_name: customerName } : {}),
-                    ...(customerPic ? { from_pic_url: customerPic } : {}),
-                  })
-                  .eq('id', savedCommentRowId);
-              }
-            } catch (nameErr) {
-              console.warn('[comment-bot] อัปเดตชื่อลูกค้าจากแชทไม่สำเร็จ:', nameErr);
-            }
+            if (error) throw new Error(`Meta รับข้อความส่วนตัวแล้ว แต่บันทึกผลไม่สำเร็จ: ${error.message}`);
           } else {
             console.warn(
               `[comment-bot] ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} ไม่สำเร็จ (${page.platform}):`,
@@ -395,10 +383,17 @@ export async function processCommentAutoReply(
         }
       } catch (err) {
         console.error(`[comment-bot] เกิดข้อผิดพลาดขณะทักส่วนตัว:`, err);
+        await db().from('comments').update({
+          last_error_th: err instanceof Error ? err.message : 'ทักส่วนตัวไม่สำเร็จ กรุณาตรวจบน Meta ก่อนส่งเอง',
+        }).eq('id', savedCommentRowId);
       }
     }
   } else if (settings.auto_reply_private && !capabilities.privateReply) {
     console.info(`[comment-bot] แพลตฟอร์ม ${page.platform} ไม่รองรับการทักแชทส่วนตัว`);
+  }
+  // finish_private_reply clears last_error_th; it must not hide a failed public reply.
+  if (publicError) {
+    await db().from('comments').update({ last_error_th: publicError }).eq('id', savedCommentRowId);
   }
 }
 

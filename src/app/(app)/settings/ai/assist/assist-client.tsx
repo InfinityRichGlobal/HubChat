@@ -109,7 +109,8 @@ export default function AssistSettingsClient({ isOwner }: { isOwner: boolean }) 
   }, []);
 
   useEffect(() => {
-    void loadData();
+    const timer = setTimeout(() => void loadData(), 0);
+    return () => clearTimeout(timer);
   }, [loadData]);
 
   // บันทึกหมวดหมู่ AI ช่วยคิด

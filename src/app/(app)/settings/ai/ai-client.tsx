@@ -94,7 +94,8 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
   }, []);
 
   useEffect(() => {
-    void loadSettings();
+    const timer = setTimeout(() => void loadSettings(), 0);
+    return () => clearTimeout(timer);
   }, [loadSettings]);
 
   async function handleSave() {

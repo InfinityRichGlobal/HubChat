@@ -301,11 +301,14 @@ describe.skipIf(!available)('PostgreSQL จริง — ดึงแชทเ�
       },
     ]);
 
-    const summary = await backfillPageConversations(metaPage());
+    const first = await backfillPageConversations(metaPage());
+    expect(first.has_more).toBe(true);
+    expect(first.next_cursor).toBe('CURSOR_2');
+    const second = await backfillPageConversations(metaPage(), first.next_cursor);
 
-    expect(summary.pages_fetched).toBe(2);
-    expect(summary.messages_saved).toBe(2);
-    expect(summary.has_more).toBe(false);
+    expect(first.pages_fetched + second.pages_fetched).toBe(2);
+    expect(first.messages_saved + second.messages_saved).toBe(2);
+    expect(second.has_more).toBe(false);
     // หน้าที่สองต้องส่ง cursor ที่ได้จากหน้าแรกไปด้วย
     expect(calls[1]).toContain('after=CURSOR_2');
   });

@@ -8,7 +8,7 @@
  *   4. ยังไม่ตั้งค่า R2 → ข้ามอย่างสุภาพ ไม่พัง และจดไว้ว่าข้าม
  *   5. ข้อความเดียวแนบหลายไฟล์ → เก็บครบทุกไฟล์ ไม่ทับกัน
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { postgresAvailable, resetDatabase, startRestServer, testPool, type RestServer } from './harness';
@@ -24,7 +24,7 @@ process.env.ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
 
 
 const { captureInboundMedia } = await import('@/server/storage/media');
-const { __setStorageFetcherForTests } = await import('@/server/storage/supabase-storage');
+const realFetch = globalThis.fetch;
 
 let pool: Pool;
 let rest: RestServer;
@@ -45,11 +45,11 @@ describe.skipIf(!available)('PostgreSQL จริง — เก็บสื่�
   afterAll(async () => {
     await rest?.close();
     await pool?.end();
-    __setStorageFetcherForTests(null);
+    vi.unstubAllGlobals();
   });
 
   beforeEach(async () => {
-    __setStorageFetcherForTests(null);
+    vi.unstubAllGlobals();
     await pool.query('truncate media_assets cascade');
     await pool.query('delete from messages');
     await pool.query('delete from conversations');
@@ -82,14 +82,17 @@ describe.skipIf(!available)('PostgreSQL จริง — เก็บสื่�
    */
   function fakeWorld(opts: { downloadStatus?: number; uploadStatus?: number } = {}) {
     const state = { downloads: 0, uploads: 0 };
-    __setStorageFetcherForTests((async (input: RequestInfo | URL) => {
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === 'string' ? input
         : input instanceof URL ? input.href
         : (input as Request).url;
-      if (url.includes('storage/v1/object') || url.includes('r2.cloudflarestorage.com')) {
+      if (url.includes('/rest/v1/')) return realFetch(input, init);
+      if (url.includes('/storage/v1/object')) {
         state.uploads += 1;
-        return new Response('', { status: opts.uploadStatus ?? 200 });
+        return new Response(JSON.stringify({ Key: 'media/test.jpg' }), {
+          status: opts.uploadStatus ?? 200, headers: { 'Content-Type': 'application/json' },
+        });
       }
       state.downloads += 1;
       const status = opts.downloadStatus ?? 200;

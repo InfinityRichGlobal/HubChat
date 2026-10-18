@@ -672,7 +672,12 @@ function SyncButton({ page, onDone }: { page: SafePage; onDone: () => void }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ after: next }),
         });
-        let json: any = null;
+        let json: {
+          ok: boolean;
+          error?: { message_th?: string };
+          data: { summary: { conversations_seen: number; messages_saved: number; duplicates: number;
+            has_more: boolean; next_cursor: string | null; error_th: string | null } };
+        } | null = null;
         try {
           json = await res.json();
         } catch {

@@ -25,7 +25,11 @@ export type LibraryItem = {
   created_at: string;
 };
 
-export function MediaLibraryPicker({
+export function MediaLibraryPicker(props: Parameters<typeof MediaLibraryPickerContent>[0]) {
+  return props.open ? <MediaLibraryPickerContent key={props.kind} {...props} /> : null;
+}
+
+function MediaLibraryPickerContent({
   open,
   kind = 'image',
   multiple = false,
@@ -47,8 +51,6 @@ export function MediaLibraryPicker({
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    setSelectedIds(new Set());
-    setSelectedAlbum('ทั้งหมด');
     void fetch('/api/media-library?for_picker=1', { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => {
@@ -112,7 +114,7 @@ export function MediaLibraryPicker({
     if (kind === 'video') return [];
     const filtered = loaded.albums.filter((a) => a !== 'ทั้งหมด' && a !== 'วิดีโอ' && a !== 'ระบบ');
     return ['ทั้งหมด', ...filtered];
-  }, [loaded?.albums, kind]);
+  }, [loaded, kind]);
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
