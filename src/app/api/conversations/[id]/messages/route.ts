@@ -28,6 +28,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       limit ? Number(limit) : undefined,
       before,
       after,
+      { before_id: sp.get('before_id'), after_id: sp.get('after_id') },
     );
     return ok({ messages: page.messages, has_more: page.has_more, truncated: page.truncated });
   } catch (err) {

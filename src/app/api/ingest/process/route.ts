@@ -12,11 +12,13 @@
  */
 import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, toErrorResponse } from '@/lib/api';
-import { drainWebhookQueue } from '@/server/ingest/processor';
+import { processWebhookBatch } from '@/server/ingest/processor';
+import { heartbeatStarted, heartbeatFinished, heartbeatFailed } from '@/server/workers/heartbeat';
 import { getRuntimeSetting } from '@/server/settings/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 function secretMatches(given: string, expected: string): boolean {
   if (given.length !== expected.length) return false;
@@ -40,7 +42,12 @@ async function authorize(req: Request): Promise<'cron' | 'admin'> {
 async function handle(req: Request) {
   try {
     const by = await authorize(req);
-    const summary = await drainWebhookQueue();
+    let summary;
+    try {
+      await heartbeatStarted('ingest');
+      summary = await processWebhookBatch();
+      await heartbeatFinished('ingest', summary);
+    } catch (err) { await heartbeatFailed('ingest', err); throw err; }
     return ok({ by, ...summary });
   } catch (err) {
     return toErrorResponse(err);

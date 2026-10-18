@@ -21,7 +21,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { Client, Pool } from 'pg';
+import { Client, Pool, types as pgTypes } from 'pg';
 
 const PG = {
   host: process.env.PGHOST ?? '127.0.0.1',
@@ -47,12 +47,13 @@ export async function postgresAvailable(): Promise<boolean> {
 
 /** สร้างฐานข้อมูลใหม่แล้วรัน migration ทุกไฟล์ตามลำดับ */
 export async function resetDatabase(): Promise<void> {
+  if (!['127.0.0.1', 'localhost', '::1'].includes(PG.host) || !/^hubchat_[a-z0-9_]*test$/.test(TEST_DB)) throw new Error('Test reset is restricted to a local hubchat_*test database');
   // ฐานข้อมูลใหม่ = ชนิดคอลัมน์ที่จำไว้ใช้ไม่ได้แล้ว
   COLUMN_TYPES.clear();
   const admin = new Client({ ...PG, database: 'postgres' });
   await admin.connect();
-  await admin.query(`drop database if exists ${TEST_DB} with (force)`);
-  await admin.query(`create database ${TEST_DB}`);
+  await admin.query(`drop database if exists ${q(TEST_DB)} with (force)`);
+  await admin.query(`create database ${q(TEST_DB)}`);
   await admin.end();
 
   const dir = path.resolve(__dirname, '../../supabase/migrations');
@@ -214,6 +215,13 @@ export async function startRestServer(pool: Pool): Promise<RestServer> {
   };
 }
 
+// PostgREST preserves microseconds. Date serialization would silently corrupt cursors.
+function restQuery(pool: Pool, text: string, values: unknown[] = []) {
+  return pool.query({ text, values, types: { getTypeParser(oid: number) {
+    return oid === 1184 ? (value: string) => value.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00') : pgTypes.getTypeParser(oid);
+  } } });
+}
+
 async function handle(
   pool: Pool,
   req: http.IncomingMessage,
@@ -233,11 +241,13 @@ async function handle(
     //    ไม่งั้น node-postgres จะแปลงเป็น array ของ Postgres ({...}) ซึ่งใส่ในช่อง jsonb ไม่ได้
     //    (ตัว PostgREST จริงรับ JSON มาทั้งก้อนอยู่แล้ว จึงไม่มีปัญหานี้)
     //    ถ้าวันหนึ่งมีฟังก์ชันที่รับ text[] / uuid[] จริง ๆ ต้องกลับมาแก้ตรงนี้
-    const r = await pool.query(
+    const r = await restQuery(pool,
       sql,
       names.map((n) => (Array.isArray(args[n]) ? JSON.stringify(args[n]) : args[n])),
     );
-    return send(res, 200, r.rows.length === 1 && Object.keys(r.rows[0]).length === 0 ? null : r.rows);
+    const meta = await restQuery(pool, `select p.proretset, t.typtype from pg_proc p join pg_type t on t.oid=p.prorettype join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=$1 limit 1`, [fn]);
+    const scalar = meta.rows[0] && !meta.rows[0].proretset && meta.rows[0].typtype !== 'c' && r.fields.length === 1 && r.fields[0].name === fn;
+    return send(res, 200, scalar ? (r.rows[0]?.[fn] ?? null) : r.rows);
   }
 
   const table = pathname.replace(/\/$/, '');
@@ -246,6 +256,7 @@ async function handle(
   let selectParam = '*';
   let order = '';
   let limit = '';
+  let offset = '';
 
   for (const [k, v] of url.searchParams.entries()) {
     if (k === 'select') { selectParam = v; continue; }
@@ -267,7 +278,7 @@ async function handle(
       continue;
     }
     if (k === 'limit') { limit = ` limit ${parseInt(v, 10)}`; continue; }
-    if (k === 'offset') continue;
+    if (k === 'offset') { offset = ` offset ${parseInt(v, 10)}`; continue; }
 
     /* ---- or=(cond,cond) : ใช้ในช่องค้นหาของอินบ็อกซ์ ---- */
     if (k === 'or' || k === 'and') {
@@ -278,6 +289,7 @@ async function handle(
         if (!condition) throw new Error(`Unsupported logical filter: ${part}`);
         const [, col, op, raw] = condition;
         if (op === 'is' && raw === 'null') return `${q(col)} is null`;
+        if (op === 'not' && raw === 'is.null') return `${q(col)} is not null`;
         if (!OPS[op]) throw new Error(`Unsupported logical operator: ${op}`);
         const value = raw.startsWith('"') ? JSON.parse(raw) : raw;
         params.push(op === 'ilike' || op === 'like' ? value.replace(/\*/g, '%') : value);
@@ -365,12 +377,12 @@ async function handle(
   try {
     if (req.method === 'GET' || req.method === 'HEAD') {
       if (wantCount) {
-        const c = await pool.query(`select count(*)::int as n from ${q(table)}${whereSql}`, params);
+        const c = await restQuery(pool, `select count(*)::int as n from ${q(table)}${whereSql}`, params);
         total = c.rows[0].n;
       }
       if (req.method === 'GET') {
         const colSql = cols.includes('*') ? '*' : cols.map(q).join(', ');
-        rows = (await pool.query(`select ${colSql} from ${q(table)}${whereSql}${order}${limit}`, params)).rows;
+        rows = (await restQuery(pool, `select ${colSql} from ${q(table)}${whereSql}${order}${limit}${offset}`, params)).rows;
       }
     } else if (req.method === 'POST') {
       const payload = (Array.isArray(body) ? body : [body]) as Record<string, unknown>[];
@@ -383,9 +395,12 @@ async function handle(
       const ret = prefer.includes('return=representation')
         ? ` returning ${cols.includes('*') ? '*' : cols.map(q).join(', ')}`
         : '';
+      const conflictKeys = (url.searchParams.get('on_conflict') ?? 'id').split(',');
+      const conflict = prefer.includes('resolution=ignore-duplicates') ? ` on conflict (${conflictKeys.map(q).join(',')}) do nothing`
+        : prefer.includes('resolution=merge-duplicates') ? ` on conflict (${conflictKeys.map(q).join(',')}) do update set ${keys.map(k => `${q(k)}=excluded.${q(k)}`).join(',')}` : '';
       rows = (
-        await pool.query(
-          `insert into ${q(table)} (${keys.map(q).join(',')}) values ${values.join(',')}${ret}`,
+        await restQuery(pool,
+          `insert into ${q(table)} (${keys.map(q).join(',')}) values ${values.join(',')}${conflict}${ret}`,
           flat,
         )
       ).rows;
@@ -398,9 +413,9 @@ async function handle(
       const ret = prefer.includes('return=representation')
         ? ` returning ${cols.includes('*') ? '*' : cols.map(q).join(', ')}`
         : '';
-      rows = (await pool.query(`update ${q(table)} set ${sets.join(', ')}${whereSql}${ret}`, all)).rows;
+      rows = (await restQuery(pool, `update ${q(table)} set ${sets.join(', ')}${whereSql}${ret}`, all)).rows;
     } else if (req.method === 'DELETE') {
-      const r = await pool.query(`delete from ${q(table)}${whereSql} returning *`, params);
+      const r = await restQuery(pool, `delete from ${q(table)}${whereSql} returning *`, params);
       rows = prefer.includes('return=representation') ? r.rows : [];
     }
   } catch (err) {

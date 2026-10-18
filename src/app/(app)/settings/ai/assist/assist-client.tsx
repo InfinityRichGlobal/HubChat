@@ -2,27 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Sparkles,
-  Heart,
-  Plus,
-  Trash2,
-  Save,
-  RotateCcw,
-  Play,
-  Loader2,
-  MessageSquare,
-  Bot,
-  Sliders,
-  CheckCircle2,
-  AlertCircle,
-  HelpCircle,
-  Tag,
-  Gift,
-  Star,
-  Clock,
-  ArrowRight,
-} from 'lucide-react';
+import { Sparkles, Heart, Plus, Trash2, Save, RotateCcw, Play, Loader2, Sliders, CheckCircle2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';

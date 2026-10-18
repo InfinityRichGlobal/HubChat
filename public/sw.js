@@ -21,7 +21,7 @@
  */
 
 const OFFLINE_URL = '/offline.html';
-const CACHE_NAME = 'hubchat-shell-v3';
+const CACHE_NAME = 'hubchat-shell-v4';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

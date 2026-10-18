@@ -1,4 +1,5 @@
 'use client';
+import NextImage from 'next/image';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -29,6 +30,7 @@ import { cn } from '@/lib/utils';
 import CustomerAvatar from '@/components/customer-avatar';
 import PlatformIcon from '@/components/platform-icon';
 import { displayName, hasRealName } from '@/lib/customer-name';
+import { compareCursor, type InboxCursor } from '@/lib/inbox/cursor';
 import { mergeByTime } from '@/lib/inbox/merge';
 import { customerProfileUrl } from '@/lib/customer-profile';
 import { toast } from 'sonner';
@@ -293,7 +295,8 @@ export default function InboxClient({
   const [loadingMore, setLoadingMore] = useState(false);
   /** โหลดชุดแรกของ "ตัวกรองชุดนี้" แล้วหรือยัง */
   const listInitRef = useRef(true);
-  const newestConversationAtRef = useRef(initialConversations[0]?.last_message_at ?? null);
+  const listGeneration = useRef(0);
+  const newestConversationAtRef = useRef<InboxCursor | null>(initialConversations[0] ? { at: initialConversations[0].last_message_at, id: initialConversations[0].id } : null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedPages, setSelectedPages] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -364,7 +367,7 @@ export default function InboxClient({
           if (c) {
             router.replace(`/inbox?c=${c}`);
           }
-        } catch (_) {}
+        } catch  {}
       }
     };
     navigator.serviceWorker.addEventListener('message', handler);
@@ -378,9 +381,6 @@ export default function InboxClient({
 
   const tagById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
 
-  useEffect(() => {
-    newestConversationAtRef.current = conversations[0]?.last_message_at ?? null;
-  }, [conversations]);
 
   /* ---- โหลดรายชื่อแท็กครั้งเดียวตอนเปิดหน้า ---- */
   useEffect(() => {
@@ -398,14 +398,14 @@ export default function InboxClient({
    *    ผู้เรียกตั้ง state ใน .then() — กันการเรนเดอร์ซ้อนกันเป็นทอด ๆ
    */
   const fetchList = useCallback(
-    async (before?: string | null, since?: string | null, signal?: AbortSignal): Promise<{ rows: ConversationRow[]; has_more: boolean; truncated: boolean } | null> => {
+    async (before?: InboxCursor | null, since?: InboxCursor | null, signal?: AbortSignal): Promise<{ rows: ConversationRow[]; has_more: boolean; truncated: boolean } | null> => {
       const params = new URLSearchParams();
       if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
       if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
       if (search.trim()) params.set('search', search.trim());
       params.set('group', inboxGroup);
-      if (before) params.set('before', before);
-      if (since) params.set('since', since);
+      if (before) { params.set('before', before.at); params.set('before_id', before.id); }
+      if (since) { params.set('since', since.at); params.set('since_id', since.id); }
 
       try {
         const res = await fetch(`/api/conversations?${params.toString()}`, { cache: 'no-store', signal });
@@ -424,7 +424,7 @@ export default function InboxClient({
     [selectedPages, selectedTags, search, inboxGroup],
   );
 
-  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean; truncated: boolean }) => {
+  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean; truncated: boolean }, incremental = false) => {
     /**
      * 🔴 ชุดแรกของตัวกรองชุดใหม่ ต้อง "ทับทั้งก้อน" ไม่ใช่รวมกับของเดิม
      *    ถ้ารวม ห้องเก่าที่ไม่เข้าเงื่อนไขจะค้างอยู่บนจอ
@@ -433,12 +433,19 @@ export default function InboxClient({
      */
     if (!listInitRef.current) {
       listInitRef.current = true;
+      const first = got.rows[0];
+      newestConversationAtRef.current = first ? { at: first.last_message_at, id: first.id } : null;
       setConversations(got.rows);
       setHasMoreList(got.has_more);
       return;
     }
-    setConversations((prev) => mergeConversations(prev, got.rows, true));
-    if (got.truncated) toast.warning('มีแชทใหม่เกินเพดานหนึ่งรอบ ระบบกำลังดึงต่อและไม่ได้ทิ้งรายการ');
+    if (incremental) {
+      for (const row of got.rows) {
+        const cursor = { at: row.last_message_at, id: row.id };
+        if (!newestConversationAtRef.current || compareCursor(cursor, newestConversationAtRef.current) > 0) newestConversationAtRef.current = cursor;
+      }
+    }
+    setConversations((prev) => mergeConversations(prev, got.rows, !incremental));
   }, []);
 
   const loadList = useCallback(async () => {
@@ -457,9 +464,11 @@ export default function InboxClient({
   const loadMoreList = useCallback(async () => {
     if (loadingMore || conversations.length === 0) return;
     setLoadingMore(true);
+    const generation = listGeneration.current;
     try {
-      const oldest = conversations[conversations.length - 1].last_message_at;
-      const got = await fetchList(oldest);
+      const oldest = conversations[conversations.length - 1];
+      const got = await fetchList({ at: oldest.last_message_at, id: oldest.id });
+      if (generation !== listGeneration.current) return;
       if (!got) {
         toast.error('โหลดแชทเพิ่มไม่สำเร็จ');
         return;
@@ -482,6 +491,7 @@ export default function InboxClient({
     let alive = true;
     // ตัวกรองเปลี่ยน = เริ่มนับหนึ่งใหม่ ของเก่าที่กดโหลดไว้ใช้ต่อไม่ได้แล้ว
     listInitRef.current = false;
+    listGeneration.current += 1;
     const apply = () => {
       void fetchList().then((got) => {
         if (alive && got) applyList(got);
@@ -491,14 +501,21 @@ export default function InboxClient({
     // ดึงซ้ำทุก 8 วินาที (ดู DEFERRED_REVIEW D-21 เรื่อง Realtime)
     let controller: AbortController | null = null;
     let running = false;
+    let rounds = 0;
     const poll = () => {
       if (document.hidden || running) return;
       running = true;
       controller = new AbortController();
       const since = newestConversationAtRef.current;
-      void fetchList(undefined, since, controller.signal).then((got) => {
-        if (alive && got) applyList(got);
-      }).finally(() => { running = false; });
+      void (async () => {
+        const got = await fetchList(undefined, since, controller!.signal);
+        if (alive && got) applyList(got, Boolean(since));
+        // Refresh status changes and late arrivals without advancing past a pending delta batch.
+        if (alive && ++rounds % 8 === 0 && !got?.truncated) {
+          const head = await fetchList(undefined, undefined, controller!.signal);
+          if (alive && head) applyList(head);
+        }
+      })().finally(() => { running = false; });
     };
     const onVisibility = () => { if (!document.hidden) poll(); };
     document.addEventListener('visibilitychange', onVisibility);
@@ -612,7 +629,7 @@ export default function InboxClient({
             {/* 2. ชิป: ยังไม่ได้อ่าน */}
             <FilterChip active={inboxGroup === 'unread'} onClick={() => setInboxGroup(inboxGroup === 'unread' ? 'all' : 'unread')}>
               <MessageSquareOff className="size-3.5" />
-              ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount})` : ''}
+              ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount}${hasMoreList ? "+" : ""})` : ''}
             </FilterChip>
 
             {/* 3. ปุ่มดรอปดาวน์: ป้ายแท็ก (วางก่อนติดตามผล) */}
@@ -1483,7 +1500,7 @@ function ChatRoom({
   const initializedRef = useRef(false);
   /** id ของข้อความล่างสุดที่เคยเห็น — ใช้แยก "มีของใหม่จริง" ออกจาก "แค่ดึงข้อมูลรอบใหม่" */
   const lastMessageIdRef = useRef<string | null>(null);
-  const newestMessageAtRef = useRef<string | null>(null);
+  const newestMessageAtRef = useRef<InboxCursor | null>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 
   const [viewportStyle, setViewportStyle] = useState<{ height: string; top: string } | null>(null);
@@ -1554,11 +1571,11 @@ function ChatRoom({
 
   /* ---- ตัวดึงข้อมูล : คืนค่าอย่างเดียว ไม่ตั้ง state เอง ---- */
   const fetchMessages = useCallback(
-    async (before?: string | null, after?: string | null, signal?: AbortSignal): Promise<{ rows: MessageRow[]; has_more: boolean; truncated: boolean } | null> => {
+    async (before?: InboxCursor | null, after?: InboxCursor | null, signal?: AbortSignal): Promise<{ rows: MessageRow[]; has_more: boolean; truncated: boolean } | null> => {
       try {
         const params = new URLSearchParams();
-        if (before) params.set('before', before);
-        if (after) params.set('after', after);
+        if (before) { params.set('before', before.at); params.set('before_id', before.id); }
+        if (after) { params.set('after', after.at); params.set('after_id', after.id); }
         const qs = params.size ? `?${params.toString()}` : '';
         const res = await fetch(`/api/conversations/${c.id}/messages${qs}`, { cache: 'no-store', signal });
         const json = await res.json();
@@ -1602,11 +1619,11 @@ function ChatRoom({
   }, [c.id, meId]);
 
   /** รับชุดข้อความล่าสุดเข้ามารวมกับที่ถืออยู่ */
-  const applyLatest = useCallback((got: { rows: MessageRow[]; has_more: boolean; truncated: boolean }) => {
-    const newest = got.rows[got.rows.length - 1]?.created_at;
-    if (newest && (!newestMessageAtRef.current || newest > newestMessageAtRef.current)) newestMessageAtRef.current = newest;
+  const applyLatest = useCallback((got: { rows: MessageRow[]; has_more: boolean; truncated: boolean }, incremental = false) => {
+    const row = got.rows[got.rows.length - 1];
+    const newest = row ? { at: row.created_at, id: row.id } : null;
+    if (newest && (!newestMessageAtRef.current || compareCursor(newest, newestMessageAtRef.current) > 0)) newestMessageAtRef.current = newest;
     // ตรวจว่ามีข้อความใหม่จากลูกค้าไหม — ถ้ามี = กรอบ 24 ชม. อาจเปิดใหม่ ต้อง refresh policy
-    const hasNewInbound = got.rows.some((r) => r.direction === 'in');
     setMessages((prev) => {
       if (prev === null) return got.rows;
       const prevIds = new Set(prev.map((m) => m.id));
@@ -1614,7 +1631,7 @@ function ChatRoom({
       if (actuallyNew) {
         void fetchPolicy().then((p) => { if (p) setPolicy(p); });
       }
-      return mergeMessages(prev, got.rows, true);
+      return mergeMessages(prev, got.rows, !incremental);
     });
     // ⚠️ ตั้ง "ยังมีของเก่าอีกไหม" เฉพาะรอบแรก
     //    รอบหลัง ๆ ของเก่าที่กดโหลดมาแล้วยังอยู่ในมือ ค่าจาก API จึงไม่ใช่ความจริงอีกต่อไป
@@ -1622,7 +1639,6 @@ function ChatRoom({
       initializedRef.current = true;
       setHasOlder(got.has_more);
     }
-    if (got.truncated) toast.warning('มีข้อความใหม่เกินเพดานหนึ่งรอบ ระบบกำลังดึงต่อและไม่ได้ทิ้งข้อความ');
   }, [fetchPolicy]);
 
   const loadMessages = useCallback(async () => {
@@ -1636,7 +1652,7 @@ function ChatRoom({
     if (!current || current.length === 0 || loadingOlder) return;
     setLoadingOlder(true);
     try {
-      const got = await fetchMessages(current[0].created_at);
+      const got = await fetchMessages({ at: current[0].created_at, id: current[0].id });
       if (!got) {
         toast.error('โหลดข้อความเก่าไม่สำเร็จ');
         return;
@@ -1682,8 +1698,9 @@ function ChatRoom({
       if (document.hidden || messagesRunning) return;
       messagesRunning = true;
       messageController = new AbortController();
-      void fetchMessages(undefined, newestMessageAtRef.current, messageController.signal).then((got) => {
-        if (alive && got) applyLatest(got);
+      const after = newestMessageAtRef.current;
+      void fetchMessages(undefined, after, messageController.signal).then((got) => {
+        if (alive && got) applyLatest(got, Boolean(after));
       }).finally(() => { messagesRunning = false; });
     };
     const pullLock = () => {
@@ -3370,7 +3387,7 @@ function MessageBubble({
       <div className={cn('flex items-end gap-1.5 max-w-[85%]', outgoing ? 'flex-row-reverse' : 'flex-row')}>
         {outgoing && m.sender_type === 'admin' && (
           m.admin_avatar_url ? (
-            <img
+            <NextImage unoptimized width={24} height={24}
               src={m.admin_avatar_url}
               alt={m.admin_name ?? 'แอดมิน'}
               title={m.admin_name ?? 'แอดมิน'}

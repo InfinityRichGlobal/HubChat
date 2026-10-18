@@ -2,15 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { requireAdmin, requireOwner } from '@/lib/auth/current-admin';
 import { ok, toErrorResponse } from '@/lib/api';
-import {
-  getAssistCategories,
-  saveAssistCategories,
-  getRelationCategories,
-  saveRelationCategories,
-  getGlobalAssistPrompt,
-  saveGlobalAssistPrompt,
-  type AiCategory,
-} from '@/server/ai/assist';
+import { getAssistCategories, saveAssistCategories, getRelationCategories, saveRelationCategories, getGlobalAssistPrompt, saveGlobalAssistPrompt } from '@/server/ai/assist';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

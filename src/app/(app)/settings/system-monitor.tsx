@@ -2,40 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Activity,
-  AlertCircle,
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Database,
-  ExternalLink,
-  HardDrive,
-  HelpCircle,
-  Loader2,
-  MessageSquare,
-  RefreshCw,
-  Send,
-  ShieldAlert,
-  ShieldCheck,
-  Sparkles,
-  Zap,
-} from 'lucide-react';
+import { Activity, AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Clock, Database, Loader2, RefreshCw, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+
 import PlatformIcon from '@/components/platform-icon';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type {
-  DiagnosticItemStatus,
-  MetaErrorIssue,
-  SystemDiagnosticsReport,
-} from '@/types/diagnostics';
+import type { DiagnosticItemStatus, SystemDiagnosticsReport } from '@/types/diagnostics';
 
 function StatusIcon({ status, className }: { status: DiagnosticItemStatus; className?: string }) {
   if (status === 'healthy') {
@@ -123,7 +98,6 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
   if (!report) return null;
 
   const { overallStatus, overallScore, checkedAt, subsystems, metaErrors, pages } = report;
-  const criticalIssueCount = metaErrors.issues.filter((i) => i.severity === 'high').length;
   const totalIssueCount = metaErrors.issues.length;
 
   return (

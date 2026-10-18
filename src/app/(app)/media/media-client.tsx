@@ -388,8 +388,8 @@ export default function MediaClient({
   useEffect(() => {
     if (!previewItem) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') goToPrev();
-      else if (e.key === 'ArrowRight') goToNext();
+      if (e.key === 'ArrowLeft' && previewIndex > 0) setPreviewItem(displayedItems[previewIndex - 1]);
+      else if (e.key === 'ArrowRight' && previewIndex >= 0 && previewIndex < displayedItems.length - 1) setPreviewItem(displayedItems[previewIndex + 1]);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);

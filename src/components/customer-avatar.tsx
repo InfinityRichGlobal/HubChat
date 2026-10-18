@@ -1,4 +1,5 @@
 'use client';
+import NextImage from 'next/image';
 /**
  * รูปโปรไฟล์ลูกค้า พร้อมตัวสำรองเมื่อไม่มีรูป และรองรับการดึงการตั้งค่าจากระบบ
  * ===========================================================================
@@ -24,6 +25,20 @@ type AvatarSettings = {
 let cachedAvatarSettings: AvatarSettings | null = null;
 let avatarSettingsListeners: Array<(s: AvatarSettings) => void> = [];
 
+let avatarSettingsRequest: Promise<void> | null = null;
+function refreshAvatarSettings(): Promise<void> {
+  if (avatarSettingsRequest) return avatarSettingsRequest;
+  avatarSettingsRequest = fetch('/api/settings/avatar', { cache: 'no-store' })
+    .then(res => { if (!res.ok) throw new Error('Avatar settings unavailable'); return res.json(); })
+    .then(result => {
+      if (!result?.ok || !result.data) return;
+      const next: AvatarSettings = { mode: result.data.mode === 'real_profile' ? 'real_profile' : 'platform', showBadge: Boolean(result.data.showBadge) };
+      cachedAvatarSettings = next;
+      avatarSettingsListeners.forEach(listener => listener(next));
+    }).catch(() => {}).finally(() => { avatarSettingsRequest = null; });
+  return avatarSettingsRequest;
+}
+
 export function useAvatarSettings(): AvatarSettings {
   const [settings, setSettings] = useState<AvatarSettings>(
     cachedAvatarSettings ?? { mode: 'platform', showBadge: false }
@@ -33,35 +48,8 @@ export function useAvatarSettings(): AvatarSettings {
     const handleUpdate = (s: AvatarSettings) => setSettings(s);
     avatarSettingsListeners.push(handleUpdate);
 
-    if (!cachedAvatarSettings) {
-      void fetch('/api/settings/avatar', { cache: 'no-store' })
-        .then((res) => res.json())
-        .then((result) => {
-          if (result?.ok && result?.data) {
-            cachedAvatarSettings = {
-              mode: result.data.mode === 'real_profile' ? 'real_profile' : 'platform',
-              showBadge: Boolean(result.data.showBadge),
-            };
-            avatarSettingsListeners.forEach((fn) => fn(cachedAvatarSettings!));
-          }
-        })
-        .catch(() => {});
-    }
-
-    const onCustomEvent = () => {
-      void fetch('/api/settings/avatar', { cache: 'no-store' })
-        .then((res) => res.json())
-        .then((result) => {
-          if (result?.ok && result?.data) {
-            cachedAvatarSettings = {
-              mode: result.data.mode === 'real_profile' ? 'real_profile' : 'platform',
-              showBadge: Boolean(result.data.showBadge),
-            };
-            avatarSettingsListeners.forEach((fn) => fn(cachedAvatarSettings!));
-          }
-        })
-        .catch(() => {});
-    };
+    if (!cachedAvatarSettings) void refreshAvatarSettings();
+    const onCustomEvent = () => { void refreshAvatarSettings(); };
 
     window.addEventListener('avatar-settings-updated', onCustomEvent);
 
@@ -120,12 +108,12 @@ export default function CustomerAvatar({
   const globalSettings = useAvatarSettings();
   const effectiveMode = mode ?? globalSettings.mode;
   const effectiveShowBadge = showBadge ?? globalSettings.showBadge;
-  const [broken, setBroken] = useState(false);
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
 
   const box =
     size === 'sm' ? 'size-7 text-[10px]' : size === 'lg' ? 'size-12 text-base' : 'size-9 text-xs';
 
-  const showRealPic = effectiveMode === 'real_profile' && Boolean(src) && !broken;
+  const showRealPic = effectiveMode === 'real_profile' && Boolean(src) && brokenSrc !== src;
 
   return (
     <div className="relative inline-flex shrink-0">
@@ -140,13 +128,13 @@ export default function CustomerAvatar({
         aria-hidden="true"
       >
         {showRealPic && src ? (
-          <img
+          <NextImage unoptimized width={64} height={64}
             src={src}
             alt=""
             className="size-full object-cover"
             referrerPolicy="no-referrer"
             loading="lazy"
-            onError={() => setBroken(true)}
+            onError={() => setBrokenSrc(src)}
           />
         ) : platform ? (
           <PlatformIcon

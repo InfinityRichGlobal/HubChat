@@ -1,4 +1,5 @@
 'use client';
+import NextImage from 'next/image';
 
 import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
@@ -161,7 +162,7 @@ export default function AppShell({
     items.forEach((item) => {
       try {
         router.prefetch(item.href);
-      } catch (_) {}
+      } catch  {}
     });
   }, [items, router]);
 
@@ -201,7 +202,7 @@ export default function AppShell({
           className="flex h-14 items-center gap-2 px-4 font-semibold transition-opacity hover:opacity-80"
           title="กลับหน้าหลักอินบ็อกซ์"
         >
-          {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
+          {brand.logoUrl && <NextImage unoptimized width={32} height={32} src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
           <span className="truncate">{brand.name}</span>
         </Link>
         <nav className="flex flex-1 flex-col gap-1 p-2 overflow-y-auto">
@@ -248,7 +249,7 @@ export default function AppShell({
             className="flex min-w-0 items-center gap-2 font-semibold transition-opacity hover:opacity-80"
             title="กลับหน้าหลักอินบ็อกซ์"
           >
-            {brand.logoUrl && <img src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
+            {brand.logoUrl && <NextImage unoptimized width={32} height={32} src={brand.logoUrl} alt="" className="size-8 rounded object-contain" />}
             <span className="truncate">{brand.name}</span>
           </Link>
           <div className="flex items-center gap-1">
@@ -503,7 +504,7 @@ function AccountMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className={cn('justify-start gap-2', className)}>
+          <Button variant="ghost" size="sm" disabled={savingAvatar} aria-busy={savingAvatar} className={cn('justify-start gap-2', className)}>
             {avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img

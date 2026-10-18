@@ -1,3 +1,5 @@
+import { compareCursor } from './cursor';
+
 /**
  * รวมรายการที่ "ดึงมาเป็นชุด ๆ" ให้เป็นก้อนเดียว (รอบ 7)
  * ===========================================================================
@@ -43,21 +45,16 @@ export function mergeByTime<T extends HasKey>(
   const incomingIds = new Set(incoming.map((x) => x.id));
 
   // ขอบของหน้าต่างที่ชุดใหม่ครอบคลุม = รายการที่เก่าที่สุดในชุด
-  const edge = newestFirst ? timeOf(incoming[incoming.length - 1]) : timeOf(incoming[0]);
+  const edgeRow = newestFirst ? incoming[incoming.length - 1] : incoming[0];
+  const edge = { at: timeOf(edgeRow), id: edgeRow.id };
 
   const kept = prev.filter((x) => {
     if (incomingIds.has(x.id)) return false; // มีตัวใหม่กว่ามาแทนแล้ว
-    if (replaceWindow && timeOf(x) >= edge) return false; // อยู่ในหน้าต่างแต่หายไป = ถูกลบ
+    if (replaceWindow && compareCursor({ at: timeOf(x), id: x.id }, edge) >= 0) return false; // อยู่ในหน้าต่างแต่หายไป = ถูกลบ
     return true;
   });
 
   return [...kept, ...incoming].sort((a, b) => {
-    const ta = timeOf(a);
-    const tb = timeOf(b);
-    if (ta !== tb) return (ta < tb ? -1 : 1) * (newestFirst ? -1 : 1);
-    // เวลาเท่ากันเป๊ะเกิดได้บ่อยมากกับข้อความที่ดึงย้อนหลังมาจาก Meta
-    // จึงต้องมีตัวตัดสินที่คงที่ ไม่งั้นลำดับจะสลับไปมาทุกครั้งที่ดึงข้อมูล
-    if (a.id === b.id) return 0;
-    return (a.id < b.id ? -1 : 1) * (newestFirst ? -1 : 1);
+    return compareCursor({ at: timeOf(a), id: a.id }, { at: timeOf(b), id: b.id }) * (newestFirst ? -1 : 1);
   });
 }

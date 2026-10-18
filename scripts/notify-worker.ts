@@ -58,7 +58,7 @@ async function main() {
       console.error('[notify] รอบนี้ผิดพลาด (จะลองใหม่):', err);
       await heartbeatFailed('notifications', err);
     }
-    const configured = Number(await getRuntimeSetting('NOTIFY_INTERVAL_MS'));
+    const configured = Number(await getRuntimeSetting('NOTIFY_INTERVAL_MS').catch(() => '60000'));
     const intervalMs = Number.isFinite(configured) ? Math.max(configured, 60_000) : 60_000;
     await new Promise((r) => setTimeout(r, intervalMs));
   }

@@ -1,4 +1,3 @@
-import { NextRequest } from 'next/server';
 import { requireAdmin } from '@/lib/auth/current-admin';
 import { ok, fail, toErrorResponse } from '@/lib/api';
 import { getRuntimeSetting } from '@/server/settings/service';
@@ -11,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * ทดสอบยิง GET Challenge จำลองไปที่ Webhook ของ Meta
  * เพื่อให้ผู้ใช้สามารถกดทดสอบได้จากหน้าเว็บทันที โดยไม่ต้องรอให้ Meta ยิงเข้ามา
  */
-export async function POST(req: NextRequest) {
+export async function POST() {
   try {
     await requireAdmin();
 

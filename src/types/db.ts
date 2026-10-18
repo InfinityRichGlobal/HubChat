@@ -444,5 +444,6 @@ export const ALL_TABLES = [
   'message_sends', 'conversation_policy_state', 'auto_reply_executions',
   'shipping_methods', 'media_assets', 'fulfillment_notifications',
   'notification_jobs', 'customer_notes', 'worker_heartbeats',
-  'order_media_links', 'runtime_settings',
+  'order_media_links', 'runtime_settings', 'comment_public_sends',
+  'data_deletion_requests', 'erased_meta_identities',
 ] as const;

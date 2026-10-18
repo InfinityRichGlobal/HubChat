@@ -1,97 +1,78 @@
 import 'server-only';
-/**
- * Meta Data Deletion Callback
- * ===========================================================================
- * ⚠️ จำเป็นสำหรับ Meta App Review
- *    Meta กำหนดให้แอพทุกตัวต้องมี Data Deletion Callback หรือ Instructions URL
- *    เมื่อผู้ใช้ลบแอพออกจาก Facebook/Instagram → Meta จะยิง POST มาที่นี่
- *    แอพต้องลบข้อมูลของผู้ใช้นั้นออก แล้วตอบกลับด้วย confirmation_code
- *
- * Flow:
- *   1. ผู้ใช้ไปที่ Facebook → Settings → Apps and Websites → ลบแอพ
- *   2. Meta ส่ง POST มาพร้อม signed_request ใน body
- *   3. API ถอดรหัส signed_request → ได้ user_id
- *   4. ลบข้อมูลที่เกี่ยวข้องกับ user_id ออกจาก DB
- *   5. ตอบ JSON { url, confirmation_code }
- */
 import crypto from 'node:crypto';
 import { db } from '@/lib/supabase/admin';
-import { getRuntimeSetting } from '@/server/settings/service';
+import { encryptSecret, decryptSecret } from '@/lib/crypto';
+import type { PublicAdmin } from '@/types/db';
+import { z } from 'zod';
+import { removeObjects } from '@/server/storage/supabase-storage';
 
-export type ParsedSignedRequest = {
-  user_id: string;
-  algorithm: string;
-  issued_at: number;
-};
-
-/**
- * ถอดรหัส signed_request ของ Meta
- * https://developers.facebook.com/docs/facebook-login/guides/parse-signed-request
- */
-function parseSignedRequest(
-  signedRequest: string,
-  appSecret: string,
-): ParsedSignedRequest | null {
-  const [encodedSig, payload] = signedRequest.split('.', 2);
-  if (!encodedSig || !payload) return null;
-
-  // Base64url → Buffer
+export type ParsedSignedRequest = { user_id: string; algorithm: string; issued_at: number };
+export function parseSignedRequest(signedRequest: string, appSecret: string): ParsedSignedRequest | null {
+  if (signedRequest.length > 16000 || !/^[\w-]+\.[\w-]+$/.test(signedRequest)) return null;
+  const [encodedSig, payload] = signedRequest.split('.');
   const sig = Buffer.from(encodedSig, 'base64url');
-  const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as ParsedSignedRequest & { algorithm?: string };
-
-  // ตรวจว่า algorithm เป็น HMAC-SHA256
-  if (data.algorithm?.toUpperCase() !== 'HMAC-SHA256') return null;
-
-  // ตรวจลายเซ็น
-  const expectedSig = crypto
-    .createHmac('sha256', appSecret)
-    .update(payload)
-    .digest();
-
-  if (sig.length !== expectedSig.length) return null;
-  if (!crypto.timingSafeEqual(sig, expectedSig)) return null;
-
-  return data;
+  const expected = crypto.createHmac('sha256', appSecret).update(payload).digest();
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(sig, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (data.algorithm !== 'HMAC-SHA256' || !/^\d{1,50}$/.test(data.user_id) || typeof data.user_id !== 'string' || !Number.isSafeInteger(data.issued_at) || data.issued_at <= 0 || data.issued_at > Date.now() / 1000 + 300) return null;
+    return { user_id: data.user_id, algorithm: data.algorithm, issued_at: data.issued_at };
+  } catch { return null; }
 }
 
-/**
- * ลบข้อมูลของผู้ใช้จากฐานข้อมูล
- */
-async function deleteUserData(userId: string): Promise<number> {
-  let deletedCount = 0;
+/** A callback identifies an app user, not a page-scoped Messenger customer. Queue verified review. */
+export async function registerDeletionRequest(parsed: ParsedSignedRequest, appSecret: string): Promise<string> {
+  const requestKey = crypto.createHmac('sha256', appSecret).update(`${parsed.user_id}:${parsed.issued_at}`).digest('hex');
+  const { error } = await db().from('data_deletion_requests').upsert({
+    request_key: requestKey, confirmation_code: crypto.randomBytes(24).toString('hex'), subject_encrypted: encryptSecret(parsed.user_id),
+  }, { onConflict: 'request_key', ignoreDuplicates: true });
+  if (error) throw new Error('บันทึกคำขอลบข้อมูลไม่สำเร็จ');
+  const { data, error: readError } = await db().from('data_deletion_requests').select('confirmation_code').eq('request_key', requestKey).single();
+  if (readError || !data) throw new Error('อ่านรหัสยืนยันไม่สำเร็จ');
+  return String(data.confirmation_code);
+}
 
-  // ลบคอมเมนต์ที่ from_id ตรงกับ user_id
-  const { count: commentsDeleted } = await db()
-    .from('comments')
-    .delete({ count: 'exact' })
-    .eq('from_id', userId);
-  deletedCount += commentsDeleted ?? 0;
-
-  // ลบ customers ที่ meta_id ตรงกับ user_id
-  const { data: customers } = await db()
-    .from('customers')
-    .select('id')
-    .eq('meta_id', userId);
-
-  if (customers && customers.length > 0) {
-    const customerIds = customers.map((c: { id: string }) => c.id);
-
-    // ลบ conversations ที่เชื่อมกับ customer
-    const { count: convsDeleted } = await db()
-      .from('conversations')
-      .delete({ count: 'exact' })
-      .in('customer_id', customerIds);
-    deletedCount += convsDeleted ?? 0;
-
-    // ลบ customers
-    const { count: custDeleted } = await db()
-      .from('customers')
-      .delete({ count: 'exact' })
-      .eq('meta_id', userId);
-    deletedCount += custDeleted ?? 0;
+export const DELETION_STATUS: Record<string, string> = {
+  pending_review: 'รับคำขอแล้ว กำลังตรวจยืนยันตัวตนและขอบเขตข้อมูล',
+  processing: 'กำลังลบข้อมูลที่ตรวจยืนยันแล้ว', failed: 'ดำเนินการยังไม่สำเร็จ เจ้าหน้าที่กำลังตรวจสอบ',
+  completed: 'ดำเนินการลบข้อมูลที่ตรวจยืนยันและเชื่อมโยงกับคำขอเรียบร้อยแล้ว',
+};
+export async function deletionStatus(code: string) {
+  if (!/^[a-f0-9]{48}$/.test(code)) return null;
+  const { data, error } = await db().from('data_deletion_requests').select('status,created_at,completed_at').eq('confirmation_code', code).maybeSingle();
+  if (error) throw new Error('อ่านสถานะไม่สำเร็จ');
+  return data ? { ...data, message: DELETION_STATUS[String(data.status)] } : null;
+}
+export function requireDeletionOwner(admin: PublicAdmin) {
+  if (admin.role !== 'owner') throw new Error('เฉพาะเจ้าของระบบเท่านั้น');
+}
+export async function listDeletionRequests(admin: PublicAdmin) {
+  requireDeletionOwner(admin);
+  const { data, error } = await db().from('data_deletion_requests').select('id,confirmation_code,subject_encrypted,status,created_at,completed_at,verification_note,result,error_th').order('created_at', { ascending: false }).limit(100);
+  if (error) throw new Error('อ่านคำขอไม่สำเร็จ');
+  return (data ?? []).map(({ subject_encrypted, ...row }) => ({ ...row, app_user_id: subject_encrypted ? decryptSecret(String(subject_encrypted)) : null }));
+}
+export const DeleteScopeSchema = z.object({
+  request_id: z.string().uuid(), customers: z.array(z.string().uuid()).max(100), comments: z.array(z.string().uuid()).max(100),
+  verification_note: z.string().trim().min(10).max(500), confirmed: z.literal(true),
+});
+/** Storage removal is idempotent; database deletion is atomic and never reports success after an error. */
+export async function fulfillDeletion(admin: PublicAdmin, input: unknown) {
+  requireDeletionOwner(admin);
+  const scope = DeleteScopeSchema.parse(input);
+  const prepared = await db().rpc('prepare_data_deletion', { p_request_id: scope.request_id, p_customers: scope.customers, p_comments: scope.comments, p_admin_id: admin.id, p_note: scope.verification_note });
+  if (prepared.error) throw new Error(prepared.error.message);
+  const manifest = prepared.data as { storage_keys: string[] };
+  try {
+    for (let i = 0; i < manifest.storage_keys.length; i += 100) {
+      await removeObjects(manifest.storage_keys.slice(i, i + 100));
+    }
+    const result = await db().rpc('finish_data_deletion', { p_request_id: scope.request_id });
+    if (result.error) throw new Error('ลบข้อมูลในฐานข้อมูลไม่สำเร็จ สามารถลองคำขอเดิมอีกครั้ง');
+    return result.data;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'ลบข้อมูลไม่สำเร็จ';
+    await db().from('data_deletion_requests').update({ status: 'failed', error_th: message }).eq('id', scope.request_id).eq('status', 'processing');
+    throw err;
   }
-
-  return deletedCount;
 }
-
-export { parseSignedRequest, deleteUserData };

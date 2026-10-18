@@ -553,24 +553,25 @@ async function runJob(job: QueueJob, cache: PageCache, summary: ProcessSummary):
  * หยิบงานจากคิวมาทำสูงสุด `limit` ชิ้น
  * เรียกได้จาก 3 ที่ : ทันทีหลังตอบ webhook / worker ที่วนเรียก / หน้าจอสั่งเอง
  */
-export async function processWebhookBatch(limit = 20): Promise<ProcessSummary> {
+export async function processWebhookBatch(limit = 20, budgetMs = 40_000): Promise<ProcessSummary> {
   const summary: ProcessSummary = { ...EMPTY_SUMMARY };
   const cache: PageCache = new Map();
 
-  const jobs = await claimJobs(limit);
-  summary.jobs = jobs.length;
-
-  for (const job of jobs) {
+  const deadline = Date.now() + budgetMs;
+  for (let index = 0; index < limit && Date.now() < deadline; index += 1) {
+    const [job] = await claimJobs(1);
+    if (!job) break;
+    summary.jobs += 1;
     try {
       await runJob(job, cache, summary);
-      await finishJob(job.id, 'done', null);
+      await finishJob(job.id, 'done', null, job.attempts);
     } catch (err) {
       const permanent = err instanceof PermanentJobError;
       const message = err instanceof Error ? err.message : String(err);
       const next = nextStatusAfterFailure(job.attempts, permanent);
       summary.failed_jobs += 1;
       console.error(`[ingest] งานคิว #${job.id} ล้มเหลว (ครั้งที่ ${job.attempts}) → ${next}: ${message}`);
-      await finishJob(job.id, next, message.slice(0, 500));
+      await finishJob(job.id, next, message.slice(0, 500), job.attempts);
     }
   }
 

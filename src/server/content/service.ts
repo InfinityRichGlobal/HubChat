@@ -1,4 +1,5 @@
 import 'server-only';
+import { searchPattern } from '@/lib/pagination';
 /**
  * ชุดคำตอบ + แท็ก — ชั้นข้อมูล (สเปกหัวข้อ 5.1 / 5.6)
  * ===========================================================================
@@ -45,7 +46,7 @@ export async function listCanned(search?: string): Promise<CannedResponse[]> {
   const term = search?.trim();
   if (term) {
     // ค้นจากทั้งชื่อ ตัวย่อ และเนื้อข้อความ — แอดมินจำได้ไม่เหมือนกัน
-    query = query.or(`title.ilike.%${term}%,shortcut.ilike.%${term}%,text.ilike.%${term}%`);
+    query = query.or(`title.ilike.${searchPattern(term)},shortcut.ilike.${searchPattern(term)},text.ilike.${searchPattern(term)}`);
   }
 
   const { data, error } = await query;

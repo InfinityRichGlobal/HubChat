@@ -27,7 +27,7 @@ import { verifyHubToken, verifyMetaSignature } from '@/server/ingest/signature';
 export const runtime = 'nodejs';
 // ห้าม cache เด็ดขาด ทุกคำขอคือของใหม่
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /* ------------------------------------------------------------------------ */
 /* GET — Meta มาขอยืนยันว่าเราเป็นเจ้าของ URL นี้จริง (ทำครั้งเดียวตอนตั้งค่า)     */

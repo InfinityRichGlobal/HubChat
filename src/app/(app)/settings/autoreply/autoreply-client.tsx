@@ -10,33 +10,7 @@
 import { useCallback, useEffect, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import {
-  Archive,
-  ArrowRight,
-  Bot,
-  Brain,
-  Check,
-  CheckCircle2,
-  CornerDownRight,
-  Edit2,
-  Filter,
-  ImageIcon,
-  Link2,
-  Loader2,
-  Mail,
-  MessageCircle,
-  MessageSquare,
-  Play,
-  Plus,
-  RefreshCw,
-  Send,
-  ShieldAlert,
-  ShoppingBag,
-  Sparkles,
-  ThumbsUp,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Archive, ArrowRight, Bot, Brain, Check, CheckCircle2, Edit2, Filter, ImageIcon, Loader2, MessageSquare, Play, Plus, RefreshCw, Send, ShieldAlert, ShoppingBag, Sparkles, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';

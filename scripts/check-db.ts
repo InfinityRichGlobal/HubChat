@@ -59,6 +59,14 @@ async function main() {
   }
   console.log('✅ คอลัมน์และ RPC กันตอบคอมเมนต์ซ้ำพร้อมใช้งาน');
 
+  const { data: fenced, error: fenceError } = await supabase.rpc('finish_webhook_job_attempt', { p_id: null, p_attempt: 0, p_status: 'done', p_error: null });
+  const { data: manual, error: manualError } = await supabase.rpc('claim_manual_public_reply', { p_comment_id: null, p_fingerprint: '0'.repeat(64), p_admin_id: null });
+  if (fenceError || manualError || fenced !== false || manual !== false) {
+    console.log('❌ RPC กู้คิวและกันตอบซ้ำยังไม่ครบ กรุณารัน migration ล่าสุด'); process.exit(1);
+  }
+  const { data: schedule, error: scheduleError } = await supabase.rpc('worker_schedule_status');
+  console.log(!scheduleError && schedule?.jobs?.filter((j: { active: boolean }) => j.active).length === 2 ? '✅ ตั้งตัวกู้คิวและแจ้งเตือนบนเซิร์ฟเวอร์แล้ว' : '⚠️ ยังไม่พบตารางเวลาตัวกู้คิวครบทั้งสองงาน');
+
   const { count: owners } = await supabase
     .from('admins')
     .select('id', { head: true, count: 'exact' })

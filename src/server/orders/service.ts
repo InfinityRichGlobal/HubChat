@@ -1,4 +1,5 @@
 import 'server-only';
+import { searchPattern } from '@/lib/pagination';
 /**
  * ออเดอร์ + สินค้า + โปรโมชัน — ชั้นข้อมูล (สเปกหัวข้อ 4 / 5.3)
  * ===========================================================================
@@ -288,7 +289,7 @@ export async function listOrders(admin: PublicAdmin, filters: OrderFilters = {})
   const term = filters.search?.trim();
   if (term) {
     query = query.or(
-      `order_no.ilike.%${term}%,recipient_name.ilike.%${term}%,phone.ilike.%${term}%,tracking_no.ilike.%${term}%`,
+      `order_no.ilike.${searchPattern(term)},recipient_name.ilike.${searchPattern(term)},phone.ilike.${searchPattern(term)},tracking_no.ilike.${searchPattern(term)}`,
     );
   }
 

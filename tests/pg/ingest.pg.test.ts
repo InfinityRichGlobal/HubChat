@@ -26,7 +26,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'b'.repeat(40);
 process.env.SESSION_SECRET = 'c'.repeat(40);
 process.env.ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
 
-const { enqueueWebhook } = await import('@/server/ingest/queue');
+const { enqueueWebhook, claimJobs, finishJob } = await import('@/server/ingest/queue');
 const { processWebhookBatch, drainWebhookQueue } = await import('@/server/ingest/processor');
 
 let pool: Pool;
@@ -116,6 +116,29 @@ describe.skipIf(!available)('PostgreSQL จริง — ทางเข้า�
   });
 
   /* -------------------------------------------------------------- */
+  it('fenced lease ไม่ให้ worker เก่าเขียนทับ และ final crash เข้าคิวเสีย', async () => {
+    const id = await enqueueWebhook(inbound('mid.fence', 'test'));
+    const [old] = await claimJobs(1);
+    await pool.query("update webhook_queue set claimed_at=now()-interval '7 minutes' where id=$1", [id]);
+    const [current] = await claimJobs(1);
+    expect(current.attempts).toBe(old.attempts + 1);
+    await expect(finishJob(id, 'done', null, old.attempts)).rejects.toThrow('หมดอายุ');
+    await finishJob(id, 'pending', 'temporary', current.attempts);
+    expect(await claimJobs(1)).toHaveLength(0);
+    await pool.query("update webhook_queue set status='processing',attempts=5,claimed_at=now()-interval '7 minutes' where id=$1", [id]);
+    expect(await claimJobs(1)).toHaveLength(0);
+    expect((await pool.query('select status from webhook_queue where id=$1', [id])).rows[0].status).toBe('failed');
+  });
+
+  it('กดกู้คิวเสียพร้อมกัน → สร้างงานใหม่ชิ้นเดียว ไม่รีเซ็ต lease เก่า', async () => {
+    const id = await enqueueWebhook(inbound('mid.deadletter', 'test'));
+    await pool.query("update webhook_queue set status='failed',attempts=5 where id=$1",[id]);
+    const results = await Promise.all(Array.from({length:6},()=>pool.query('select retry_failed_webhook_job($1) id',[id])));
+    expect(new Set(results.map(r=>r.rows[0].id)).size).toBe(1);
+    expect((await pool.query('select count(*)::int n from webhook_queue')).rows[0].n).toBe(2);
+    expect((await pool.query('select attempts,status from webhook_queue where id=$1',[id])).rows[0]).toEqual({attempts:5,status:'failed'});
+  });
+
   it('ข้อความแรกเข้ามา → สร้างลูกค้า ห้องแชท และข้อความครบ', async () => {
     await enqueueWebhook(inbound('mid.001', 'สนใจโปร 2 ชิ้นค่ะ'));
     const summary = await processWebhookBatch();
@@ -162,11 +185,13 @@ describe.skipIf(!available)('PostgreSQL จริง — ทางเข้า�
     } finally {
       await pool.query('drop trigger fail_comment_ingest on comments; drop function fail_comment_ingest()');
     }
+    expect((await processWebhookBatch()).jobs).toBe(0);
+    await pool.query("update webhook_queue set next_attempt_at=now() where status='pending'");
     const retry = await processWebhookBatch();
     expect(retry.comments_saved).toBe(1);
-    expect(retry.duplicates).toBe(1);
+    expect(retry.duplicates).toBe(0);
     expect(await count('messages')).toBe(1);
-    expect((await pool.query('select status from webhook_queue')).rows[0].status).toBe('done');
+    expect((await pool.query("select count(*)::int n from webhook_queue where status!='done'")).rows[0].n).toBe(0);
   });
 
   /* -------------------------------------------------------------- */

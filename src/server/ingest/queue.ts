@@ -22,7 +22,7 @@ export type QueueJob = {
 export const MAX_ATTEMPTS = 5;
 
 /** งานที่ค้างสถานะ "กำลังทำ" นานเกินนี้ ถือว่า worker ตายไปแล้ว ให้เอากลับมาทำใหม่ */
-export const STALE_SECONDS = 120;
+export const STALE_SECONDS = 360;
 
 /**
  * วางงานลงคิว — ต้องเร็วที่สุด ทำอย่างอื่นน้อยที่สุด
@@ -31,12 +31,11 @@ export const STALE_SECONDS = 120;
 export async function enqueueWebhook(payload: unknown): Promise<number> {
   const { data, error } = await db()
     .from('webhook_queue')
-    .insert({ payload })
-    .select('id')
-    .single();
+    .insert(splitWebhookPayload(payload).map((item) => ({ payload: item })))
+    .select('id');
 
   if (error) throw new Error(`วางงานลงคิวไม่สำเร็จ: ${error.message}`);
-  return Number((data as { id: number }).id);
+  return Number((data as Array<{ id: number }>)[0].id);
 }
 
 /** หยิบงานมาทำแบบไม่ชนกับ worker ตัวอื่น */
@@ -57,13 +56,15 @@ export async function claimJobs(limit: number): Promise<QueueJob[]> {
 }
 
 /** ปิดงาน — สำเร็จ / ล้มเหลวถาวร / เอากลับเข้าคิวเพื่อลองใหม่ */
-export async function finishJob(id: number, status: QueueStatus, errorMessage: string | null): Promise<void> {
-  const { error } = await db().rpc('finish_webhook_job', {
+export async function finishJob(id: number, status: QueueStatus, errorMessage: string | null, attempt: number): Promise<void> {
+  const { data, error } = await db().rpc('finish_webhook_job_attempt', {
     p_id: id,
+    p_attempt: attempt,
     p_status: status,
     p_error: errorMessage,
   });
-  if (error) console.error('[ingest] ปิดงานในคิวไม่สำเร็จ:', error.message);
+  if (error) throw new Error(`ปิดงานในคิวไม่สำเร็จ: ${error.message}`);
+  if (!data) throw new Error('สิทธิ์ประมวลผลงานหมดอายุแล้ว ไม่เขียนผลทับ worker ใหม่');
 }
 
 /**
@@ -76,4 +77,22 @@ export async function finishJob(id: number, status: QueueStatus, errorMessage: s
 export function nextStatusAfterFailure(attempts: number, permanent: boolean): QueueStatus {
   if (permanent) return 'failed';
   return attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
+}
+
+/** Split a delivery atomically into small jobs so one failed event cannot hold up others. */
+export function splitWebhookPayload(payload: unknown): unknown[] {
+  if (!payload || typeof payload !== 'object' || !('entry' in payload) || !Array.isArray(payload.entry)) return [payload];
+  const jobs: unknown[] = [];
+  for (const raw of payload.entry) {
+    if (!raw || typeof raw !== 'object') { jobs.push({ ...payload, entry: [raw] }); continue; }
+    const entry = raw as Record<string, unknown>;
+    const { messaging, changes, standby, ...base } = entry;
+    let count = 0;
+    for (const [field, items] of Object.entries({ changes, messaging, standby })) {
+      if (!Array.isArray(items)) continue;
+      for (const item of items) { jobs.push({ ...payload, entry: [{ ...base, [field]: [item] }] }); count += 1; }
+    }
+    if (!count) jobs.push({ ...payload, entry: [entry] });
+  }
+  return jobs.length ? jobs : [payload];
 }

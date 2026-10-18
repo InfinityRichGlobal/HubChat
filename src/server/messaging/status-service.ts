@@ -21,12 +21,13 @@ async function visiblePageIds(admin: PublicAdmin): Promise<string[]> {
     .filter((id) => canSeePage(admin.role, admin.allowed_page_ids, id));
 }
 
-export async function listSendStatuses(admin: PublicAdmin, status?: SendStatus): Promise<SendStatusRow[]> {
+export async function listSendStatuses(admin: PublicAdmin, status?: SendStatus, options: { offset?: number; limit?: number; q?: string } = {}): Promise<SendStatusRow[]> {
   const pageIds = await visiblePageIds(admin);
   if (pageIds.length === 0) return [];
   let query = db().from('message_sends').select(SEND_STATUS_SELECT)
-    .in('page_id', pageIds).order('created_at', { ascending: false }).limit(200);
+    .in('page_id', pageIds).order('created_at', { ascending: false }).order('id', { ascending: false }).range(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 200) - 1);
   if (status) query = query.eq('status', status);
+  if (options.q?.trim()) query = query.ilike('policy_reason_th', `%${options.q.trim().slice(0, 120).replace(/[\\%_*]/g, '\\$&')}%`);
   const { data, error } = await query;
   if (error) throw new Error(`อ่านสถานะการส่งไม่สำเร็จ: ${error.message}`);
   return (data ?? []) as SendStatusRow[];

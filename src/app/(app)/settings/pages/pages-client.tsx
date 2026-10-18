@@ -58,7 +58,6 @@ export type MetaConfig = {
 export default function PagesClient({
   initialPages,
   metaConfig,
-  isOwner = false,
 }: {
   initialPages: SafePage[];
   metaConfig?: MetaConfig;

@@ -22,7 +22,6 @@ export class CommentError extends Error {
 
 export const COMMENT_SELECTS = {
   comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,from_username,from_pic_url,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_liked,is_deleted,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
-  legacy_comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
   setting: 'value',
 } as const;
 
@@ -253,23 +252,7 @@ export async function listComments(admin: PublicAdmin, input: CommentFilters = {
 }
 
 export async function getComment(admin: PublicAdmin, id: string): Promise<CommentRow> {
-  let { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle<CommentRow>();
-
-  if (error && error.message.includes('from_username')) {
-    const fallbackRes = await db().from('comments').select(COMMENT_SELECTS.legacy_comments).eq('id', id)
-      .maybeSingle<Omit<CommentRow, 'from_username' | 'from_pic_url' | 'is_liked' | 'is_deleted'>>();
-    if (fallbackRes.error) throw new CommentError(`อ่านคอมเมนต์ไม่สำเร็จ: ${fallbackRes.error.message}`);
-    if (fallbackRes.data) {
-      data = {
-        ...fallbackRes.data,
-        from_username: null,
-        from_pic_url: null,
-        is_liked: false,
-        is_deleted: false,
-      };
-      error = null;
-    }
-  }
+  const { data, error } = await db().from('comments').select(COLUMNS).eq('id', id).maybeSingle<CommentRow>();
 
   if (error) throw new CommentError(`อ่านคอมเมนต์ไม่สำเร็จ: ${error.message}`);
   if (!data) throw new CommentError('ไม่พบคอมเมนต์นี้');

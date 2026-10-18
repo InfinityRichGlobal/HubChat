@@ -184,6 +184,55 @@ describe.skipIf(!available)('PostgreSQL จริง — ฟีดคอมเ�
     return { saved, run: () => processCommentAutoReply(page, event, saved.id) };
   }
 
+  it('public จากหลายแท็บพร้อมกันและ retry → ส่งครั้งเดียว', async () => {
+    const saved = await saveIncomingComment(comment(), []);
+    const meta = fakeMeta(async () => { await new Promise(r => setTimeout(r, 30)); return okResponse('one'); });
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () => replyPublic(OWNER, saved.id!, 'สวัสดีค่ะ')));
+    expect(results.some(r => r.status === 'fulfilled' && r.value.ok)).toBe(true);
+    expect((await replyPublic(OWNER, saved.id!, 'สวัสดีค่ะ')).ok).toBe(true);
+    expect(meta.calls).toBe(1);
+  });
+
+  it('public Meta รับแล้ว DB finish พัง → แจ้งไม่ทราบผล และ retry ซ่อมเฉพาะ DB', async () => {
+    const saved = await saveIncomingComment(comment(), []);
+    const meta = fakeMeta(() => okResponse('accepted'));
+    await pool.query(`create function fail_manual_receipt() returns trigger language plpgsql as $$
+      begin if new.replied_public then raise exception 'receipt unavailable'; end if; return new; end $$;
+      create trigger fail_manual_receipt before update on comments for each row execute function fail_manual_receipt()`);
+    try {
+      const result = await replyPublic(OWNER, saved.id!, 'สวัสดีค่ะ');
+      expect(result.ok).toBe(false);
+      expect(result.outcome_unknown).toBe(true);
+    } finally { await pool.query('drop trigger fail_manual_receipt on comments; drop function fail_manual_receipt()'); }
+    expect((await replyPublic(OWNER, saved.id!, 'สวัสดีค่ะ')).ok).toBe(true);
+    expect(meta.calls).toBe(1);
+  });
+
+  it('public timeout → บล็อกทั้งข้อความเดิมและฉบับแก้ไข รวมถึงบอท', async () => {
+    const bot = await setupBot();
+    const meta = fakeMeta(() => { throw new Error('connection reset'); });
+    expect((await replyPublic(OWNER, bot.saved.id!, 'สวัสดีค่ะ')).outcome_unknown).toBe(true);
+    await expect(replyPublic(OWNER, bot.saved.id!, 'ข้อความใหม่')).rejects.toThrow('ไม่ส่งซ้ำ');
+    await bot.run();
+    expect(meta.calls).toBe(1);
+  });
+
+  it('บอทจองส่งค้าง → manual ต้องไม่ส่งซ้อน', async () => {
+    const bot = await setupBot();
+    const meta = fakeMeta(() => { throw new Error('connection reset'); });
+    await bot.run();
+    await expect(replyPublic(OWNER, bot.saved.id!, 'ตอบเอง')).rejects.toThrow('ไม่ส่งซ้ำ');
+    expect(meta.calls).toBe(1);
+  });
+
+  it('public ถูก Meta ปฏิเสธชัดเจน → แก้ไขแล้วลองใหม่ได้', async () => {
+    const saved = await saveIncomingComment(comment(), []);
+    const meta = fakeMeta(n => n === 1 ? errorResponse(190, 'expired') : okResponse('accepted'));
+    expect((await replyPublic(OWNER, saved.id!, 'สวัสดีค่ะ')).ok).toBe(false);
+    expect((await replyPublic(OWNER, saved.id!, 'สวัสดีค่ะ')).ok).toBe(true);
+    expect(meta.calls).toBe(2);
+  });
+
   it('บอทหลายตัวตอบคอมเมนต์พร้อมกันและเรียกซ้ำ → ส่งสาธารณะครั้งเดียว', async () => {
     const bot = await setupBot();
     const meta = fakeMeta(() => okResponse('reply-1'));

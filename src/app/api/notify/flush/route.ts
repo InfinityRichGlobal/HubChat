@@ -9,7 +9,7 @@
  *    ห้าม "เปิดให้ใครก็เรียกได้" เด็ดขาด เพราะจะโดนยิงรัวจนโดน Telegram แบน
  */
 import { requireOwner } from '@/lib/auth/current-admin';
-import { ok, fail, toErrorResponse } from '@/lib/api';
+import { ok, toErrorResponse } from '@/lib/api';
 import { flushNotifications } from '@/server/notify/dispatch';
 import { scanIdleAndClosing } from '@/server/notify/scan';
 import { getRuntimeSetting } from '@/server/settings/service';
@@ -43,8 +43,10 @@ async function authorize(req: Request): Promise<'cron' | 'admin'> {
 }
 
 async function handle(req: Request) {
+  let authorized = false;
   try {
     const by = await authorize(req);
+    authorized = true;
     await heartbeatStarted('notifications');
     // เดินตรวจก่อน แล้วค่อยส่ง — ของที่เพิ่งเข้าคิวจะได้ออกในรอบเดียวกัน
     const scan = await scanIdleAndClosing();
@@ -52,7 +54,7 @@ async function handle(req: Request) {
     await heartbeatFinished('notifications', { scan, sent });
     return ok({ by, scan, sent });
   } catch (err) {
-    await heartbeatFailed('notifications', err);
+    if (authorized) await heartbeatFailed('notifications', err);
     return toErrorResponse(err);
   }
 }

@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  CommentBotSettingsSchema,
-  DEFAULT_COMMENT_BOT_SETTINGS,
-  type CommentBotSettings,
-} from '@/types/comment-bot';
+import { CommentBotSettingsSchema, type CommentBotSettings } from '@/types/comment-bot';
 
 describe('CommentBotSettingsSchema', () => {
   it('มีค่าเริ่มต้นที่ถูกต้องและปลอดภัย', () => {

@@ -81,6 +81,7 @@ export async function testGeminiApiKey(apiKeyOverride?: string, requestedModel?:
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
+          signal: AbortSignal.timeout(12_000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: 'ตอบสั้นๆ เพียง 1 คำ: สบายดี' }] }],
@@ -181,6 +182,7 @@ ${catalogContext}${knowledgeContext}
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
+          signal: AbortSignal.timeout(12_000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       cache: 'no-store',
@@ -278,6 +280,7 @@ export async function generateCommentReply(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
+          signal: AbortSignal.timeout(12_000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
           cache: 'no-store',

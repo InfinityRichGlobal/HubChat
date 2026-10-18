@@ -33,7 +33,7 @@ process.env.VAPID_PUBLIC_KEY = 'x'.repeat(80);
 process.env.VAPID_PRIVATE_KEY = 'y'.repeat(40);
 process.env.VAPID_SUBJECT = 'mailto:test@hubchat.local';
 
-const { dispatchNotification, unreadBadgeCount } = await import('@/server/notify/dispatch');
+const { dispatchNotification, unreadBadgeCount, unhandledCommentBadgeCount } = await import('@/server/notify/dispatch');
 const { scanIdleAndClosing } = await import('@/server/notify/scan');
 const { getPrefs, savePrefs } = await import('@/server/notify/prefs');
 const { encryptSecret } = await import('@/lib/crypto');
@@ -497,6 +497,16 @@ describe.skipIf(!available)('PostgreSQL จริง — ระบบแจ้�
       expect(await unreadBadgeCount(ids.admin, 'admin', [ids.page])).toBe(1);
       // ไม่มีสิทธิ์เพจไหนเลย = ไม่ต้องขึ้นเลข
       expect(await unreadBadgeCount(ids.admin, 'admin', [])).toBe(0);
+    });
+
+    it('comment badge includes review errors, excludes deleted/own comments and respects page access', async () => {
+      await pool.query(`insert into comments (page_id, post_id, comment_id, is_handled, is_deleted, is_from_page, last_error_th)
+        values ($1,'p','pending',false,false,false,null), ($1,'p','review',true,false,false,'needs review'),
+        ($1,'p','deleted',false,true,false,null), ($1,'p','own',false,false,true,null),
+        ($1,'p','done',true,false,false,null), ($2,'p','other',false,false,false,null)`, [ids.page, ids.otherPage]);
+      expect(await unhandledCommentBadgeCount(ids.owner, 'owner', [])).toBe(3);
+      expect(await unhandledCommentBadgeCount(ids.admin, 'admin', [ids.page])).toBe(2);
+      expect(await unhandledCommentBadgeCount(ids.admin, 'admin', [])).toBe(0);
     });
 
     it('อ่านหมดแล้ว = 0', async () => {

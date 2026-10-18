@@ -55,7 +55,7 @@ async function unansweredIds(rows: ConvRow[]): Promise<Set<string>> {
   const oldest = rows
     .map((r) => r.last_customer_message_at)
     .filter((v): v is string => Boolean(v))
-    .sort()[0];
+    .sort((a,b) => Date.parse(a) - Date.parse(b))[0];
 
   /**
    * 🔴 sender_type ต้องเป็น 'admin' เท่านั้น ห้ามใช้แค่ direction = 'out'
@@ -80,7 +80,7 @@ async function unansweredIds(rows: ConvRow[]): Promise<Set<string>> {
   const repliedAfter = new Map<string, string>();
   for (const m of (data ?? []) as Array<{ conversation_id: string; created_at: string }>) {
     const prev = repliedAfter.get(m.conversation_id);
-    if (!prev || m.created_at > prev) repliedAfter.set(m.conversation_id, m.created_at);
+    if (!prev || Date.parse(m.created_at) > Date.parse(prev)) repliedAfter.set(m.conversation_id, m.created_at);
   }
 
   const out = new Set<string>();
@@ -88,7 +88,7 @@ async function unansweredIds(rows: ConvRow[]): Promise<Set<string>> {
     if (!r.last_customer_message_at) continue;
     const replied = repliedAfter.get(r.id);
     // ตอบหลังข้อความล่าสุดของลูกค้าแล้ว = จบ ไม่ต้องเตือน
-    if (replied && replied >= r.last_customer_message_at) continue;
+    if (replied && Date.parse(replied) >= Date.parse(r.last_customer_message_at)) continue;
     out.add(r.id);
   }
   return out;
@@ -187,7 +187,7 @@ export async function scanIdleAndClosing(now = new Date()): Promise<ScanSummary>
       summary.idle_queued += idle.queued;
 
       /* ---- ใกล้หมดกรอบ 24 ชม. : บอกคนที่รับแชทไว้ ---- */
-      if (stamp <= warnAfter && row.assigned_admin_id) {
+      if (Date.parse(stamp) <= Date.parse(warnAfter) && row.assigned_admin_id) {
         const left = Math.max(
           0,
           Math.round((new Date(stamp).getTime() + windowHours * 3_600_000 - nowMs) / 60_000),

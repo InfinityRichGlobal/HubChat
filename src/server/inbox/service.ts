@@ -14,6 +14,7 @@ import 'server-only';
  *   3. การล็อกกันแอดมินชนให้ฐานข้อมูลตัดสิน (สเปกหัวข้อ 5.1)
  *      สองคนกดเข้าห้องเดียวกันพร้อมกันได้จริง โค้ด JavaScript ตัดสินไม่ได้
  */
+import { cursorFilter } from '@/lib/inbox/cursor';
 import { db } from '@/lib/supabase/admin';
 import { canSeePage } from '@/lib/auth/permissions';
 import { conversationIdsWithTags, tagsForConversations } from '@/server/content/service';
@@ -132,14 +133,11 @@ export type ListFilters = {
   /** กรองเฉพาะห้องที่ติดแท็กใดแท็กหนึ่งในรายการนี้ */
   tag_ids?: string[];
   limit?: number;
-  /**
-   * ขอห้องที่เก่ากว่าเวลานี้ (ค่าของ last_message_at จากห้องสุดท้ายที่หน้าเว็บถืออยู่)
-   * ⭐ ใช้ lte ไม่ใช่ lt เพราะการดึงแชทเก่าเข้ามาทำให้หลายห้องมีเวลาเท่ากันเป๊ะได้
-   *    หน้าเว็บกรองตัวซ้ำที่ขอบทิ้งด้วย id เอง
-   */
+  /** Timestamp + ID cursors keep rows with the same timestamp reachable. */
   before?: string | null;
-  /** ขอเฉพาะห้องที่มีข้อความใหม่ตั้งแต่เวลานี้ ใช้ polling ไม่ให้โหลดรายการเดิมทั้งก้อน */
+  before_id?: string | null;
   since?: string | null;
+  since_id?: string | null;
 };
 
 export class InboxAccessError extends Error {}
@@ -335,8 +333,12 @@ export async function listConversations(
   if (group === 'ai_handoff') query = query.eq('has_ai_handoff', true);
   if (customerIdFilter) query = query.in('customer_id', customerIdFilter);
   if (conversationIdFilter) query = query.in('id', conversationIdFilter);
-  if (filters.before) query = query.lte('last_message_at', filters.before);
-  if (filters.since) query = query.gte('last_message_at', filters.since);
+  if (filters.before) query = filters.before_id
+    ? query.or(cursorFilter('last_message_at', filters.before, filters.before_id, 'lt'))
+    : query.lte('last_message_at', filters.before);
+  if (filters.since) query = filters.since_id
+    ? query.or(cursorFilter('last_message_at', filters.since, filters.since_id, 'gt'))
+    : query.gte('last_message_at', filters.since);
 
   const { data: convRows, error } = await query;
   if (error) throw new Error(`อ่านลิสต์แชทไม่สำเร็จ: ${error.message}`);
@@ -498,22 +500,14 @@ export type MessagePage = {
   truncated: boolean;
 };
 
-/**
- * อ่านข้อความในห้องแชท (ล่าสุดก่อน แล้วกลับลำดับให้อ่านตามเวลา)
- *
- * @param before ส่งเวลาของข้อความที่เก่าที่สุดที่หน้าเว็บถืออยู่ เพื่อขอของเก่ากว่านั้น
- *
- * ⭐ ใช้ lte ไม่ใช่ lt โดยตั้งใจ :
- *    ข้อความที่ดึงย้อนหลังมาจาก Meta หลายข้อความมีเวลาเท่ากันเป๊ะได้
- *    ถ้าใช้ lt ข้อความที่เวลาตรงกับขอบพอดีจะหายไปเงียบ ๆ ทั้งกลุ่ม
- *    ผลข้างเคียงคือจะได้ของซ้ำมาหนึ่งชุดที่ขอบ — หน้าเว็บกรองด้วย id ทิ้งเอง
- */
+/** อ่านข้อความย้อนหลังหรือข้อความใหม่ด้วย cursor เวลาและ ID */
 export async function listMessages(
   admin: PublicAdmin,
   conversationId: string,
   limit = 100,
   before?: string | null,
   after?: string | null,
+  cursorIds: { before_id?: string | null; after_id?: string | null } = {},
 ): Promise<MessagePage> {
   await requireConversationAccess(admin, conversationId);
 
@@ -528,8 +522,12 @@ export async function listMessages(
     //    ชุดที่ได้จะว่างเปล่า หน้าเว็บก็จะเข้าใจว่า "หมดแล้ว" แล้วอ่านของเก่ากว่านั้นไม่ได้อีกเลย
     .eq('is_deleted', false);
 
-  if (before) query = query.lte('created_at', before);
-  if (after) query = query.gte('created_at', after);
+  if (before) query = cursorIds.before_id
+    ? query.or(cursorFilter('created_at', before, cursorIds.before_id, 'lt'))
+    : query.lte('created_at', before);
+  if (after) query = cursorIds.after_id
+    ? query.or(cursorFilter('created_at', after, cursorIds.after_id, 'gt'))
+    : query.gte('created_at', after);
 
   const { data, error } = await query
     .order('created_at', { ascending: Boolean(after) })

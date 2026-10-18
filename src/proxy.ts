@@ -23,19 +23,32 @@ function isBypassed(pathname: string): boolean {
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/health') ||
     pathname.startsWith('/api/webhooks') || // Meta ยิงเข้ามาโดยไม่มี cookie
+    pathname === '/api/compliance/data-deletion-status' ||
     pathname.startsWith('/api/meta/data-deletion') || // Meta data deletion callback
     pathname === '/api/notify/flush' || // ตรวจสอบ CRON_SECRET / session เองข้างใน
     pathname === '/api/ingest/process' || // ตรวจสอบ CRON_SECRET / permission เองข้างใน
     pathname === '/favicon.ico' ||
     pathname === '/manifest.json' ||
     pathname === '/sw.js' ||
+    pathname === '/offline.html' ||
     pathname.startsWith('/icons')
   );
 }
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (isBypassed(pathname)) return NextResponse.next();
+  // Browser mutations must come from this application. Signed Meta callbacks and
+  // authenticated cron requests validate their own credentials in their handlers.
+  const safeMethod = ['GET','HEAD','OPTIONS'].includes(req.method);
+  const signedCallback = pathname.startsWith('/api/webhooks/meta') || pathname === '/api/meta/data-deletion';
+  const bearerWorker = ['/api/ingest/process','/api/notify/flush'].includes(pathname) && req.headers.get('authorization')?.startsWith('Bearer ');
+  if (!safeMethod && pathname.startsWith('/api/') && !signedCallback && !bearerWorker) {
+    const origin = req.headers.get('origin');
+    if ((origin && origin !== req.nextUrl.origin) || (!origin && req.headers.get('sec-fetch-site') === 'cross-site')) {
+      return NextResponse.json({ ok:false, error:{code:'invalid_origin',message_th:'คำขอนี้ไม่ได้มาจากหน้า HubChat กรุณาเปิดหน้าเว็บแล้วลองใหม่'} },{status:403});
+    }
+  }
+  if (isBypassed(pathname) || PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`))) return NextResponse.next();
 
   const secret = process.env.SESSION_SECRET;
   if (!secret) {
@@ -70,6 +83,13 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Clear a server-rejected ticket before enforcing its obsolete password flag.
+  if (isAuth && req.nextUrl.searchParams.has('reason')) {
+    const response = NextResponse.next();
+    response.cookies.delete(SESSION_COOKIE);
+    return response;
+  }
+
   // --- login แล้ว แต่ยังต้องเปลี่ยนรหัสผ่านครั้งแรก ------------------------
   const onChangePasswordPage =
     pathname === '/change-password' || pathname.startsWith('/api/auth/change-password');
@@ -90,12 +110,6 @@ export async function proxy(req: NextRequest) {
   // ⚠️ ยกเว้น: ถ้ามี ?reason=... แปลว่าฝั่ง Server (AppLayout) ตรวจ DB แล้วพบว่า
   //    session ไม่ valid → ต้องลบ cookie ทิ้งแล้วให้ล็อกอินใหม่ ไม่ใช่เด้งกลับ /inbox
   if (isAuth) {
-    const hasAuthError = req.nextUrl.searchParams.has('reason');
-    if (hasAuthError) {
-      const res = NextResponse.next();
-      res.cookies.delete(SESSION_COOKIE);
-      return res;
-    }
     const url = req.nextUrl.clone();
     url.pathname = '/inbox';
     url.search = '';

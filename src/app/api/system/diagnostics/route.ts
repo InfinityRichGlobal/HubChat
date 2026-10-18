@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { requireAdmin } from '@/lib/auth/current-admin';
+import { requirePermission } from '@/lib/auth/current-admin';
 import { ok, toErrorResponse } from '@/lib/api';
 import { runSystemDiagnostics } from '@/server/diagnostics/service';
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    await requireAdmin();
+    await requirePermission('page.manage');
     const { searchParams } = new URL(req.url);
     const refresh = searchParams.get('refresh') === 'true';
 

@@ -2,15 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Sparkles, Key, Bot, BookOpen, Sliders, Play, Save, Check,
-  ExternalLink, Loader2, RefreshCw, AlertCircle, MessageSquare,
-  ArrowRight, Heart,
-} from 'lucide-react';
+import { Sparkles, Key, Bot, BookOpen, Sliders, Play, Save, Check, ExternalLink, Loader2, RefreshCw, AlertCircle, MessageSquare, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -86,7 +82,7 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
         setEnableCommentSuggest(d.enableCommentSuggest);
         setEnableChatAssist(d.enableChatAssist);
       }
-    } catch (err) {
+    } catch  {
       toast.error('โหลดการตั้งค่า AI ไม่สำเร็จ');
     } finally {
       setLoading(false);
@@ -131,7 +127,7 @@ export default function AiSettingsClient({ isOwner }: { isOwner: boolean }) {
       } else {
         toast.error(json.error?.message_th || 'บันทึกไม่สำเร็จ');
       }
-    } catch (err) {
+    } catch  {
       toast.error('ติดต่อเซิร์ฟเวอร์ไม่ได้');
     } finally {
       setSaving(false);

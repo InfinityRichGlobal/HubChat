@@ -99,3 +99,22 @@ describe('ลิสต์แชท (เรียงใหม่→เก่า)'
     expect(out.map((x) => x.id)).toEqual(['new', 'old1', 'old2']);
   });
 });
+
+
+describe('cursor boundaries during polling', () => {
+  it('keeps history when the incremental poll is empty', () => {
+    const prev = [m('a', '2026-01-01T10:00:00Z')];
+    expect(mergeByTime(prev, [], msgOpts(false))).toEqual(prev);
+  });
+  it('keeps tied rows below the refreshed head and merges batches without loss', () => {
+    const at = '2026-01-01T10:00:00Z';
+    const prev = ['a', 'b', 'c', 'd'].map(id => cv(id, at));
+    expect(mergeByTime(prev, [cv('d', at), cv('c', at)], convOpts(true)).map(x => x.id)).toEqual(['d','c','b','a']);
+    expect(mergeByTime(prev, [cv('e', at)], convOpts(false)).map(x => x.id)).toEqual(['e','d','c','b','a']);
+  });
+});
+
+it('orders microseconds before UUIDs', () => {
+  const rows = [m('z','2026-01-01T00:00:00.123001Z'),m('a','2026-01-01T00:00:00.123999Z')];
+  expect(mergeByTime([], rows, msgOpts(false)).map(x=>x.id)).toEqual(['z','a']);
+});

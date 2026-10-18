@@ -409,4 +409,60 @@ describe.skipIf(!available)('PostgreSQL จริง — หน้าอิน�
     expect(seen.has(ids.convB)).toBe(false);
     for (const id of extra) expect(seen.has(id)).toBe(true);
   });
+  it('loads every conversation with the same timestamp, backwards and forwards without repeating a page', async () => {
+    const at = '2026-10-01T00:00:00.123456Z';
+    await pool.query(`insert into customers (page_id, psid, platform, name)
+      select $1, 'TIED_' || n, 'facebook', 'Tied ' || n from generate_series(1,205) n`, [ids.pageA]);
+    await pool.query(`insert into conversations (customer_id, page_id, last_message_at, is_read)
+      select id, page_id, $1, true from customers where psid like 'TIED_%'`, [at]);
+    await pool.query('update conversations set last_message_at=$1 where id=$2', [at, ids.convA]);
+    const seen = new Set<string>();
+    let cursor: { before: string; before_id: string } | undefined;
+    for (let i = 0; i < 10; i++) {
+      const page = await listConversations(ADMIN_A, { limit: 50, ...cursor });
+      for (const row of page.conversations) { expect(seen.has(row.id)).toBe(false); seen.add(row.id); }
+      if (!page.has_more) break;
+      const last = page.conversations.at(-1)!;
+      cursor = { before: last.last_message_at, before_id: last.id };
+    }
+    expect(seen.size).toBe(206);
+    const forward = new Set<string>();
+    let sinceId = '00000000-0000-4000-8000-000000000000';
+    for (let i = 0; i < 10; i++) {
+      const page = await listConversations(ADMIN_A, { limit: 50, since: at, since_id: sinceId });
+      for (const row of page.conversations) { expect(forward.has(row.id)).toBe(false); forward.add(row.id); }
+      sinceId = page.conversations.at(-1)?.id ?? sinceId;
+      if (!page.truncated) break;
+    }
+    expect([...forward].sort()).toEqual([...seen].sort());
+    expect((await listConversations(ADMIN_A, { since: at, since_id: sinceId })).conversations).toEqual([]);
+  });
+
+  it('reads all 205 tied messages in both directions and rejects malformed cursor expressions', async () => {
+    const at = '2026-10-01T00:00:00.123456Z';
+    await pool.query(`insert into messages (conversation_id, direction, sender_type, text, created_at)
+      select $1, 'in', 'customer', 'Tied ' || n, $2 from generate_series(1,205) n`, [ids.convA, at]);
+    const seen = new Set<string>();
+    let before: string | undefined;
+    let beforeId: string | undefined;
+    for (let i = 0; i < 10; i++) {
+      const page = await listMessages(OWNER, ids.convA, 50, before, undefined, { before_id: beforeId });
+      for (const row of page.messages) { expect(seen.has(row.id)).toBe(false); seen.add(row.id); }
+      if (!page.has_more) break;
+      before = page.messages[0].created_at; beforeId = page.messages[0].id;
+    }
+    expect(seen.size).toBe(205);
+    const forward = new Set<string>();
+    let afterId = '00000000-0000-4000-8000-000000000000';
+    for (let i = 0; i < 10; i++) {
+      const page = await listMessages(OWNER, ids.convA, 50, undefined, at, { after_id: afterId });
+      for (const row of page.messages) { expect(forward.has(row.id)).toBe(false); forward.add(row.id); }
+      afterId = page.messages.at(-1)?.id ?? afterId;
+      if (!page.truncated) break;
+    }
+    expect([...forward].sort()).toEqual([...seen].sort());
+    expect((await listMessages(OWNER, ids.convA, 50, undefined, at, { after_id: afterId })).messages).toEqual([]);
+    await expect(listMessages(OWNER, ids.convA, 50, at, undefined, { before_id: 'x),id.gt.0' })).rejects.toThrow();
+  });
+
 });

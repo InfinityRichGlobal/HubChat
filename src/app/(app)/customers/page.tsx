@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PAGE_SIZE, pageNumber, pageHref, searchPattern } from '@/lib/pagination';
 import { redirect } from 'next/navigation';
 import { Search, ShoppingBag, UserRound } from 'lucide-react';
 import { getCurrentAdmin } from '@/lib/auth/current-admin';
@@ -14,13 +15,15 @@ export const dynamic = 'force-dynamic';
 export default async function CustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; filter?: string }>;
+  searchParams: Promise<{ q?: string; filter?: string; p?: string }>;
 }) {
   const result = await getCurrentAdmin();
   if (!result.ok) redirect('/login');
-  const { q = '', filter = 'verified' } = await searchParams;
+  const { q = '', filter = 'verified', p } = await searchParams;
+  const page = pageNumber(p);
 
-  const { data: pages } = await db().from('pages').select('id,platform');
+  const { data: pages, error: pagesError } = await db().from('pages').select('id,platform');
+  if (pagesError) throw new Error('โหลดสิทธิ์เพจไม่สำเร็จ กรุณาลองใหม่');
   const pageMap = new Map(((pages ?? []) as Array<{ id: string; platform: 'facebook' | 'instagram' }>).map((p) => [p.id, p.platform]));
   const pageIds = ((pages ?? []) as Array<{ id: string }>)
     .map((page) => page.id)
@@ -33,7 +36,7 @@ export default async function CustomersPage({
     .select('id,page_id,name,profile_pic_url,phone,recipient_name,address,postcode,total_orders,total_spent,updated_at')
     .in('page_id', pageIds)
     .order('updated_at', { ascending: false })
-    .limit(200);
+    .order('id', { ascending: false }).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ลูกค้าจะปรากฏก็ต่อเมื่อมีการสรุปยอด (มีออเดอร์) หรือบันทึกข้อมูล
   if (filter === 'orders') {
@@ -45,19 +48,21 @@ export default async function CustomersPage({
     query = query.or('total_orders.gt.0,phone.not.is.null,recipient_name.not.is.null,address.not.is.null');
   }
 
-  const term = q.trim().replace(/[%,_()]/g, '');
-  if (term) query = query.or(`name.ilike.%${term}%,recipient_name.ilike.%${term}%,phone.ilike.%${term}%`);
+  const term = searchPattern(q);
+  if (q.trim()) query = query.or(`name.ilike.${term},recipient_name.ilike.${term},phone.ilike.${term}`);
   const { data, error } = await query;
   if (error) throw new Error(`อ่านข้อมูลลูกค้าไม่สำเร็จ: ${error.message}`);
-  const customers = (data ?? []) as Array<{
+  const hasMore = (data?.length ?? 0) > PAGE_SIZE;
+  const customers = (data ?? []).slice(0, PAGE_SIZE) as Array<{
     id: string; page_id: string; name: string | null; profile_pic_url: string | null; phone: string | null;
     recipient_name: string | null; address: string | null; postcode: string | null;
     total_orders: number; total_spent: number;
   }>;
 
-  const { data: conversations } = customers.length
+  const { data: conversations, error: conversationsError } = customers.length
     ? await db().from('conversations').select('id,customer_id').in('customer_id', customers.map((customer) => customer.id))
-    : { data: [] };
+    : { data: [], error: null };
+  if (conversationsError) throw new Error('โหลดห้องแชทของลูกค้าไม่สำเร็จ กรุณาลองใหม่');
   const conversationByCustomer = new Map(((conversations ?? []) as Array<{ id: string; customer_id: string }>).map((row) => [row.customer_id, row.id]));
 
   return (
@@ -122,7 +127,13 @@ export default async function CustomersPage({
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground">แสดง {customers.length} รายการ{customers.length === 200 ? 'ล่าสุด · จำกัด 200 รายการ ใช้คำค้นหาเพื่อเจาะจงลูกค้า' : ''}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">หน้า {page} · {customers.length} รายการ</p>
+        <nav aria-label="หน้ารายการลูกค้า" className="flex gap-2">
+          {page > 1 && <Button asChild size="sm" variant="outline"><Link href={pageHref('/customers', page - 1, { q, filter })}>ก่อนหน้า</Link></Button>}
+          {hasMore && <Button asChild size="sm" variant="outline"><Link href={pageHref('/customers', page + 1, { q, filter })}>ถัดไป</Link></Button>}
+        </nav>
+      </div>
       <div className="grid gap-2 md:grid-cols-2">
         {customers.map((customer) => {
           const conversationId = conversationByCustomer.get(customer.id);

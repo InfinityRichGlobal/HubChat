@@ -20,6 +20,7 @@ let stopping = false;
 async function main() {
   // import ทีหลังเพื่อให้ค่าจาก .env.local ถูกอ่านก่อนเสมอ
   const { processWebhookBatch } = await import('../src/server/ingest/processor');
+  const { heartbeatStarted, heartbeatFinished, heartbeatFailed } = await import('../src/server/workers/heartbeat');
   const { getRuntimeSetting } = await import('../src/server/settings/service');
 
   console.log('[worker] เริ่มทำงาน (ช่วงเวลาตรวจอ่านใหม่จากค่าตั้งทุกครั้ง)');
@@ -33,7 +34,9 @@ async function main() {
 
   while (!stopping) {
     try {
+      await heartbeatStarted('ingest');
       const summary = await processWebhookBatch();
+      await heartbeatFinished('ingest', summary);
       if (summary.jobs > 0) {
         console.log(
           `[worker] ทำงาน ${summary.jobs} ชิ้น | เข้า ${summary.inbound_saved} | ออก ${summary.echo_saved} | ` +
@@ -43,9 +46,10 @@ async function main() {
       }
     } catch (err) {
       // ห้ามตาย — ฐานข้อมูลสะดุดชั่วคราวต้องกลับมาทำงานต่อได้เอง
+      await heartbeatFailed('ingest', err);
       console.error('[worker] รอบนี้ผิดพลาด (จะลองใหม่):', err);
     }
-    const configured = Number(await getRuntimeSetting('WORKER_INTERVAL_MS'));
+    const configured = Number(await getRuntimeSetting('WORKER_INTERVAL_MS').catch(() => '2000'));
     const intervalMs = Number.isFinite(configured) ? Math.max(configured, 250) : 2_000;
     await new Promise((r) => setTimeout(r, intervalMs));
   }

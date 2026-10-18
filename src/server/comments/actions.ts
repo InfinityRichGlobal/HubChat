@@ -18,6 +18,7 @@ import 'server-only';
  *   4. ⚠️ ข้อความ "หลังจาก" ทักส่วนตัวสำเร็จ ต้องกลับไปผ่าน sendMessage() ตามปกติ
  *      เพราะตอนนั้นกรอบ 24 ชม. เปิดแล้ว และ Policy Engine เป็นคนตัดสิน
  */
+import { createHash } from 'node:crypto';
 import { db } from '@/lib/supabase/admin';
 import type { PublicAdmin } from '@/types/db';
 import { logActivity } from '@/lib/activity-log';
@@ -83,25 +84,40 @@ export async function replyPublic(
     throw new CommentError('คอมเมนต์นี้เป็นของเพจเราเอง ไม่ต้องตอบ');
   }
 
+  if (comment.is_deleted) throw new CommentError('คอมเมนต์ถูกลบแล้ว');
   const page = await loadPage(comment.page_id);
-  const result = await replyToCommentPublicly(page, comment.comment_id, clean, attachmentUrl);
-
-  if (!result.ok) {
-    await db().from('comments').update({ last_error_th: result.error_th }).eq('id', commentRowId);
-    return {
-      ok: false,
-      message_th: result.error_th,
-      outcome_unknown: result.outcome_unknown,
-      comment: await getComment(admin, commentRowId),
-    };
+  if (!page.access_token) throw new CommentError('เพจยังไม่มี token กรุณาตรวจการเชื่อมต่อ');
+  const fingerprint = createHash('sha256').update(JSON.stringify([clean, attachmentUrl ?? null])).digest('hex');
+  const ledger = () => db().from('comment_public_sends').select('state').eq('comment_id', commentRowId).eq('fingerprint', fingerprint).maybeSingle<{ state: string }>();
+  const previous = await ledger();
+  if (previous.error) throw new CommentError('ตรวจหลักฐานกันส่งซ้ำไม่สำเร็จ');
+  if (previous.data?.state === 'succeeded' && comment.replied_public) return { ok: true, outcome_unknown: false, message_th: 'เคยส่งคำตอบนี้แล้ว ระบบไม่ได้ส่งซ้ำ', comment };
+  if (previous.data?.state !== 'succeeded') {
+    const claim = await db().rpc('claim_manual_public_reply', { p_comment_id: commentRowId, p_fingerprint: fingerprint, p_admin_id: admin.id });
+    if (claim.error) throw new CommentError('จองสิทธิ์ตอบไม่สำเร็จ กรุณาตรวจฐานข้อมูล');
+    if (!claim.data) throw new CommentError('มีการตอบนี้แล้วหรือมีคำตอบที่ยังไม่ทราบผล กรุณาตรวจโพสต์ต้นทางก่อน ไม่ส่งซ้ำ');
+    let result;
+    try { result = await replyToCommentPublicly(page, comment.comment_id, clean, attachmentUrl); }
+    catch (err) {
+      const knownUnsent = err instanceof MetaNotConfiguredError;
+      const errorText = knownUnsent ? err.message : 'ไม่ทราบผลการตอบ กรุณาตรวจโพสต์ต้นทางก่อน ไม่ส่งซ้ำ';
+      await db().from('comments').update({ last_error_th: errorText }).eq('id', commentRowId);
+      await db().from('comment_public_sends').update({ state: knownUnsent ? 'rejected' : 'outcome_unknown' }).eq('comment_id', commentRowId).eq('fingerprint', fingerprint);
+      return { ok: false, outcome_unknown: !knownUnsent, message_th: errorText, comment: { ...comment, last_error_th: errorText } };
+    }
+    const state = result.ok ? 'succeeded' : result.outcome_unknown ? 'outcome_unknown' : 'rejected';
+    const recorded = await db().from('comment_public_sends').update({ state, updated_at: new Date().toISOString() }).eq('comment_id', commentRowId).eq('fingerprint', fingerprint);
+    if (recorded.error) return unrecordedDelivery(comment);
+    if (!result.ok) {
+      await db().from('comments').update({ last_error_th: result.error_th }).eq('id', commentRowId);
+      return { ok: false, outcome_unknown: result.outcome_unknown, message_th: result.error_th, comment: { ...comment, last_error_th: result.error_th } };
+    }
   }
-
+  // On retry after a database failure, only repair the receipt; never send again.
   const { error } = await db().rpc('finish_public_reply', {
-    p_comment_row_id: commentRowId,
-    p_admin_id: admin.id,
-    p_text: clean,
+    p_comment_row_id: commentRowId, p_admin_id: admin.id, p_text: clean,
   });
-  if (error) console.error(`[comments] จดผลตอบใต้โพสต์ไม่สำเร็จ: ${error.message}`);
+  if (error) return unrecordedDelivery(comment);
 
   await logActivity({
     adminId: admin.id,
@@ -115,8 +131,13 @@ export async function replyPublic(
     ok: true,
     message_th: 'ตอบใต้โพสต์แล้ว',
     outcome_unknown: false,
-    comment: await getComment(admin, commentRowId),
+    comment: await getComment(admin, commentRowId).catch(() => ({ ...comment, replied_public: true, public_reply_text: clean, is_handled: true, last_error_th: null })),
   };
+}
+
+function unrecordedDelivery(comment: CommentRow): ActionOutcome {
+  const message = 'Meta อาจรับข้อความแล้ว แต่บันทึกผลในระบบไม่สำเร็จ กรุณาตรวจต้นทางก่อน ไม่ส่งข้อความซ้ำ';
+  return { ok: false, outcome_unknown: true, message_th: message, comment: { ...comment, last_error_th: message } };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -131,6 +152,10 @@ export async function replyPrivate(
 ): Promise<ActionOutcome> {
   const comment = await getComment(admin, commentRowId);
   const clean = validateText(text);
+  if (comment.is_deleted) throw new CommentError('คอมเมนต์ถูกลบแล้ว');
+  if (comment.is_from_page) throw new CommentError('คอมเมนต์นี้เป็นของเพจเราเอง ไม่ต้องตอบ');
+  const page = await loadPage(comment.page_id);
+  if (!page.access_token) throw new CommentError('เพจยังไม่มี token กรุณาตรวจการเชื่อมต่อ');
 
   /**
    * ⭐ จองสิทธิ์ "ก่อน" ยิงเสมอ
@@ -151,8 +176,15 @@ export async function replyPrivate(
     throw new CommentError(claim?.reason_th ?? 'ทักส่วนตัวไม่ได้');
   }
 
-  const page = await loadPage(comment.page_id);
-  const result = await sendPrivateReply(page, comment.comment_id, clean, attachmentUrl);
+  let result;
+  try { result = await sendPrivateReply(page, comment.comment_id, clean, attachmentUrl); }
+  catch (err) {
+    if (err instanceof MetaNotConfiguredError) {
+      await db().rpc('release_private_reply', { p_comment_row_id: commentRowId, p_error_th: err.message });
+      throw new CommentError(err.message);
+    }
+    return unrecordedDelivery(comment);
+  }
 
   if (!result.ok) {
     /**
@@ -186,7 +218,7 @@ export async function replyPrivate(
         ? 'ยิงออกไปแล้วแต่ไม่ทราบผล — เปิด Messenger ดูก่อนว่าข้อความถึงลูกค้าหรือยัง'
         : result.error_th,
       outcome_unknown: result.outcome_unknown,
-      comment: await getComment(admin, commentRowId),
+      comment: await getComment(admin, commentRowId).catch(() => ({ ...comment, last_error_th: result.error_th })),
     };
   }
 
@@ -203,7 +235,7 @@ export async function replyPrivate(
     p_conversation_id: linked?.conversation_id ?? null,
     p_customer_id: linked?.customer_id ?? null,
   });
-  if (error) console.error(`[comments] จดผลทักส่วนตัวไม่สำเร็จ: ${error.message}`);
+  if (error) return unrecordedDelivery(comment);
 
   await logActivity({
     adminId: admin.id,
@@ -217,7 +249,7 @@ export async function replyPrivate(
     ok: true,
     message_th: 'ทักส่วนตัวแล้ว — เมื่อลูกค้าตอบกลับ แชทจะขึ้นในอินบ็อกซ์',
     outcome_unknown: false,
-    comment: await getComment(admin, commentRowId),
+    comment: await getComment(admin, commentRowId).catch(() => ({ ...comment, replied_private: true, private_reply_text: clean, is_handled: true, last_error_th: null })),
   };
 }
 

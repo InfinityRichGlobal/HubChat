@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { redirect } from 'next/navigation';
 import SystemMonitor from './system-monitor';
+import WorkerMonitor from './worker-monitor';
 
 /**
  * หน้าตั้งค่า — สเปกหัวข้อ 5.6
@@ -18,6 +19,7 @@ export default async function SettingsPage() {
   const admin = result.admin;
 
   const ready = [
+    { href: '/settings/data-deletion', icon: ShieldCheck, title: 'คำขอลบข้อมูล', description: 'ตรวจยืนยันตัวตน เลือกข้อมูลที่เกี่ยวข้อง และติดตามผลการลบ', show: admin.role === 'owner' },
     {
       href: '/send-status', icon: Send, title: 'สถานะการส่ง',
       description: 'ดูว่าส่งแล้ว ถูกกฎบล็อก ล้มเหลว หรือไม่ทราบผล', show: true,
@@ -120,7 +122,7 @@ export default async function SettingsPage() {
       </Card>
 
       {/* แผงมอนิเตอร์สถานะระบบ & ตรวจฟังก์ชันแอป พร้อมตัวตรวจจับ Meta Error */}
-      <SystemMonitor isOwner={admin.role === 'owner'} />
+      {admin.role === 'owner' && <><SystemMonitor isOwner /><WorkerMonitor /></>}
 
       {ready.length > 0 && (
         <Card className="py-0">

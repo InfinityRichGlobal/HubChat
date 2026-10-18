@@ -96,3 +96,8 @@ export async function fetchAndStore(
 
   return putObject(key, body, mime);
 }
+
+export async function removeObjects(keys: string[]): Promise<void> {
+  const { error } = await db().storage.from('media').remove(keys);
+  if (error) throw new Error('ลบไฟล์ไม่สำเร็จ จึงยังไม่ปิดคำขอ');
+}

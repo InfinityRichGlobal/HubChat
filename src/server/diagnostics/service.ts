@@ -30,11 +30,12 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
   const since24h = oneDayAgo.toISOString();
 
   // 1. ดึงข้อมูลเพจและตรวจสถานะ Meta
-  const { data: pageRows } = await db()
+  const { data: pageRows, error: pageError } = await db()
     .from('pages')
     .select('id, platform, page_id, page_name, is_active, access_token, created_at')
     .order('created_at');
 
+  if (pageError) throw new Error('อ่านข้อมูลเพจเพื่อตรวจระบบไม่สำเร็จ');
   const rawPages = (pageRows ?? []) as Array<{
     id: string;
     platform: string;
@@ -75,11 +76,10 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
     });
   }
 
-  const [settingVerifyToken, settingAppId, settingAppSecret, settingAppUrl] = await Promise.all([
+  const [settingVerifyToken, settingAppId, settingAppSecret] = await Promise.all([
     getRuntimeSetting('META_VERIFY_TOKEN'),
     getRuntimeSetting('META_APP_ID'),
     getRuntimeSetting('META_APP_SECRET'),
-    getRuntimeSetting('APP_BASE_URL'),
   ]);
 
   const envs = serverEnv();
@@ -88,29 +88,20 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
   const hasAppSecret = Boolean(settingAppSecret || envs.META_APP_SECRET);
 
   // 2. ดึงสถิติข้อผิดพลาด Meta ย้อนหลัง 24 ชม.
-  const [{ data: recentSends }, { data: recentAttempts }] = await Promise.all([
-    db()
-      .from('message_sends')
-      .select('id, status, policy_reason_code, policy_reason_th, created_at')
-      .gte('created_at', since24h)
-      .order('created_at', { ascending: false })
-      .limit(300),
-    db()
-      .from('send_attempts')
-      .select('id, success, meta_response_code, meta_error_subcode, meta_error_message, policy_reason_code, policy_reason_th, fbtrace_id, created_at')
-      .gte('created_at', since24h)
-      .eq('success', false)
-      .order('created_at', { ascending: false })
-      .limit(300),
+  const [attempts, total, succeeded, blocked, failed, unknown] = await Promise.all([
+    db().from('send_attempts').select('id,success,meta_response_code,meta_error_subcode,meta_error_message,policy_reason_code,policy_reason_th,fbtrace_id,created_at').gte('created_at',since24h).eq('success',false).order('created_at',{ascending:false}).limit(300),
+    db().from('message_sends').select('id',{head:true,count:'exact'}).gte('created_at',since24h),
+    db().from('message_sends').select('id',{head:true,count:'exact'}).gte('created_at',since24h).eq('status','succeeded'),
+    db().from('message_sends').select('id',{head:true,count:'exact'}).gte('created_at',since24h).eq('status','blocked_by_policy'),
+    db().from('message_sends').select('id',{head:true,count:'exact'}).gte('created_at',since24h).in('status',['permanent_failed','retryable_failed','outcome_unknown']),
+    db().from('message_sends').select('created_at',{count:'exact'}).gte('created_at',since24h).eq('status','outcome_unknown').order('created_at',{ascending:false}).limit(1),
   ]);
-
-  const sendsList = recentSends ?? [];
-  const attemptsList = recentAttempts ?? [];
-
-  const totalSends24h = sendsList.length;
-  const successfulSends24h = sendsList.filter((s) => s.status === 'succeeded').length;
-  const policyBlocked24h = sendsList.filter((s) => s.status === 'blocked_by_policy').length;
-  const failedSends24h = sendsList.filter((s) => s.status === 'permanent_failed' || s.status === 'retryable_failed' || s.status === 'outcome_unknown').length;
+  if ([attempts,total,succeeded,blocked,failed,unknown].some(r => r.error)) throw new Error('อ่านประวัติส่งเพื่อตรวจระบบไม่สำเร็จ');
+  const attemptsList = attempts.data ?? [];
+  const totalSends24h = total.count ?? 0;
+  const successfulSends24h = succeeded.count ?? 0;
+  const policyBlocked24h = blocked.count ?? 0;
+  const failedSends24h = failed.count ?? 0;
 
   // วิเคราะห์และจัดกลุ่ม Meta Error Issues
   const issuesMap = new Map<string, MetaErrorIssue>();
@@ -257,15 +248,14 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
   }
 
   // เพิ่มเคส Timeout / Outcome Unknown จาก message_sends ถ้ามี
-  const unknownSends = sendsList.filter((s) => s.status === 'outcome_unknown');
-  if (unknownSends.length > 0) {
+  if ((unknown.count ?? 0) > 0) {
     issuesMap.set('outcome_unknown', {
       id: 'outcome_unknown',
       title: 'ข้อความไม่ทราบผล — ป้องกันการส่งเบิ้ล (Timeout 15s)',
       code: null,
       subcode: null,
-      count: unknownSends.length,
-      lastOccurredAt: unknownSends[0].created_at,
+      count: unknown.count ?? 0,
+      lastOccurredAt: unknown.data?.[0]?.created_at ?? checkedAt,
       severity: 'medium',
       explanationTh: 'เซิร์ฟเวอร์ส่งคำขอไปยัง Meta แล้วแต่ไม่ได้รับผลตอบกลับภายใน 15 วินาที',
       solutionTh: 'ระบบระงับไว้เพื่อป้องกันลูกค้าได้รับข้อความซ้ำ ห้ามกดส่งเดาซ้ำ แอดมินสามารถเปิดดูในแอพ Messenger เพื่อยืนยันได้',
@@ -411,7 +401,7 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
 
   // 7. ตรวจสอบ Messaging & Pipeline
   let messagingStatus: DiagnosticItemStatus = 'healthy';
-  const messagingDetails: string[] = [];
+  const messagingDetails: string[] = ['รายละเอียดสาเหตุจากความพยายามส่งที่ล้มเหลวล่าสุดไม่เกิน 300 รายการ'];
 
   if (totalSends24h === 0) {
     messagingDetails.push('ไม่มีประวัติการส่งข้อความในรอบ 24 ชั่วโมงที่ผ่านมา');

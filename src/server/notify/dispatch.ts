@@ -367,8 +367,9 @@ export async function unhandledCommentBadgeCount(
     let q = db()
       .from('comments')
       .select('id', { count: 'exact', head: true })
-      .eq('is_handled', false)
-      .eq('is_from_page', false);
+      .eq('is_deleted', false)
+      .eq('is_from_page', false)
+      .or('is_handled.eq.false,last_error_th.not.is.null');
 
     if (role !== 'owner') {
       if (allowedPageIds.length === 0) return 0;
