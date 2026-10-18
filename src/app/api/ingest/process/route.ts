@@ -28,7 +28,7 @@ function secretMatches(given: string, expected: string): boolean {
 }
 
 async function authorize(req: Request): Promise<'cron' | 'admin'> {
-  const expected = process.env.CRON_SECRET || (await getRuntimeSetting('CRON_SECRET'));
+  const expected = await getRuntimeSetting('CRON_SECRET');
   const header = req.headers.get('authorization') ?? '';
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
 
