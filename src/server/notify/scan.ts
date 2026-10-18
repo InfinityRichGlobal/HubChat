@@ -103,7 +103,7 @@ function preview(text: string | null | undefined, max = 80): string {
 /**
  * เดินตรวจหนึ่งรอบ
  *
- * ⚠️ ห้ามโยน error ออกไป — ตัวนี้ถูกเรียกจาก cron/worker ที่ทำงานอย่างอื่นต่อ
+ * ส่งข้อผิดพลาดให้ cron/worker บันทึก heartbeat ล้มเหลว แล้วลองรอบถัดไป
  */
 export async function scanIdleAndClosing(now = new Date()): Promise<ScanSummary> {
   const summary: ScanSummary = { idle_queued: 0, window_queued: 0, scanned: 0 };
@@ -209,7 +209,7 @@ export async function scanIdleAndClosing(now = new Date()): Promise<ScanSummary>
 
     return summary;
   } catch (err) {
-    console.error('[notify] เดินตรวจแชทค้างไม่สำเร็จ (ข้ามรอบนี้):', err);
-    return summary;
+    console.error('[notify] เดินตรวจแชทค้างไม่สำเร็จ:', err);
+    throw err;
   }
 }

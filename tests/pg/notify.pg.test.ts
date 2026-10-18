@@ -440,6 +440,12 @@ describe.skipIf(!available)('PostgreSQL จริง — ระบบแจ้�
       expect(second.idle_queued).toBe(0);
     });
 
+    it('reports scan failures to the worker instead of recording a successful heartbeat', async () => {
+      await pool.query('alter table conversations rename to conversations_unavailable');
+      try { await expect(scanIdleAndClosing()).rejects.toThrow(); }
+      finally { await pool.query('alter table conversations_unavailable rename to conversations'); }
+    });
+
     it('⭐ ใกล้หมดกรอบ 24 ชม. → เตือนเฉพาะคนที่รับแชทไว้', async () => {
       const at = new Date(Date.now() - 23 * 3_600_000); // เหลืออีกชั่วโมงเดียว
       await makeConversation({ last_customer_message_at: at, assigned: ids.admin });

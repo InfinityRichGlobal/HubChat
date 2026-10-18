@@ -36,7 +36,7 @@
 ## การนำขึ้นระบบรอบนี้
 
 - ลง migration 3 ไฟล์ `20261019_data_deletion.sql`, `20261019_runtime_reliability.sql`, `20261019_worker_schedule.sql` ผ่าน SQL Editor แบบ transaction สำเร็จ และ check-db จริงผ่าน
-- Deployment และการตรวจ heartbeat จาก scheduler: กำลังดำเนินการ จะอัปเดตผลหลังตรวจจริง
+- Deployment โค้ดหลัก `f74139f` ขึ้น Vercel Ready และตรวจ Settings บน production แล้ว เปิด scheduler ทั้งสองงานสำเร็จ กำลังตรวจ heartbeat จากการเรียกตามเวลาจริงก่อนบันทึกส่งมอบ
 - วิธีดูแลคิวและลบข้อมูล: [RUNTIME_OPERATIONS_TH.md](RUNTIME_OPERATIONS_TH.md)
 
 ## งานภายนอกที่ยังต้องยืนยัน
