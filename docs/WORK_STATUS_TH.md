@@ -38,7 +38,12 @@
 ## การนำขึ้นระบบรอบนี้
 
 - ลง migration 3 ไฟล์ `20261019_data_deletion.sql`, `20261019_runtime_reliability.sql`, `20261019_worker_schedule.sql` ผ่าน SQL Editor แบบ transaction สำเร็จ และ check-db จริงผ่าน
-- Deployment โค้ดหลัก `f74139f` ขึ้น Vercel Ready และตรวจ Settings บน production แล้ว เปิด scheduler ทั้งสองงานสำเร็จ กำลังตรวจ heartbeat จากการเรียกตามเวลาจริงก่อนบันทึกส่งมอบ
+- Deployment โค้ดหลัก `f74139f` และการเชื่อม scheduler รุ่น `98e3ec2` ขึ้น Vercel Ready บน production แล้ว
+- พบ production ยังไม่มี CRON_SECRET ที่ใช้งานได้ จึงบันทึกค่าของโปรเจกต์แบบเข้ารหัส และเชื่อม Vault จาก Settings ด้วยค่าที่ production อ่านเอง
+- Scheduler กู้คิวเรียกจริงสำเร็จตั้งแต่ 00:52 น. วันที่ 19 ตุลาคม (HTTP 200, งานรอ 0) การตรวจเส้นทางด้วย bearer เดียวกันได้ 200 เช่นกัน
+- Scheduler แจ้งเตือนทำสำเร็จรอบ 00:55 น. โดยอัตโนมัติ ทั้งสอง worker มี last_success_at และไม่มี last_error_summary ค้าง ตรวจผล HTTP จาก pg_net เป็น 200; รอบแจ้งเตือนตรวจ 3 ห้อง เข้าคิวใหม่ 2 งาน push สำเร็จ 2 อุปกรณ์ และ Telegram สำเร็จ 1 รายการ ไม่มี failed ตามผล API
+- ตรวจ production: Settings/คำขอลบข้อมูล/ลูกค้า/Comments ผ่าน ประวัติส่งหน้า 1 แสดง 50 รายการ หน้า 2 แสดงอีก 8 รายการ ปุ่มก่อนหน้า/ถัดไปถูกต้อง
+- Endpoint สาธารณะ health/privacy/terms/offline ตอบ 200; รหัสคำขอลบที่ไม่พบตอบ 404; worker management ที่ไม่ได้ login ตอบ 401
 - วิธีดูแลคิวและลบข้อมูล: [RUNTIME_OPERATIONS_TH.md](RUNTIME_OPERATIONS_TH.md)
 
 ## งานภายนอกที่ยังต้องยืนยัน
