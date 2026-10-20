@@ -124,6 +124,9 @@ export type MessageRow = {
 
 export type ListFilters = {
   page_ids?: string[];
+  platform?: 'facebook' | 'instagram';
+  assigned_admin_id?: string | 'unassigned';
+  order_count?: '0' | '1' | '2' | '3' | '4' | '5_10' | '11_plus';
   search?: string;
   group?: InboxGroup;
   /** รองรับผู้เรียกเดิมระหว่างเปลี่ยนมาใช้ group */
@@ -191,12 +194,12 @@ async function adminNames(ids: string[]): Promise<Map<string, string>> {
  * อ่านเป็นหน้า ๆ เพราะ Data API อาจจำกัดจำนวนแถวต่อคำขอ ถ้าดึงครั้งเดียวแล้ว
  * ถูกตัดที่ 1,000 แถว ห้องเก่าจะหายจากกลุ่มติดตามผลโดยไม่มีคำเตือน
  */
-async function customerIdsWithOrders(pageIds: string[]): Promise<string[]> {
-  const ids = new Set<string>();
+async function customerOrderCounts(pageIds: string[], customerIds?: string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
   const pageSize = 1_000;
 
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await db()
+    let query = db()
       .from('orders')
       .select('customer_id')
       .in('page_id', pageIds)
@@ -204,14 +207,16 @@ async function customerIdsWithOrders(pageIds: string[]): Promise<string[]> {
       .not('status', 'in', '("cancelled","returned")')
       .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
-    if (error) throw new Error(`อ่านกลุ่มติดตามผลไม่สำเร็จ: ${error.message}`);
+    if (customerIds) query = query.in('customer_id', customerIds);
+    const { data, error } = await query;
+    if (error) throw new Error(`อ่านจำนวนออเดอร์ไม่สำเร็จ: ${error.message}`);
 
     const rows = (data ?? []) as Array<{ customer_id: string | null }>;
-    for (const row of rows) if (row.customer_id) ids.add(row.customer_id);
+    for (const row of rows) if (row.customer_id) counts.set(row.customer_id, (counts.get(row.customer_id) ?? 0) + 1);
     if (rows.length < pageSize) break;
   }
 
-  return [...ids];
+  return counts;
 }
 
 /**
@@ -257,7 +262,9 @@ export async function listConversations(
 
   // ตัวกรองเพจจากหน้าเว็บ ต้องตัดเพจที่ไม่มีสิทธิ์ทิ้งเสมอ
   const requested = filters.page_ids?.filter((id) => pages.has(id));
-  let pageIds = requested && requested.length > 0 ? requested : [...pages.keys()];
+  let pageIds = filters.page_ids?.length ? (requested ?? []) : [...pages.keys()];
+  if (filters.platform) pageIds = pageIds.filter((id) => pages.get(id)?.platform === filters.platform);
+  if (!pageIds.length) return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
   const group = filters.group ?? (filters.follow_up_only ? 'follow_up' : filters.unread_only ? 'unread' : 'all');
   if (group === 'facebook' || group === 'instagram') {
     pageIds = pageIds.filter((id) => pages.get(id)?.platform === group);
@@ -295,9 +302,8 @@ export async function listConversations(
 
   /* กลุ่มติดตามผล: รวมถึงคนที่มีออเดอร์ หรือกดติดดาว (สำคัญ) */
   let followUpCustomerIds: string[] = [];
-  if (group === 'follow_up') {
-    followUpCustomerIds = await customerIdsWithOrders(pageIds);
-  }
+  const allOrderCounts = group === 'follow_up' || filters.order_count ? await customerOrderCounts(pageIds) : null;
+  if (allOrderCounts) followUpCustomerIds = [...allOrderCounts.keys()];
 
   /* --- ตัวกรองแท็ก : หาว่าห้องไหนติดแท็กที่เลือกไว้บ้าง --- */
   let conversationIdFilter: string[] | null = null;
@@ -328,7 +334,19 @@ export async function listConversations(
       query = query.eq('is_important', true);
     }
   }
+  if (filters.order_count && allOrderCounts) {
+    const selected = filters.order_count;
+    const matching = [...allOrderCounts].filter(([, n]) => selected === '5_10' ? n >= 5 && n <= 10 : selected === '11_plus' ? n >= 11 : n === Number(selected)).map(([id]) => id);
+    if (selected === '0') {
+      if (allOrderCounts.size) query = query.not('customer_id', 'in', `(${[...allOrderCounts.keys()].join(',')})`);
+    } else {
+      if (!matching.length) return { conversations: [], pages: [...pages.values()], has_more: false, truncated: false };
+      query = query.in('customer_id', matching);
+    }
+  }
   if (group === 'assigned') query = query.not('assigned_admin_id', 'is', null);
+  if (filters.assigned_admin_id === 'unassigned') query = query.is('assigned_admin_id', null);
+  else if (filters.assigned_admin_id) query = query.eq('assigned_admin_id', filters.assigned_admin_id);
   if (group === 'ai_reply') query = query.eq('has_ai_reply', true);
   if (group === 'ai_handoff') query = query.eq('has_ai_handoff', true);
   if (customerIdFilter) query = query.in('customer_id', customerIdFilter);
@@ -372,7 +390,7 @@ export async function listConversations(
 
   const customerIds = [...new Set(rows.map((r) => r.customer_id))];
   const unreadConvIds = rows.filter((r) => !r.is_read).map((r) => r.id);
-  const [customers, names, avatarMap, tagMap, orders, unreadCounts] = await Promise.all([
+  const [customers, names, avatarMap, tagMap, orderCounts, unreadCounts] = await Promise.all([
     db()
       .from('customers')
       /**
@@ -385,11 +403,7 @@ export async function listConversations(
     adminNames(rows.flatMap((r) => [r.locked_by_admin_id, r.assigned_admin_id]).filter((v): v is string => Boolean(v))),
     getAllAdminAvatars(),
     tagsForConversations(rows.map((r) => r.id)),
-    db()
-      .from('orders')
-      .select('customer_id')
-      .in('customer_id', customerIds)
-      .not('status', 'in', '("cancelled","returned")'),
+    allOrderCounts ?? customerOrderCounts(pageIds, customerIds),
     countUnreadMessages(unreadConvIds),
   ]);
 
@@ -405,13 +419,6 @@ export async function listConversations(
     }>).map((c) => [c.id, c]),
   );
   if (customers.error) throw new Error(`อ่านข้อมูลลูกค้าไม่สำเร็จ: ${customers.error.message}`);
-  if (orders.error) throw new Error(`อ่านจำนวนออเดอร์ไม่สำเร็จ: ${orders.error.message}`);
-  const orderCounts = new Map<string, number>();
-  for (const order of (orders.data ?? []) as Array<{ customer_id: string | null }>) {
-    if (!order.customer_id) continue;
-    orderCounts.set(order.customer_id, (orderCounts.get(order.customer_id) ?? 0) + 1);
-  }
-
   const staleBefore = Date.now() - LOCK_STALE_SECONDS * 1000;
 
   const conversations: ConversationRow[] = rows.flatMap((r) => {

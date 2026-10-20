@@ -293,6 +293,20 @@ export default function InboxClient({
   /** ยังมีแชทเก่ากว่าที่โหลดมาอีกไหม (สำคัญมากหลังกดดึงแชทเก่าเข้าระบบ) */
   const [hasMoreList, setHasMoreList] = useState(initialHasMore);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState(new Map<string, { text: string; reply: MessageRow | null }>());
+  const saveDraft = useCallback((id: string, patch: { text?: React.SetStateAction<string>; reply?: MessageRow | null }) => {
+    setDrafts((previous) => {
+      const saved = previous.get(id);
+      const text = typeof patch.text === 'function' ? patch.text(saved?.text ?? '') : patch.text ?? saved?.text ?? '';
+      const reply = patch.reply !== undefined ? patch.reply : saved?.reply ?? null;
+      if ((!saved && !text && !reply) || (saved?.text === text && saved.reply === reply)) return previous;
+      const next = new Map(previous);
+      if (text || reply) next.set(id, { text, reply });
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   /** โหลดชุดแรกของ "ตัวกรองชุดนี้" แล้วหรือยัง */
   const listInitRef = useRef(true);
   const listGeneration = useRef(0);
@@ -398,9 +412,15 @@ export default function InboxClient({
    *    ผู้เรียกตั้ง state ใน .then() — กันการเรนเดอร์ซ้อนกันเป็นทอด ๆ
    */
   const fetchList = useCallback(
-    async (before?: InboxCursor | null, since?: InboxCursor | null, signal?: AbortSignal): Promise<{ rows: ConversationRow[]; has_more: boolean; truncated: boolean } | null> => {
+    async (before?: InboxCursor | null, since?: InboxCursor | null, signal?: AbortSignal): Promise<{ rows: ConversationRow[]; has_more: boolean; truncated: boolean; error?: string } | null> => {
       const params = new URLSearchParams();
       if (selectedPages.length > 0) params.set('page_ids', selectedPages.join(','));
+      if (platformFilter.startsWith('page:')) {
+        const pageId = platformFilter.slice(5);
+        params.set('page_ids', selectedPages.length && !selectedPages.includes(pageId) ? '00000000-0000-0000-0000-000000000000' : pageId);
+      } else if (platformFilter !== 'all') params.set('platform', platformFilter);
+      if (assignedAdminFilter !== 'all') params.set('assigned_admin_id', assignedAdminFilter);
+      if (orderFilter !== 'all') params.set('order_count', orderFilter);
       if (selectedTags.length > 0) params.set('tag_ids', selectedTags.join(','));
       if (search.trim()) params.set('search', search.trim());
       params.set('group', inboxGroup);
@@ -410,21 +430,23 @@ export default function InboxClient({
       try {
         const res = await fetch(`/api/conversations?${params.toString()}`, { cache: 'no-store', signal });
         const json = await res.json();
-        if (!json.ok) return null;
+        if (!res.ok || !json.ok) throw new Error(json?.error?.message_th || 'โหลดรายการแชทไม่สำเร็จ');
         return {
           rows: json.data.conversations as ConversationRow[],
           has_more: Boolean(json.data.has_more),
           truncated: Boolean(json.data.truncated),
         };
-      } catch {
-        // เน็ตสะดุดชั่วคราว — เดี๋ยวรอบหน้าก็ได้เอง ไม่ต้องรบกวนแอดมิน
-        return null;
+      } catch (err) {
+        if (signal?.aborted) return null;
+        return { rows: [], has_more: false, truncated: false, error: err instanceof Error ? err.message : 'ติดต่อเซิร์ฟเวอร์ไม่ได้' };
       }
     },
-    [selectedPages, selectedTags, search, inboxGroup],
+    [selectedPages, selectedTags, search, inboxGroup, platformFilter, assignedAdminFilter, orderFilter],
   );
 
-  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean; truncated: boolean }, incremental = false) => {
+  const applyList = useCallback((got: { rows: ConversationRow[]; has_more: boolean; truncated: boolean; error?: string }, incremental = false) => {
+    setListError(got.error ?? null);
+    if (got.error) return;
     /**
      * 🔴 ชุดแรกของตัวกรองชุดใหม่ ต้อง "ทับทั้งก้อน" ไม่ใช่รวมกับของเดิม
      *    ถ้ารวม ห้องเก่าที่ไม่เข้าเงื่อนไขจะค้างอยู่บนจอ
@@ -449,16 +471,22 @@ export default function InboxClient({
   }, []);
 
   const loadList = useCallback(async () => {
+    const generation = listGeneration.current;
     const got = await fetchList();
-    if (got) applyList(got);
+    if (got && generation === listGeneration.current) applyList(got);
   }, [fetchList, applyList]);
 
   // ถ้ามี activeId แต่ยังไม่มีในลิสต์ (เช่น แชทใหม่ที่ทักมาแล้วกดเปิดจากแจ้งเตือน) ให้โหลดรายการใหม่ทันที
+  const activeMissing = Boolean(activeId && !active);
   useEffect(() => {
-    if (activeId && !conversations.some((c) => c.id === activeId)) {
-      void loadList();
+    if (activeMissing) {
+      const controller = new AbortController();
+      void fetchList(undefined, undefined, controller.signal).then((got) => {
+        if (got && !controller.signal.aborted) applyList(got);
+      });
+      return () => controller.abort();
     }
-  }, [activeId, conversations, loadList]);
+  }, [activeId, activeMissing, fetchList, applyList]);
 
   /** ปุ่ม "โหลดแชทเพิ่ม" */
   const loadMoreList = useCallback(async () => {
@@ -469,10 +497,12 @@ export default function InboxClient({
       const oldest = conversations[conversations.length - 1];
       const got = await fetchList({ at: oldest.last_message_at, id: oldest.id });
       if (generation !== listGeneration.current) return;
-      if (!got) {
-        toast.error('โหลดแชทเพิ่มไม่สำเร็จ');
+      if (!got || got.error) {
+        setListError(got?.error ?? 'โหลดแชทเพิ่มไม่สำเร็จ');
+        toast.error(got?.error ?? 'โหลดแชทเพิ่มไม่สำเร็จ');
         return;
       }
+      setListError(null);
       const known = new Set(conversations.map((c) => c.id));
       const fresh = got.rows.filter((c) => !known.has(c.id));
       // ไม่ได้ของใหม่เลย = หมดจริง ต้องปิดปุ่ม ไม่งั้นกดวนไม่รู้จบ
@@ -492,8 +522,9 @@ export default function InboxClient({
     // ตัวกรองเปลี่ยน = เริ่มนับหนึ่งใหม่ ของเก่าที่กดโหลดไว้ใช้ต่อไม่ได้แล้ว
     listInitRef.current = false;
     listGeneration.current += 1;
+    const initialController = new AbortController();
     const apply = () => {
-      void fetchList().then((got) => {
+      void fetchList(undefined, undefined, initialController.signal).then((got) => {
         if (alive && got) applyList(got);
       });
     };
@@ -522,6 +553,7 @@ export default function InboxClient({
     const timer = setInterval(poll, 4000);
     return () => {
       alive = false;
+      initialController.abort();
       controller?.abort();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -531,7 +563,6 @@ export default function InboxClient({
   const toggle = (setter: React.Dispatch<React.SetStateAction<string[]>>) => (id: string) =>
     setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const unreadCount = conversations.filter((c) => !c.is_read).length;
   const filterCount =
     selectedPages.length +
     selectedTags.length +
@@ -568,38 +599,34 @@ export default function InboxClient({
   }, [conversations, orderFilter, assignedAdminFilter, platformFilter, inboxGroup, selectedTags]);
 
   return (
-    <div className={cn('flex h-full w-full gap-3', (active || activeId) ? 'p-0 md:p-[10px]' : 'p-2 md:p-[10px]')}>
+    <div className={cn('flex h-full w-full gap-3 bg-muted/20', (active || activeId) ? 'p-0 md:p-3' : 'p-2 md:p-3')}>
       {/* ---------------- ลิสต์แชท ---------------- */}
-      <div className={cn('flex min-w-0 flex-1 flex-col gap-2 md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
-        <div className="flex flex-col gap-2">
+      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
+        <div className="flex flex-col gap-3 p-3">
+          <div className="flex items-center justify-between">
+            <div><h1 className="text-xl font-semibold tracking-tight">กล่องข้อความ</h1><p className="mt-0.5 text-xs text-muted-foreground">ทุกบทสนทนา ดูแลต่อได้ในที่เดียว</p></div>
+            <Button variant="ghost" size="icon" aria-label="อัปเดตรายการแชท" onClick={() => void loadList()}><RefreshCw className="size-4" /></Button>
+          </div>
           {/* ช่องค้นหาเดสก์ท็อป */}
-          <div className="relative hidden md:block">
+          <div className="relative">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="ชื่อ เบอร์ ออเดอร์ หรือเลขพัสดุ"
-              className="pl-8"
+              aria-label="ค้นหาบทสนทนา"
+              className="rounded-xl bg-muted/40 pl-8 pr-9"
             />
+            {search && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button>}
+          </div>
+          <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted/60 p-1" role="group" aria-label="กลุ่มบทสนทนา">
+            {([{ value: 'all', label: 'ทั้งหมด' }, { value: 'unread', label: 'ยังไม่อ่าน' }, { value: 'follow_up', label: 'ติดตาม' }, { value: 'done', label: 'เรียบร้อย' }] as const).map((tab) => (
+              <button key={tab.value} type="button" aria-pressed={inboxGroup === tab.value} onClick={() => setInboxGroup(tab.value)} className={cn('min-h-9 rounded-lg px-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary', inboxGroup === tab.value ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{tab.label}</button>
+            ))}
           </div>
 
-          {/* ป้ายแสดงผลการค้นหาบนมือถือ */}
-          {search && (
-            <div className="flex items-center justify-between rounded-md bg-primary/10 px-2.5 py-1 text-xs text-primary md:hidden">
-              <span className="truncate">ค้นหา: &quot;{search}&quot;</span>
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="ml-2 shrink-0 rounded p-0.5 hover:bg-primary/20"
-                aria-label="ล้างคำค้นหา"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
-
           <div
-            className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none touch-pan-x select-none"
+            className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none touch-pan-x select-none md:flex-wrap"
             onTouchStart={handleFilterTouchStart}
             onTouchMove={handleFilterTouchMove}
             onTouchEnd={handleFilterTouchEnd}
@@ -625,12 +652,6 @@ export default function InboxClient({
                 </span>
               )}
             </Button>
-
-            {/* 2. ชิป: ยังไม่ได้อ่าน */}
-            <FilterChip active={inboxGroup === 'unread'} onClick={() => setInboxGroup(inboxGroup === 'unread' ? 'all' : 'unread')}>
-              <MessageSquareOff className="size-3.5" />
-              ยังไม่ได้อ่าน{inboxGroup === 'all' && unreadCount > 0 ? ` (${unreadCount}${hasMoreList ? "+" : ""})` : ''}
-            </FilterChip>
 
             {/* 3. ปุ่มดรอปดาวน์: ป้ายแท็ก (วางก่อนติดตามผล) */}
             <DropdownMenu
@@ -716,11 +737,6 @@ export default function InboxClient({
             </DropdownMenu>
 
             {/* 4. ชิป: ติดตามผล */}
-            <FilterChip active={inboxGroup === 'follow_up'} onClick={() => setInboxGroup(inboxGroup === 'follow_up' ? 'all' : 'follow_up')}>
-              <Star className={cn('size-3.5', inboxGroup === 'follow_up' && 'fill-current text-amber-500')} />
-              ติดตามผล
-            </FilterChip>
-
             {/* 4. ปุ่มดรอปดาวน์: ผู้ดูแล / แอดมิน */}
             <DropdownMenu
               open={openDropdown === 'admins'}
@@ -1018,9 +1034,11 @@ export default function InboxClient({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
+        {listError && <div role="alert" className="mx-3 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs"><p className="font-medium">อัปเดตแชทไม่สำเร็จ</p><p className="mt-1 break-words text-muted-foreground">{listError} · รายการที่เห็นอาจไม่ใช่ข้อมูลล่าสุด</p><button className="mt-2 font-semibold text-primary underline" onClick={() => void loadList()}>ลองอีกครั้ง</button></div>}
+        <div className="flex items-center justify-between border-y bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span title="ร่างข้อความเก็บไว้ระหว่างสลับห้องในหน้านี้ และจะหายเมื่อออกจากหน้าหรือรีเฟรช">{displayedConversations.length} บทสนทนาที่แสดง{drafts.size > 0 && ` · ${drafts.size} ร่าง`}</span><span>{hasMoreList ? 'มีรายการให้โหลดเพิ่ม' : 'โหลดรายการครบแล้ว'}</span></div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {displayedConversations.length === 0 ? (
-            <EmptyList hasPages={pages.length > 0} />
+            <EmptyList hasPages={pages.length > 0} filtered={Boolean(search.trim() || filterCount || inboxGroup !== 'all' || platformFilter !== 'all')} />
           ) : (
             <ul className="divide-y">
               {displayedConversations.map((c) => (
@@ -1061,6 +1079,8 @@ export default function InboxClient({
             canReply={canReply}
             meId={me.id}
             tags={tags}
+            initialDraft={drafts.get(active.id)}
+            onDraftChange={saveDraft}
             onBack={() => {
               window.history.pushState(null, '', '/inbox');
             }}
@@ -1091,8 +1111,10 @@ export default function InboxClient({
             </Button>
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center rounded-lg border text-sm text-muted-foreground">
-            เลือกแชทจากรายการทางซ้าย
+          <div className="flex h-full flex-col items-center justify-center gap-5 rounded-2xl border bg-card p-8 text-center">
+            <div className="flex size-20 items-center justify-center rounded-3xl bg-primary/10 text-primary"><MessageCircle className="size-9" /></div>
+            <div><h2 className="text-xl font-semibold">เริ่มดูแลลูกค้าจากบทสนทนา</h2><p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">เลือกแชททางซ้ายเพื่อดูประวัติ ตอบข้อความ และจัดการออเดอร์ได้โดยไม่ต้องสลับหน้า</p></div>
+            <div className="flex flex-wrap justify-center gap-3 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><PlatformIcon platform="facebook" size="xs" /> Messenger</span><span className="flex items-center gap-1.5"><PlatformIcon platform="instagram" size="xs" /> Instagram</span></div>
           </div>
         )}
       </div>
@@ -1270,14 +1292,15 @@ function FilterChoice({ active, onClick, dotColor, icon, children }: { active: b
   );
 }
 
-function EmptyList({ hasPages }: { hasPages: boolean }) {
+function EmptyList({ hasPages, filtered }: { hasPages: boolean; filtered: boolean }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
       <MessageSquareOff className="size-8 text-muted-foreground" />
-      <p className="text-sm font-medium">ยังไม่มีแชท</p>
+      <p className="text-sm font-medium">{filtered ? 'ไม่พบบทสนทนาในตัวกรองนี้' : 'ยังไม่มีแชท'}</p>
       <p className="max-w-xs text-xs text-muted-foreground">
-        {hasPages
-          ? 'เมื่อลูกค้าทักเข้าเพจ ข้อความจะขึ้นที่นี่อัตโนมัติ — ถ้าทักแล้วยังไม่ขึ้น ให้ดูหัวข้อแก้ปัญหาในคู่มือ docs/META_SETUP_TH.md'
+        {filtered ? 'ลองเปลี่ยนคำค้นหา เลือกกลุ่ม “ทั้งหมด” หรือล้างตัวกรอง'
+          : hasPages
+          ? 'ข้อความใหม่จะแสดงเมื่อระบบได้รับจากเพจ หากยังไม่เข้า ตรวจการเชื่อมต่อได้ที่ ตั้งค่า → จัดการเพจ'
           : 'ยังไม่ได้เชื่อมเพจไหนเลย — ไปที่ ตั้งค่า → จัดการเพจ'}
       </p>
     </div>
@@ -1437,6 +1460,8 @@ function ChatRoom({
   onChanged,
   onStateChanged,
   onUpdateConversation,
+  initialDraft,
+  onDraftChange,
 }: {
   conversation: ConversationRow;
   canReply: boolean;
@@ -1446,6 +1471,8 @@ function ChatRoom({
   onChanged: () => void;
   onStateChanged: () => void;
   onUpdateConversation?: (patch: Partial<ConversationRow>) => void;
+  initialDraft?: { text: string; reply: MessageRow | null };
+  onDraftChange: (id: string, patch: { text?: React.SetStateAction<string>; reply?: MessageRow | null }) => void;
 }) {
   const [messages, setMessages] = useState<MessageRow[] | null>(null);
   /** ยังมีข้อความเก่ากว่าที่โหลดมาอีกไหม */
@@ -1456,9 +1483,13 @@ function ChatRoom({
   const [newBelow, setNewBelow] = useState(false);
   const [policy, setPolicy] = useState<PolicyStatus | null>(null);
   const [lockedBy, setLockedBy] = useState<{ name: string; id: string } | null>(null);
-  const [text, setText] = useState('');
+  const text = initialDraft?.text ?? '';
+  const setText = useCallback((value: React.SetStateAction<string>) => {
+    onDraftChange(c.id, { text: value });
+  }, [c.id, onDraftChange]);
   /** ข้อความที่กำลังจะตอบกลับ — null = ส่งข้อความธรรมดา */
-  const [replyTarget, setReplyTarget] = useState<MessageRow | null>(null);
+  const replyTarget = initialDraft?.reply ?? null;
+  const setReplyTarget = useCallback((reply: MessageRow | null) => onDraftChange(c.id, { reply }), [c.id, onDraftChange]);
   /** แผงข้อมูลลูกค้า (ข้อ 1.6) */
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** ตัวเลือกสินค้า (ข้อ 1.10) */

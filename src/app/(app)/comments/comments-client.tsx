@@ -212,6 +212,12 @@ export default function CommentsClient({ initial, initialError, pages = [], canM
     { value: 'deleted', label: 'ลบแล้ว' },
   ];
   const botOn = botSettings && (botSettings.auto_reply_public || botSettings.auto_reply_private);
+  const selectedIndex = selected ? feed.comments.findIndex((c) => c.id === selected.id) : -1;
+  function moveDetail(offset: number) {
+    if (busy || dirty) return;
+    const next = feed.comments[selectedIndex + offset];
+    if (next) setSelected(next);
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 pb-12">
@@ -224,6 +230,17 @@ export default function CommentsClient({ initial, initialError, pages = [], canM
           <RefreshCw className={cn('size-4', syncing && 'animate-spin')} />
           {syncing ? 'กำลังดึงจาก Meta…' : 'ดึงคอมเมนต์จาก Meta'}
         </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" onClick={() => setStatus('pending')} className={cn('flex min-w-0 items-center gap-3 rounded-2xl border p-4 text-left transition-colors hover:border-primary/40', status === 'pending' ? 'border-primary/30 bg-primary/5' : 'bg-card')}>
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><MessageSquare className="size-5" /></span>
+          <span className="min-w-0"><span className="block text-2xl font-semibold tabular-nums">{feed.unhandled_count}</span><span className="block text-xs text-muted-foreground">คอมเมนต์รอจัดการ</span></span>
+        </button>
+        <button type="button" onClick={() => setStatus('review')} className={cn('flex min-w-0 items-center gap-3 rounded-2xl border p-4 text-left transition-colors hover:border-amber-500/40', status === 'review' ? 'border-amber-500/30 bg-amber-500/5' : 'bg-card')}>
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-300"><AlertTriangle className="size-5" /></span>
+          <span className="min-w-0"><span className="block text-2xl font-semibold tabular-nums">{feed.review_count}</span><span className="block text-xs text-muted-foreground">ต้องตรวจผลการตอบ</span></span>
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
@@ -282,6 +299,14 @@ export default function CommentsClient({ initial, initialError, pages = [], canM
       <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) closeDetail(); }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader><DialogTitle>รายละเอียดคอมเมนต์</DialogTitle><DialogDescription>ตรวจข้อความและผลการตอบก่อนทำรายการ</DialogDescription></DialogHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/40 p-2">
+            <span className="px-2 text-xs text-muted-foreground">{selectedIndex >= 0 ? `รายการ ${selectedIndex + 1} จาก ${feed.comments.length} ที่โหลดไว้` : 'รายการที่เลือก'}</span>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" disabled={busy || dirty || selectedIndex <= 0} onClick={() => moveDetail(-1)}>ก่อนหน้า</Button>
+              <Button variant="ghost" size="sm" disabled={busy || dirty || selectedIndex < 0 || selectedIndex >= feed.comments.length - 1} onClick={() => moveDetail(1)}>ถัดไป <ChevronRight className="size-4" /></Button>
+            </div>
+            {dirty && <p className="w-full px-2 text-xs text-muted-foreground">มีข้อความร่างอยู่ · ส่งหรือล้างร่างก่อนเปลี่ยนรายการ</p>}
+          </div>
           {selected && <CommentCard key={selected.id} comment={selected} page={pages.find((p) => p.id === selected.page_id)} onChanged={replaceComment} setBusy={setBusy} onDirtyChange={setDirty} />}
         </DialogContent>
       </Dialog>

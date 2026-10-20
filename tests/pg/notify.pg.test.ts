@@ -350,6 +350,51 @@ describe.skipIf(!available)('PostgreSQL จริง — ระบบแจ้�
 
   /* ============================================================== */
   describe('เดินตรวจแชทที่ลูกค้ารออยู่', () => {
+    it('ตรวจต่อหลัง 200 ห้องแรกที่ตอบแล้ว และไม่เข้าคิวซ้ำในรอบถัดไป', async () => {
+      const now = new Date();
+      const at = new Date(now.getTime() - 20 * 60_000).toISOString();
+      await pool.query(`
+        insert into customers (id,page_id,platform,psid,name)
+        select ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid,
+          $1,'facebook','scan_' || i,'ลูกค้าทดสอบ'
+        from generate_series(1,205) i`, [ids.page]);
+      await pool.query(`
+        insert into conversations (id,customer_id,page_id,last_customer_message_at)
+        select id,id,page_id,$1 from customers where psid like 'scan_%'`, [at]);
+      await pool.query(`
+        insert into messages (conversation_id,direction,sender_type,text,created_at)
+        select id,'out','admin','ตอบแล้ว',$1::timestamptz + interval '1 minute'
+        from conversations where id < '00000000-0000-0000-0000-000000000205'`, [at]);
+      const first = await scanIdleAndClosing(now);
+      expect(first.scanned).toBe(205);
+      expect(first.idle_queued).toBe(2);
+      const queued = await jobs();
+      expect(queued.every((j) => j.dedupe_key.includes('00000000-0000-0000-0000-000000000205'))).toBe(true);
+      expect((await scanIdleAndClosing(now)).idle_queued).toBe(0);
+    });
+
+    it('อ่านคำตอบหลังหน้าแรกครบ แม้ห้องเดียวมีประวัติข้อความจำนวนมาก', async () => {
+      const now = new Date();
+      const at = new Date(now.getTime() - 20 * 60_000);
+      await makeConversation({ last_customer_message_at: at });
+      // Another older conversation makes early replies relevant to the batch query.
+      const otherCustomer = randomUUID();
+      const otherConversation = randomUUID();
+      await pool.query(`insert into customers (id,page_id,platform,psid) values ($1,$2,'facebook','older')`, [otherCustomer, ids.page]);
+      await pool.query(`insert into conversations (id,customer_id,page_id,last_customer_message_at)
+        values ($1,$2,$3,$4::timestamptz - interval '1 hour')`, [otherConversation, otherCustomer, ids.page, at.toISOString()]);
+      await pool.query(`insert into messages (id,conversation_id,direction,sender_type,text,created_at)
+        select ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid,
+          $1,'out','admin','คำตอบก่อนลูกค้าทักใหม่',$2::timestamptz - interval '1 minute'
+        from generate_series(1,1005) i`, [ids.conversation, at.toISOString()]);
+      await pool.query(`insert into messages (id,conversation_id,direction,sender_type,text,created_at)
+        values ('ffffffff-ffff-ffff-ffff-ffffffffffff',$1,'out','admin','ตอบล่าสุด',$2)`,
+      [ids.conversation, now.toISOString()]);
+      await scanIdleAndClosing(now);
+      expect((await jobs()).some((j) => j.dedupe_key.includes(ids.conversation))).toBe(false);
+      expect((await jobs()).some((j) => j.dedupe_key.includes(otherConversation))).toBe(true);
+    });
+
     it('⭐ ลูกค้าทักแล้วเงียบ 20 นาที ยังไม่มีใครตอบ → เตือน', async () => {
       const at = new Date(Date.now() - 20 * 60_000);
       await makeConversation({ last_customer_message_at: at });

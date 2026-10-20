@@ -187,8 +187,37 @@ describe.skipIf(!available)('PostgreSQL จริง — หน้าอิน�
     // แอดมิน A ยัด page_ids ของเพจ B มาเอง (จำลองการแก้ค่าจากเบราว์เซอร์)
     const result = await listConversations(ADMIN_A, { page_ids: [ids.pageB] });
 
-    // ต้องไม่หลุดข้อมูลเพจ B ออกไป — ตกกลับไปใช้เฉพาะเพจที่มีสิทธิ์
-    expect(result.conversations.every((c) => c.page.id === ids.pageA)).toBe(true);
+    // ตัวกรองที่ไม่มีสิทธิ์ต้องว่าง ไม่เปลี่ยนไปแสดงอีกเพจให้ผู้ใช้เข้าใจผิด
+    expect(result.conversations).toEqual([]);
+  });
+
+  it('กรองแพลตฟอร์มและผู้ดูแลก่อนแบ่งหน้า', async () => {
+    await pool.query(`update pages set platform='instagram' where id=$1`, [ids.pageB]);
+    await pool.query(`update conversations set assigned_admin_id=$1,last_message_at=now() where id=$2`, [ids.adminA, ids.convA]);
+    const instagram = await listConversations(OWNER, { platform: 'instagram', limit: 1 });
+    expect(instagram.conversations.map((c) => c.id)).toEqual([ids.convB]);
+    const unassigned = await listConversations(OWNER, { assigned_admin_id: 'unassigned', limit: 1 });
+    expect(unassigned.conversations.map((c) => c.id)).toEqual([ids.convB]);
+    const assigned = await listConversations(OWNER, { assigned_admin_id: ids.adminA, limit: 1 });
+    expect(assigned.conversations.map((c) => c.id)).toEqual([ids.convA]);
+    expect((await listConversations(ADMIN_A, { platform: 'instagram' })).conversations).toEqual([]);
+  });
+
+  it('กรองจำนวนออเดอร์ก่อนแบ่งหน้า และไม่นับออเดอร์ยกเลิก', async () => {
+    await pool.query(`update conversations set last_message_at=now() where id=$1`, [ids.convA]);
+    const orderIds = [randomUUID(), randomUUID()];
+    try {
+      await pool.query(`insert into orders (id,order_no,customer_id,page_id,items,subtotal,total,status,payment_method)
+        values ($1,'FILTER-B',$3,$4,'[]',100,100,'confirmed','cod'),
+               ($2,'FILTER-CANCELLED',$5,$6,'[]',100,100,'cancelled','cod')`,
+      [...orderIds, ids.customerB, ids.pageB, ids.customerA, ids.pageA]);
+      expect((await listConversations(OWNER, { order_count: '1', limit: 1 })).conversations.map((c) => c.id)).toEqual([ids.convB]);
+      expect((await listConversations(OWNER, { order_count: '0', limit: 1 })).conversations.map((c) => c.id)).toEqual([ids.convA]);
+      expect((await listConversations(OWNER, { order_count: '5_10' })).conversations).toEqual([]);
+      expect((await listConversations(ADMIN_A, { order_count: '1' })).conversations).toEqual([]);
+    } finally {
+      await pool.query('delete from orders where id=any($1::uuid[])', [orderIds]);
+    }
   });
 
   /* -------------------------------------------------------------- */

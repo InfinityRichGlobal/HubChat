@@ -25,7 +25,7 @@ import { dispatchNotification } from './dispatch';
 export const IDLE_MINUTES = 15;
 /** เหลือกรอบ 24 ชม. น้อยกว่ากี่ชั่วโมงถึงเตือน */
 export const WINDOW_WARN_HOURS = 2;
-/** ตรวจสูงสุดกี่ห้องต่อรอบ — กันรอบเดียวกินเวลาจนหมด timeout */
+/** อ่านทีละชุด โดยเดิน cursor ต่อจนหมด ไม่ตัดห้องหลังชุดแรก */
 const MAX_ROWS = 200;
 
 export type ScanSummary = {
@@ -65,22 +65,29 @@ async function unansweredIds(rows: ConvRow[]): Promise<Set<string>> {
    *    จะไม่มีใครได้รับแจ้งเตือนเลย — ซึ่งเป็นห้องที่ต้องเตือนที่สุดด้วยซ้ำ
    *    เพราะลูกค้าเข้าใจว่ามีคนคุยอยู่ แล้วรอยาวกว่าเดิม
    */
-  const { data, error } = await db()
-    .from('messages')
-    .select('conversation_id,created_at')
-    .in('conversation_id', rows.map((r) => r.id))
-    .eq('direction', 'out')
-    .eq('sender_type', 'admin')
-    .eq('is_deleted', false)
-    .gte('created_at', oldest);
-
-  // ⚠️ อ่านไม่ได้ต้องดัง — ไม่ใช่คืนเซ็ตว่างแล้วไปเตือนซ้ำห้องที่ตอบไปแล้ว
-  if (error) throw new Error(`อ่านข้อความเพื่อตรวจว่าตอบไปหรือยังไม่สำเร็จ: ${error.message}`);
-
   const repliedAfter = new Map<string, string>();
-  for (const m of (data ?? []) as Array<{ conversation_id: string; created_at: string }>) {
-    const prev = repliedAfter.get(m.conversation_id);
-    if (!prev || Date.parse(m.created_at) > Date.parse(prev)) repliedAfter.set(m.conversation_id, m.created_at);
+  let messageCursor: string | null = null;
+  while (true) {
+    let query = db()
+      .from('messages')
+      .select('id,conversation_id,created_at')
+      .in('conversation_id', rows.map((r) => r.id))
+      .eq('direction', 'out')
+      .eq('sender_type', 'admin')
+      .eq('is_deleted', false)
+      .gte('created_at', oldest)
+      .order('id', { ascending: true })
+      .limit(MAX_ROWS);
+    if (messageCursor) query = query.gt('id', messageCursor);
+    const { data, error } = await query;
+    if (error) throw new Error(`อ่านข้อความเพื่อตรวจว่าตอบไปหรือยังไม่สำเร็จ: ${error.message}`);
+    const messages = (data ?? []) as Array<{ id: string; conversation_id: string; created_at: string }>;
+    if (!messages.length) break;
+    for (const m of messages) {
+      const prev = repliedAfter.get(m.conversation_id);
+      if (!prev || Date.parse(m.created_at) > Date.parse(prev)) repliedAfter.set(m.conversation_id, m.created_at);
+    }
+    messageCursor = messages[messages.length - 1].id;
   }
 
   const out = new Set<string>();
@@ -127,83 +134,86 @@ export async function scanIdleAndClosing(now = new Date()): Promise<ScanSummary>
     const windowStart = new Date(nowMs - windowHours * 3_600_000).toISOString();
     const warnAfter = new Date(nowMs - (windowHours - WINDOW_WARN_HOURS) * 3_600_000).toISOString();
 
-    const { data, error } = await db()
-      .from('conversations')
-      .select('id,page_id,assigned_admin_id,last_customer_message_at,customer_id')
-      .not('last_customer_message_at', 'is', null)
-      .gte('last_customer_message_at', windowStart)
-      .lte('last_customer_message_at', idleBefore)
-      .order('last_customer_message_at', { ascending: true })
-      .limit(MAX_ROWS);
+    let conversationCursor: string | null = null;
+    while (true) {
+      let query = db()
+        .from('conversations')
+        .select('id,page_id,assigned_admin_id,last_customer_message_at,customer_id')
+        .not('last_customer_message_at', 'is', null)
+        .gte('last_customer_message_at', windowStart)
+        .lte('last_customer_message_at', idleBefore)
+        .order('id', { ascending: true })
+        .limit(MAX_ROWS);
+      if (conversationCursor) query = query.gt('id', conversationCursor);
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as ConvRow[];
+      if (!rows.length) break;
+      conversationCursor = rows[rows.length - 1].id;
+      summary.scanned += rows.length;
+      const pending = await unansweredIds(rows);
+      if (!pending.size) continue;
 
-    if (error) throw new Error(error.message);
+      // ชื่อลูกค้า — ดึงทีเดียวทั้งชุด
+      const names = new Map<string, string>();
+      const { data: custRows, error: customerError } = await db()
+        .from('customers')
+        .select('id,name')
+        .in('id', rows.map((r) => r.customer_id));
+      if (customerError) throw new Error(`อ่านชื่อลูกค้าไม่สำเร็จ: ${customerError.message}`);
+      for (const c of (custRows ?? []) as Array<{ id: string; name: string | null }>) {
+        names.set(c.id, c.name || 'ลูกค้า');
+      }
 
-    const rows = (data ?? []) as ConvRow[];
-    summary.scanned = rows.length;
-    if (rows.length === 0) return summary;
+      const { data: prevRows, error: previewError } = await db()
+        .from('conversations')
+        .select('id,last_message_preview')
+        .in('id', [...pending]);
+      if (previewError) throw new Error(`อ่านข้อความตัวอย่างไม่สำเร็จ: ${previewError.message}`);
+      const previews = new Map(
+        ((prevRows ?? []) as Array<{ id: string; last_message_preview: string | null }>)
+          .map((p) => [p.id, p.last_message_preview]),
+      );
 
-    const pending = await unansweredIds(rows);
-    if (pending.size === 0) return summary;
+      for (const row of rows) {
+        if (!pending.has(row.id)) continue;
+        const stamp = row.last_customer_message_at!;
+        const who = names.get(row.customer_id) ?? 'ลูกค้า';
+        const link = `/inbox?c=${row.id}`;
 
-    // ชื่อลูกค้า — ดึงทีเดียวทั้งชุด
-    const names = new Map<string, string>();
-    const { data: custRows, error: customerError } = await db()
-      .from('customers')
-      .select('id,name')
-      .in('id', rows.map((r) => r.customer_id));
-    if (customerError) throw new Error(`อ่านชื่อลูกค้าไม่สำเร็จ: ${customerError.message}`);
-    for (const c of (custRows ?? []) as Array<{ id: string; name: string | null }>) {
-      names.set(c.id, c.name || 'ลูกค้า');
-    }
-
-    const { data: prevRows, error: previewError } = await db()
-      .from('conversations')
-      .select('id,last_message_preview')
-      .in('id', [...pending]);
-    if (previewError) throw new Error(`อ่านข้อความตัวอย่างไม่สำเร็จ: ${previewError.message}`);
-    const previews = new Map(
-      ((prevRows ?? []) as Array<{ id: string; last_message_preview: string | null }>)
-        .map((p) => [p.id, p.last_message_preview]),
-    );
-
-    for (const row of rows) {
-      if (!pending.has(row.id)) continue;
-      const stamp = row.last_customer_message_at!;
-      const who = names.get(row.customer_id) ?? 'ลูกค้า';
-      const link = `/inbox?c=${row.id}`;
-
-      /* ---- เงียบเกิน 15 นาที : บอกทุกคน เพราะยังไม่มีใครรับ ---- */
-      const idle = await dispatchNotification({
-        event: 'idle_15min',
-        page_id: row.page_id,
-        // 🔴 ต้องมีเวลาข้อความล่าสุดอยู่ในกุญแจ ไม่งั้นเตือนได้ครั้งเดียวตลอดชีวิตห้อง
-        subject_id: `${row.id}:${stamp}`,
-        conversation_id: row.id,
-        assigned_admin_id: row.assigned_admin_id,
-        title: `⏰ ${who} รอมา ${IDLE_MINUTES} นาทีแล้ว`,
-        body: preview(previews.get(row.id)),
-        link,
-      });
-      summary.idle_queued += idle.queued;
-
-      /* ---- ใกล้หมดกรอบ 24 ชม. : บอกคนที่รับแชทไว้ ---- */
-      if (Date.parse(stamp) <= Date.parse(warnAfter) && row.assigned_admin_id) {
-        const left = Math.max(
-          0,
-          Math.round((new Date(stamp).getTime() + windowHours * 3_600_000 - nowMs) / 60_000),
-        );
-        const closing = await dispatchNotification({
-          event: 'window_closing',
+        /* ---- เงียบเกิน 15 นาที : บอกทุกคน เพราะยังไม่มีใครรับ ---- */
+        const idle = await dispatchNotification({
+          event: 'idle_15min',
           page_id: row.page_id,
-          // กรอบหนึ่งรอบ = ข้อความล่าสุดหนึ่งครั้ง จึงใช้เวลาเดียวกันเป็นกุญแจ
+          // 🔴 ต้องมีเวลาข้อความล่าสุดอยู่ในกุญแจ ไม่งั้นเตือนได้ครั้งเดียวตลอดชีวิตห้อง
           subject_id: `${row.id}:${stamp}`,
           conversation_id: row.id,
           assigned_admin_id: row.assigned_admin_id,
-          title: `⚠️ เหลือเวลาตอบ ${who} อีก ${left} นาที`,
-          body: 'พ้นกรอบเวลาแล้วจะส่งข้อความธรรมดาไม่ได้อีก',
+          title: `⏰ ${who} รอมา ${IDLE_MINUTES} นาทีแล้ว`,
+          body: preview(previews.get(row.id)),
           link,
         });
-        summary.window_queued += closing.queued;
+        summary.idle_queued += idle.queued;
+
+        /* ---- ใกล้หมดกรอบ 24 ชม. : บอกคนที่รับแชทไว้ ---- */
+        if (Date.parse(stamp) <= Date.parse(warnAfter) && row.assigned_admin_id) {
+          const left = Math.max(
+            0,
+            Math.round((new Date(stamp).getTime() + windowHours * 3_600_000 - nowMs) / 60_000),
+          );
+          const closing = await dispatchNotification({
+            event: 'window_closing',
+            page_id: row.page_id,
+            // กรอบหนึ่งรอบ = ข้อความล่าสุดหนึ่งครั้ง จึงใช้เวลาเดียวกันเป็นกุญแจ
+            subject_id: `${row.id}:${stamp}`,
+            conversation_id: row.id,
+            assigned_admin_id: row.assigned_admin_id,
+            title: `⚠️ เหลือเวลาตอบ ${who} อีก ${left} นาที`,
+            body: 'พ้นกรอบเวลาแล้วจะส่งข้อความธรรมดาไม่ได้อีก',
+            link,
+          });
+          summary.window_queued += closing.queued;
+        }
       }
     }
 
