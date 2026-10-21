@@ -32,6 +32,7 @@ import PlatformIcon from '@/components/platform-icon';
 import { displayName, hasRealName } from '@/lib/customer-name';
 import { compareCursor, type InboxCursor } from '@/lib/inbox/cursor';
 import { mergeByTime } from '@/lib/inbox/merge';
+import { useInboxDrafts } from '@/lib/inbox/use-inbox-drafts';
 import { customerProfileUrl } from '@/lib/customer-profile';
 import { toast } from 'sonner';
 import type { ConversationRow, InboxGroup, InboxPage, MessageRow } from '@/server/inbox/service';
@@ -294,9 +295,9 @@ export default function InboxClient({
   const [hasMoreList, setHasMoreList] = useState(initialHasMore);
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState(new Map<string, { text: string; reply: MessageRow | null }>());
+  const [drafts, setDrafts] = useInboxDrafts(me.id);
   const saveDraft = useCallback((id: string, patch: { text?: React.SetStateAction<string>; reply?: MessageRow | null }) => {
-    setDrafts((previous) => {
+    const persisted = setDrafts((previous) => {
       const saved = previous.get(id);
       const text = typeof patch.text === 'function' ? patch.text(saved?.text ?? '') : patch.text ?? saved?.text ?? '';
       const reply = patch.reply !== undefined ? patch.reply : saved?.reply ?? null;
@@ -306,7 +307,8 @@ export default function InboxClient({
       else next.delete(id);
       return next;
     });
-  }, []);
+    if (!persisted) toast.error('เก็บร่างในแท็บนี้ไม่ได้ ร่างจะหายเมื่อรีเฟรช', { id: 'draft-storage' });
+  }, [setDrafts]);
   /** โหลดชุดแรกของ "ตัวกรองชุดนี้" แล้วหรือยัง */
   const listInitRef = useRef(true);
   const listGeneration = useRef(0);
@@ -1035,7 +1037,7 @@ export default function InboxClient({
         </div>
 
         {listError && <div role="alert" className="mx-3 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs"><p className="font-medium">อัปเดตแชทไม่สำเร็จ</p><p className="mt-1 break-words text-muted-foreground">{listError} · รายการที่เห็นอาจไม่ใช่ข้อมูลล่าสุด</p><button className="mt-2 font-semibold text-primary underline" onClick={() => void loadList()}>ลองอีกครั้ง</button></div>}
-        <div className="flex items-center justify-between border-y bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span title="ร่างข้อความเก็บไว้ระหว่างสลับห้องในหน้านี้ และจะหายเมื่อออกจากหน้าหรือรีเฟรช">{displayedConversations.length} บทสนทนาที่แสดง{drafts.size > 0 && ` · ${drafts.size} ร่าง`}</span><span>{hasMoreList ? 'มีรายการให้โหลดเพิ่ม' : 'โหลดรายการครบแล้ว'}</span></div>
+        <div className="flex items-center justify-between border-y bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span title="เก็บข้อความร่างในแท็บนี้เมื่อสลับหน้าหรือรีเฟรช สูงสุด 24 ชั่วโมง ล้างเมื่อออกจากระบบ; ข้อความอ้างอิงและไฟล์แนบไม่เก็บหลังรีเฟรช">{displayedConversations.length} บทสนทนาที่แสดง{drafts.size > 0 && ` · ${drafts.size} ร่าง`}</span><span>{hasMoreList ? 'มีรายการให้โหลดเพิ่ม' : 'โหลดรายการครบแล้ว'}</span></div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {displayedConversations.length === 0 ? (
             <EmptyList hasPages={pages.length > 0} filtered={Boolean(search.trim() || filterCount || inboxGroup !== 'all' || platformFilter !== 'all')} />

@@ -96,6 +96,8 @@ describe('🔴 ห้ามฝังกฎเวลาของ Meta ไว้�
     const offenders = CODE_FILES.filter((f) => {
       const r = rel(f);
       if (r.startsWith('server/policy/')) return false;
+      // Browser draft retention is independent of Meta's messaging window.
+      if (r === 'lib/inbox/drafts.ts') return false;
       return suspicious.test(read(f));
     }).map(rel);
     expect(offenders).toEqual([]);

@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useLocalPreference } from '@/lib/use-local-preference';
+import { clearInboxDrafts } from '@/lib/inbox/use-inbox-drafts';
 import { can } from '@/lib/auth/permissions';
 import { ROLE_LABEL_TH } from '@/lib/auth/permissions';
 import type { PublicAdmin } from '@/types/db';
@@ -174,6 +175,7 @@ export default function AppShell({
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
+    clearInboxDrafts(admin.id);
     toast.success('ออกจากระบบแล้ว');
     router.replace('/login');
     router.refresh();
