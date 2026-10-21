@@ -100,8 +100,27 @@ export default function AppShell({
   // แล้วตั้งเป็นตัวแปร --app-height ซ้ำหลายจังหวะหลังโหลด และทุกครั้งที่จอเปลี่ยนขนาด/กลับเข้าแอป
   useEffect(() => {
     const root = document.documentElement;
+    const isStandalone = () =>
+      window.matchMedia('(display-mode: standalone)').matches
+      || (navigator as Navigator & { standalone?: boolean }).standalone === true;
     const sync = () => {
-      const h = window.innerHeight;
+      // เฉพาะตอนเปิดเป็นแอปจากหน้าจอโฮม: iOS รายงาน innerHeight/100dvh สั้นกว่าจอจริง
+      // (และค้างค่าผิดไม่อัปเดต) จึงใช้ความสูงหน้าจอจริงของเครื่องแทน
+      // ส่วนการเปิดผ่านเบราว์เซอร์ปกติ ปล่อยให้ 100dvh ทำงานตามเดิม
+      if (!isStandalone()) {
+        root.style.removeProperty('--app-height');
+        return;
+      }
+      const portrait = window.innerHeight >= window.innerWidth;
+      const screenH = portrait
+        ? Math.max(window.screen.height, window.screen.width)
+        : Math.min(window.screen.height, window.screen.width);
+      // ใช้ค่าหน้าจอเฉพาะเมื่อแอปกินเต็มความกว้างจอ (iPhone) — iPad แบ่งจอให้ใช้ innerHeight
+      const screenW = portrait
+        ? Math.min(window.screen.height, window.screen.width)
+        : Math.max(window.screen.height, window.screen.width);
+      const fullWidth = Math.abs(window.innerWidth - screenW) <= 2;
+      const h = fullWidth ? Math.max(window.innerHeight, screenH) : window.innerHeight;
       if (h > 0) root.style.setProperty('--app-height', `${h}px`);
     };
     sync();
