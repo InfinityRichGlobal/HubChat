@@ -8,6 +8,7 @@ import 'server-only';
  *    (มีแต่ saveIncomingComment ที่ "บันทึก" เฉย ๆ ไม่ตอบอะไร)
  */
 import { z } from 'zod';
+import { resolveResponder, type ReplyResponder } from '@/lib/comment-responder';
 import { db } from '@/lib/supabase/admin';
 import { canSeePage } from '@/lib/auth/permissions';
 import type { PublicAdmin } from '@/types/db';
@@ -21,7 +22,7 @@ export class CommentError extends Error {
 }
 
 export const COMMENT_SELECTS = {
-  comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,from_username,from_pic_url,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_liked,is_deleted,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,commented_at,created_at',
+  comments: 'id,page_id,comment_id,post_id,parent_comment_id,from_name,from_id,from_username,from_pic_url,message,post_permalink,attachment_url,matched_keyword,is_handled,is_hidden,is_liked,is_deleted,is_from_page,replied_public,replied_private,public_reply_text,private_reply_text,conversation_id,last_error_th,public_reply_at,private_reply_at,commented_at,created_at',
   setting: 'value',
 } as const;
 
@@ -138,6 +139,27 @@ export async function saveIncomingComment(
 /* อ่านฟีด                                                                    */
 /* ------------------------------------------------------------------------ */
 
+
+// Only successful send receipts identify a responder; handled_by can be changed by moderation.
+async function attachResponders(rows: CommentRow[]): Promise<CommentRow[]> {
+  if (!rows.length) return rows;
+  const { data, error } = await db().from('activity_logs')
+    .select('target_id,action,admin_id,created_at')
+    .eq('target_type', 'comment').in('target_id', rows.map(row => row.id))
+    .in('action', ['comment.reply_public', 'comment.reply_private', 'comment.bot_reply_public', 'comment.bot_reply_private'])
+    .order('created_at', { ascending: false }).limit(1000);
+  if (error || !data?.length) return rows;
+  const ids = [...new Set(data.flatMap(log => log.admin_id ? [log.admin_id as string] : []))];
+  const admins = ids.length ? await db().from('admins').select('id,name,avatar_url').in('id', ids) : { data: [] };
+  return rows.map(row => {
+    return {
+      ...row,
+      public_responder: resolveResponder(row.id, 'public', row.public_reply_at, row.public_reply_text, data, admins.data ?? []),
+      private_responder: resolveResponder(row.id, 'private', row.private_reply_at, row.private_reply_text, data, admins.data ?? []),
+    };
+  });
+}
+
 export type CommentRow = {
   id: string;
   page_id: string;
@@ -159,6 +181,10 @@ export type CommentRow = {
   is_from_page: boolean;
   replied_public: boolean;
   replied_private: boolean;
+  public_reply_at?: string | null;
+  private_reply_at?: string | null;
+  public_responder?: ReplyResponder | null;
+  private_responder?: ReplyResponder | null;
   public_reply_text: string | null;
   private_reply_text: string | null;
   conversation_id: string | null;
@@ -176,7 +202,7 @@ export const commentFiltersSchema = z.object({
   limit: z.number().int().min(1).max(200).default(30),
   before: z.string().datetime({ offset: true }).nullish(),
   cursor: z.string().max(500).nullish(),
-  status: z.enum(['all', 'pending', 'review', 'handled', 'deleted']).default('all'),
+  status: z.enum(['all', 'pending', 'review', 'handled', 'deleted', 'unanswered', 'replied']).default('all'),
   search: z.string().trim().max(200).default(''),
 });
 export type CommentFilters = z.input<typeof commentFiltersSchema>;
@@ -215,6 +241,8 @@ export async function listComments(admin: PublicAdmin, input: CommentFilters = {
       .limit(filters.limit + 1);
     if (filters.status === 'deleted') query = query.eq('is_deleted', true);
     else if (filters.status !== 'all' || filters.unhandled_only) query = query.eq('is_deleted', false);
+    if (filters.status === 'unanswered') query = query.is('public_reply_text', null).is('private_reply_text', null).is('last_error_th', null);
+    if (filters.status === 'replied') query = query.or('public_reply_text.not.is.null,private_reply_text.not.is.null');
     if (filters.status === 'pending') query = query.eq('is_handled', false).is('last_error_th', null);
     if (filters.status === 'review') query = query.not('last_error_th', 'is', null);
     if (filters.status === 'handled') query = query.eq('is_handled', true).is('last_error_th', null);
@@ -245,7 +273,7 @@ export async function listComments(admin: PublicAdmin, input: CommentFilters = {
   const hasMore = allRows.length > filters.limit;
   const last = rows.at(-1);
   return {
-    comments: rows, has_more: hasMore,
+    comments: await attachResponders(rows), has_more: hasMore,
     next_cursor: hasMore && last ? Buffer.from(JSON.stringify({ at: last.commented_at, id: last.id })).toString('base64url') : null,
     unhandled_count: pendingResult.count ?? 0, review_count: reviewResult.count ?? 0,
   };
@@ -260,7 +288,7 @@ export async function getComment(admin: PublicAdmin, id: string): Promise<Commen
   if (!canSeePage(admin.role, admin.allowed_page_ids, row.page_id)) {
     throw new CommentError('คุณไม่มีสิทธิ์เข้าถึงเพจของคอมเมนต์นี้');
   }
-  return row;
+  return (await attachResponders([row]))[0];
 }
 
 /** ทำเครื่องหมายว่าจัดการแล้ว / ยังไม่จัดการ (เมื่อรับทราบแล้วให้ล้างสถานะ error ค้างด้วย) */

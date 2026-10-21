@@ -33,6 +33,7 @@ export type PageDiagnosticItem = {
 };
 
 export type SystemDiagnosticsReport = {
+  incoming?: { lastReceivedAt: string | null; pending: number; failed: number; available: boolean };
   overallStatus: DiagnosticItemStatus;
   overallScore: number;
   checkedAt: string;

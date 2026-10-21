@@ -95,7 +95,10 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
     );
   }
 
-  if (!report) return null;
+  if (!report) return <Card><CardContent className="p-4 text-sm">
+    <p>ยังตรวจสถานะระบบไม่ได้ ไม่ได้แปลว่าระบบหยุดทำงาน</p>
+    <Button variant="outline" className="mt-2" onClick={() => void fetchDiagnostics(true)} disabled={refreshing}>ลองตรวจอีกครั้ง</Button>
+  </CardContent></Card>;
 
   const { overallStatus, overallScore, checkedAt, subsystems, metaErrors, pages } = report;
   const totalIssueCount = metaErrors.issues.length;
@@ -144,7 +147,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 className="h-8 gap-1.5 text-xs font-medium"
                 onClick={() => void fetchDiagnostics(true)}
                 disabled={refreshing}
-                title="ยิง ping ตรวจสอบสดทุกระบบและทดสอบ Token เพจ"
+                title="ตรวจการเชื่อมต่อระบบและสิทธิ์ของเพจอีกครั้ง"
               >
                 <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin text-primary')} />
                 <span>{refreshing ? 'กำลังตรวจ...' : 'ตรวจสอบสด'}</span>
@@ -174,8 +177,13 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
         {/* Quick Functional Chips (Always Visible) */}
         <CardContent className="px-4 pb-4 pt-0 sm:px-6">
           <p className="mb-4 rounded-lg border bg-background/60 p-3 text-sm leading-relaxed text-muted-foreground">
-            คะแนนนี้มาจากรายการตรวจการตั้งค่าและการเชื่อมต่อที่ระบบตรวจได้ ยังไม่ยืนยันว่าแชทหรือคอมเมนต์จากลูกค้าจริงเข้าถึงและตอบกลับสำเร็จ ต้องทดสอบรับ–ส่งจริงแยกต่างหาก
+            หน้านี้ตรวจการเชื่อมต่อและประวัติที่ระบบได้รับ หากลูกค้าส่งมาแล้วแต่ไม่เห็นรายการ ให้ตรวจการเชื่อมต่อเพจ ส่วนผลอนุมัติแอพต้องดูที่ Meta โดยตรง
           </p>
+          <div className="mb-4 grid gap-2 sm:grid-cols-3 text-sm">
+            <div className="rounded-lg border bg-background p-3"><p className="font-medium">ข้อมูลจาก Facebook / Instagram</p><p className="mt-1 text-xs text-muted-foreground">{!report.incoming?.available ? 'ยังตรวจเวลาได้รับข้อมูลไม่ได้' : report.incoming.lastReceivedAt ? `รับข้อมูลล่าสุด ${new Date(report.incoming.lastReceivedAt).toLocaleString('th-TH')}` : 'ยังไม่เคยได้รับข้อมูลจาก Meta'}</p><p className="mt-1 text-xs text-muted-foreground">รวมข้อความ คอมเมนต์ และเหตุการณ์จากเพจ</p></div>
+            <div className="rounded-lg border bg-background p-3"><p className="font-medium">รายการที่รอประมวลผล</p><p className="mt-1 text-xs text-muted-foreground">{!report.incoming?.available ? 'ยังตรวจจำนวนไม่ได้ ลองตรวจอีกครั้ง' : `${report.incoming.pending} รายการกำลังรอ · ${report.incoming.failed} รายการไม่สำเร็จ`}</p><p className="mt-1 text-xs text-muted-foreground">{report.incoming?.failed ? 'เปิดรายละเอียดระบบด้านล่างเพื่อตรวจสาเหตุ อย่าเพิ่งส่งซ้ำ' : 'ถ้ามีรายการรอ ให้ตรวจอีกครั้งว่าจำนวนลดลงหรือไม่'}</p></div>
+            <div className="rounded-lg border bg-background p-3"><p className="font-medium">ข้อความถึงลูกค้าใน 24 ชั่วโมง</p><p className="mt-1 text-xs text-muted-foreground">สำเร็จ {metaErrors.successfulSends24h} · มีปัญหา {metaErrors.failedSends24h} · ติดข้อจำกัด {metaErrors.policyBlocked24h}</p><Link className="mt-1 inline-block text-xs text-primary underline" href="/send-status">ดูรายการและวิธีจัดการ</Link></div>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {/* 1. Meta */}
             <div className={cn(
@@ -188,7 +196,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 <span>Meta / เพจ</span>
                 <StatusIcon status={subsystems.meta.status} className="size-3.5" />
               </div>
-              <span className="text-[11px] text-muted-foreground truncate" title={subsystems.meta.summary}>
+              <span className="text-[11px] text-muted-foreground leading-relaxed" title={subsystems.meta.summary}>
                 {subsystems.meta.summary}
               </span>
             </div>
@@ -204,7 +212,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 <span>ฐานข้อมูล</span>
                 <StatusIcon status={subsystems.database.status} className="size-3.5" />
               </div>
-              <span className="text-[11px] text-muted-foreground truncate" title={subsystems.database.summary}>
+              <span className="text-[11px] text-muted-foreground leading-relaxed" title={subsystems.database.summary}>
                 {subsystems.database.summary}
               </span>
             </div>
@@ -220,7 +228,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 <span>คลังรูป/ไฟล์</span>
                 <StatusIcon status={subsystems.storage.status} className="size-3.5" />
               </div>
-              <span className="text-[11px] text-muted-foreground truncate" title={subsystems.storage.summary}>
+              <span className="text-[11px] text-muted-foreground leading-relaxed" title={subsystems.storage.summary}>
                 {subsystems.storage.summary}
               </span>
             </div>
@@ -236,7 +244,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 <span>AI Gemini</span>
                 <StatusIcon status={subsystems.ai.status} className="size-3.5" />
               </div>
-              <span className="text-[11px] text-muted-foreground truncate" title={subsystems.ai.summary}>
+              <span className="text-[11px] text-muted-foreground leading-relaxed" title={subsystems.ai.summary}>
                 {subsystems.ai.summary}
               </span>
             </div>
@@ -252,7 +260,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 <span>การแจ้งเตือน</span>
                 <StatusIcon status={subsystems.notifications.status} className="size-3.5" />
               </div>
-              <span className="text-[11px] text-muted-foreground truncate" title={subsystems.notifications.summary}>
+              <span className="text-[11px] text-muted-foreground leading-relaxed" title={subsystems.notifications.summary}>
                 {subsystems.notifications.summary}
               </span>
             </div>
@@ -268,7 +276,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                 <span>คิวส่งข้อความ</span>
                 <StatusIcon status={subsystems.messaging.status} className="size-3.5" />
               </div>
-              <span className="text-[11px] text-muted-foreground truncate" title={subsystems.messaging.summary}>
+              <span className="text-[11px] text-muted-foreground leading-relaxed" title={subsystems.messaging.summary}>
                 {subsystems.messaging.summary}
               </span>
             </div>
@@ -284,7 +292,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
               <div className="flex items-center gap-2">
                 <ShieldAlert className="size-5 text-amber-600" />
                 <CardTitle className="text-sm sm:text-base font-bold text-foreground">
-                  ตัวตรวจจับ & ปรับปรุง Meta Error (ย้อนหลัง 24 ชม.)
+                  การส่งที่มีปัญหาและวิธีจัดการ (24 ชั่วโมง)
                 </CardTitle>
               </div>
               <div className="flex items-center gap-2 text-xs">
@@ -353,7 +361,7 @@ export default function SystemMonitor({ isOwner }: { isOwner: boolean }) {
                         <p className="text-muted-foreground leading-relaxed">{issue.explanationTh}</p>
                       </div>
                       <div className="rounded bg-background/60 p-2 border border-border/50">
-                        <span className="font-medium text-emerald-700 dark:text-emerald-400 block mb-0.5">💡 วิธีแก้ไข & ปรับปรุง:</span>
+                        <span className="font-medium text-emerald-700 dark:text-emerald-400 block mb-0.5">💡 ทำอย่างไรต่อ:</span>
                         <p className="text-foreground leading-relaxed">{issue.solutionTh}</p>
                       </div>
                     </div>

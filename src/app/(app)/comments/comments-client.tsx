@@ -37,13 +37,23 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import PlatformIcon from '@/components/platform-icon';
 import CustomerAvatar from '@/components/customer-avatar';
 import { MediaLibraryPicker, type LibraryItem } from '@/components/media-library-picker';
 import { commentStatus, mergeCommentPage, type CommentStatus } from '@/lib/comment-feed';
 import type { CommentFeed, CommentRow } from '@/server/comments/service';
 import type { SafePage } from '@/server/pages/service';
 import type { CommentBotSettings } from '@/types/comment-bot';
+
+function ReplyIdentity({ comment, channel }: { comment: CommentRow; channel: 'public' | 'private' }) {
+  const actor = comment[`${channel}_responder`];
+  const at = comment[`${channel}_reply_at`];
+  return <span className="flex flex-wrap items-center gap-1.5 text-[11px] font-normal text-muted-foreground">
+    {actor?.kind === 'bot' ? <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300"><Bot className="size-3" aria-hidden="true" /></span>
+      : <CustomerAvatar name={actor?.name ?? '?'} src={actor?.avatar_url} mode="real_profile" showBadge={false} size="sm" className="size-5 text-[9px]" />}
+    <span>{actor?.name ?? 'ไม่ทราบผู้ตอบ'} · {channel === 'public' ? 'ตอบใต้โพสต์' : 'ทักส่วนตัว'}</span>
+    {at && <time dateTime={at} title={new Date(at).toLocaleString('th-TH')}>{timeAgo(at)}</time>}
+  </span>;
+}
 
 type Feed = CommentFeed;
 
@@ -111,7 +121,8 @@ export default function CommentsClient({
 }) {
   const [feed, setFeed] = useState(initial);
   const [selectedPageId, setSelectedPageId] = useState('all');
-  const [status, setStatus] = useState<CommentStatus | 'all'>('all');
+  const [status, setStatus] = useState<CommentStatus | 'all' | 'unanswered' | 'replied'>('all');
+  const [groupPosts, setGroupPosts] = useState(false);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -473,8 +484,10 @@ export default function CommentsClient({
               {(
                 [
                   { value: 'all', label: 'ทั้งหมด' },
+                  { value: 'unanswered', label: 'รอตอบ' },
+                  { value: 'replied', label: 'ตอบแล้ว' },
                   { value: 'pending', label: 'ยังไม่อ่าน', count: feed.unhandled_count },
-                  { value: 'review', label: 'ต้องตรวจ', count: feed.review_count },
+                  { value: 'review', label: 'ต้องตรวจสอบ', count: feed.review_count },
                   { value: 'handled', label: 'อ่านแล้ว' },
                 ] as const
               ).map((tab) => (
@@ -672,15 +685,25 @@ export default function CommentsClient({
           </div>
         )}
 
+        <label className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={groupPosts} onChange={e => setGroupPosts(e.target.checked)} className="accent-primary" />
+          รวมตามโพสต์ <span className="ml-auto">เฉพาะรายการที่โหลดแล้ว</span>
+        </label>
         {/* รายการคอมเมนต์แต่ละแถว — กระชับเป็นระเบียบทรงเดียวกับรายการแชทใน Inbox */}
         <ul className={cn('divide-y', loading && 'opacity-60')} aria-busy={loading}>
-          {feed.comments.map((comment) => {
+          {(groupPosts ? [...feed.comments].sort((a, b) => `${a.page_id}:${a.post_id ?? a.id}`.localeCompare(`${b.page_id}:${b.post_id ?? b.id}`)) : feed.comments).map((comment, index, visible) => {
             const page = pages.find((p) => p.id === comment.page_id);
             const state = commentStatus(comment);
             const isUnreadOrAlert = state === 'pending' || state === 'review';
 
             return (
               <li key={comment.id}>
+                {groupPosts && (index === 0 || visible[index - 1].page_id !== comment.page_id || visible[index - 1].post_id !== comment.post_id || !comment.post_id) && (
+                  <div className="flex items-center justify-between gap-2 border-y bg-muted/60 px-3 py-2 text-xs">
+                    <span className="truncate font-medium">{page?.page_name ?? 'เพจ'} · {comment.post_id ? `โพสต์ …${comment.post_id.slice(-8)}` : 'ไม่ทราบโพสต์'}</span>
+                    {comment.post_permalink && <a href={comment.post_permalink} target="_blank" rel="noreferrer" className="shrink-0 text-primary underline">เปิดโพสต์</a>}
+                  </div>
+                )}
                 <button
                   type="button"
                   disabled={loading}
@@ -740,11 +763,13 @@ export default function CommentsClient({
                     {/* บรรทัด 2.5 (ถ้าบอท/แอดมินตอบแล้ว): พรีวิวคำตอบบรรทัดเดียวแบบบาง */}
                     {(comment.public_reply_text || comment.private_reply_text) && (
                       <p className="mt-0.5 truncate text-[11px] leading-4 text-muted-foreground">
-                        <span className="font-medium text-sky-600 dark:text-sky-400">↳ ตอบแล้ว: </span>
+                        <span className="font-medium text-sky-600 dark:text-sky-400">↳ </span>
                         {comment.public_reply_text || comment.private_reply_text}
                       </p>
                     )}
 
+                    {comment.public_reply_text && <ReplyIdentity comment={comment} channel="public" />}
+                    {comment.private_reply_text && <ReplyIdentity comment={comment} channel="private" />}
                     {comment.last_error_th && (
                       <p className="mt-0.5 truncate text-[11px] font-medium text-amber-700 dark:text-amber-300">
                         ⚠️ {comment.last_error_th}
@@ -1319,7 +1344,7 @@ function CommentCard({
           {c.public_reply_text && (
             <div className="space-y-1">
               <span className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1">
-                <MessageSquare className="size-3" /> ข้อความที่ตอบใต้โพสต์:
+                <ReplyIdentity comment={c} channel="public" />
               </span>
               <div className="rounded-lg bg-background p-2 border text-foreground whitespace-pre-wrap leading-relaxed text-xs sm:text-sm">
                 {c.public_reply_text}
@@ -1330,7 +1355,7 @@ function CommentCard({
           {c.private_reply_text && (
             <div className="space-y-1">
               <span className="font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1">
-                <Send className="size-3" /> ข้อความที่ทักแชทส่วนตัว (DM):
+                <ReplyIdentity comment={c} channel="private" />
               </span>
               <div className="rounded-lg bg-background p-2 border text-foreground whitespace-pre-wrap leading-relaxed text-xs sm:text-sm">
                 {c.private_reply_text}

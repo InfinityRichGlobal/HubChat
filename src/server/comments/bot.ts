@@ -11,6 +11,7 @@ import 'server-only';
  *  6. ระบบคัดกรองคำ (filter_mode: 'all' หรือ 'keyword_only')
  */
 import { db } from '@/lib/supabase/admin';
+import { logActivity } from '@/lib/activity-log';
 import type { PublicAdmin } from '@/types/db';
 import type { MetaPage } from '@/server/meta/client';
 import {
@@ -269,6 +270,7 @@ export async function processCommentAutoReply(
                 p_text: replyText,
               });
               if (error) throw new Error(`Meta รับคำตอบแล้ว แต่บันทึกผลไม่สำเร็จ: ${error.message}`);
+              await logActivity({ adminId: null, action: 'comment.bot_reply_public', targetType: 'comment', targetId: savedCommentRowId });
             }
           } else {
             console.warn(`[comment-bot] ตอบคอมเมนต์ใต้โพสต์ ${ev.comment_id} ไม่สำเร็จ:`, publicRes.error_th);
@@ -368,6 +370,7 @@ export async function processCommentAutoReply(
               p_customer_id: null,
             });
             if (error) throw new Error(`Meta รับข้อความส่วนตัวแล้ว แต่บันทึกผลไม่สำเร็จ: ${error.message}`);
+            await logActivity({ adminId: null, action: 'comment.bot_reply_private', targetType: 'comment', targetId: savedCommentRowId });
           } else {
             console.warn(
               `[comment-bot] ทักส่วนตัวจากคอมเมนต์ ${ev.comment_id} ไม่สำเร็จ (${page.platform}):`,

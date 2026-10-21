@@ -219,7 +219,7 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
           lastOccurredAt: att.created_at,
           severity: 'medium',
           explanationTh: 'เพจส่งข้อความหรือเรียก Meta API เร็วเกินกว่าที่ระบบ Meta อนุญาตต่อนาที',
-          solutionTh: 'ระบบจะใช้ Exponential Backoff ชะลอและลองใหม่อัตโนมัติ ควรหลีกเลี่ยงการกดส่งซ้ำรัวๆ',
+          solutionTh: 'รอสักครู่ก่อนส่งอีกครั้ง และตรวจสถานะข้อความเดิมก่อน เพื่อไม่ให้ลูกค้าได้รับข้อความซ้ำ',
           actionLink: { href: '/send-status', label: 'ดูสถานะการส่ง' },
         });
       }
@@ -421,8 +421,20 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
     }
   }
 
+  const [latestIncoming, pendingIncoming, failedIncoming] = await Promise.all([
+    db().from('webhook_queue').select('created_at').order('created_at', { ascending: false }).limit(1),
+    db().from('webhook_queue').select('id', { head: true, count: 'exact' }).in('status', ['pending', 'processing']),
+    db().from('webhook_queue').select('id', { head: true, count: 'exact' }).eq('status', 'failed'),
+  ]);
+  const incoming = {
+    lastReceivedAt: latestIncoming.data?.[0]?.created_at ?? null,
+    pending: pendingIncoming.count ?? 0, failed: failedIncoming.count ?? 0,
+    available: !latestIncoming.error && !pendingIncoming.error && !failedIncoming.error,
+  };
+
   // 8. คำนวณคะแนนและสถานะรวม (Overall Score)
-  const statuses = [metaStatus, dbStatus, storageStatus, aiStatus, notifyStatus, messagingStatus];
+  const incomingStatus: DiagnosticItemStatus = !incoming.available || incoming.failed > 0 ? 'warning' : 'healthy';
+  const statuses = [incomingStatus, metaStatus, dbStatus, storageStatus, aiStatus, notifyStatus, messagingStatus];
   const errorCount = statuses.filter((s) => s === 'error').length;
   const warningCount = statuses.filter((s) => s === 'warning').length;
 
@@ -440,6 +452,7 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
   if (score < 0) score = 0;
 
   return {
+    incoming,
     overallStatus,
     overallScore: score,
     checkedAt,
@@ -463,14 +476,14 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
         id: 'storage',
         name: 'คลังเก็บไฟล์ (Supabase Storage)',
         status: storageStatus,
-        summary: storageStatus === 'healthy' ? "บักเก็ต 'media' พร้อมเก็บรูป/สลิป" : 'ที่เก็บไฟล์อาจมีปัญหา',
+        summary: storageStatus === 'healthy' ? 'พื้นที่เก็บรูปและสลิปพร้อมใช้งาน' : 'ที่เก็บไฟล์อาจมีปัญหา',
         details: storageDetails,
       },
       ai: {
         id: 'ai',
         name: 'AI อัจฉริยะ (Gemini)',
         status: aiStatus,
-        summary: aiSettings.apiKey ? `พร้อมใช้งาน (${aiSettings.model || 'gemini-2.5-flash'})` : 'ยังไม่ได้ใส่ GEMINI_API_KEY',
+        summary: aiSettings.apiKey ? `พร้อมใช้งาน (${aiSettings.model || 'gemini-2.5-flash'})` : 'ยังไม่ได้เชื่อมต่อผู้ช่วย AI',
         details: aiDetails,
         actionLink: { href: '/settings/ai', label: 'ตั้งค่า AI' },
       },
@@ -484,7 +497,7 @@ export async function runSystemDiagnostics(options: { fullPageCheck?: boolean } 
       },
       messaging: {
         id: 'messaging',
-        name: 'คิวการส่งข้อความ & ทรานสปอร์ต',
+        name: 'การส่งข้อความถึงลูกค้า',
         status: messagingStatus,
         summary: totalSends24h > 0 ? `ส่งสำเร็จ ${Math.round((successfulSends24h / totalSends24h) * 100)}% ใน 24 ชม.` : 'ยังไม่มีประวัติการส่งใน 24 ชม.',
         details: messagingDetails,
