@@ -6,16 +6,17 @@ import {
   AlertTriangle,
   Bot,
   Check,
+  CheckCheck,
   ChevronRight,
   Search,
   ExternalLink,
   Eye,
   EyeOff,
+  HelpCircle,
   Image as ImageIcon,
   Loader2,
   MessageCircle,
   MessageSquare,
-  MoreHorizontal,
   Paperclip,
   RefreshCw,
   Send,
@@ -34,19 +35,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import PlatformIcon from '@/components/platform-icon';
 import CustomerAvatar from '@/components/customer-avatar';
 import { MediaLibraryPicker, type LibraryItem } from '@/components/media-library-picker';
-import { commentStatus, COMMENT_STATUS_LABEL, mergeCommentPage, type CommentStatus } from '@/lib/comment-feed';
+import { commentStatus, mergeCommentPage, type CommentStatus } from '@/lib/comment-feed';
 import type { CommentFeed, CommentRow } from '@/server/comments/service';
 import type { SafePage } from '@/server/pages/service';
 import type { CommentBotSettings } from '@/types/comment-bot';
@@ -79,6 +73,12 @@ function toAbsoluteUrl(url: string): string {
   return url;
 }
 
+function notifySidebarCountsRefresh() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('hubchat:counts-refresh'));
+  }
+}
+
 async function api<T>(url: string, init?: RequestInit): Promise<T | null> {
   try {
     const res = await fetch(url, {
@@ -98,221 +98,893 @@ async function api<T>(url: string, init?: RequestInit): Promise<T | null> {
   }
 }
 
-export default function CommentsClient({ initial, initialError, pages = [], canManageBot }: {
-  initial: Feed; initialError: string | null; pages?: SafePage[]; canManageBot: boolean;
+export default function CommentsClient({
+  initial,
+  initialError,
+  pages = [],
+  canManageBot,
+}: {
+  initial: Feed;
+  initialError: string | null;
+  pages?: SafePage[];
+  canManageBot: boolean;
 }) {
   const [feed, setFeed] = useState(initial);
   const [selectedPageId, setSelectedPageId] = useState('all');
-  const [status, setStatus] = useState<CommentStatus | 'all'>('pending');
+  // เปิดมาที่ "ทั้งหมด" เสมอเพื่อให้เห็นรายการคอมเมนต์ล่าสุดทันที ไม่เจอหน้าว่าง
+  const [status, setStatus] = useState<CommentStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const [error, setError] = useState(initialError);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [botSettings, setBotSettings] = useState<CommentBotSettings | null>(null);
   const [botError, setBotError] = useState(false);
   const [selected, setSelected] = useState<CommentRow | null>(null);
+  // เก็บข้อความ error ล่าสุดของคอมเมนต์ที่เพิ่งคลิกเปิด เพื่อให้แอดมินยังอ่านสาเหตุได้แม้สถานะแจ้งเตือนถูกเคลียร์ไปแล้ว
+  const [lastViewedError, setLastViewedError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  const guideDialogRef = useRef<HTMLDialogElement | null>(null);
   const historyRef = useRef(false);
   const request = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
   const syncLock = useRef(false);
 
+  // Fallback สำหรับเบราว์เซอร์ที่ยังไม่รองรับ <dialog closedby="any"> (เช่น Safari)
+  useEffect(() => {
+    const dialog = guideDialogRef.current;
+    if (!dialog) return;
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      const handleBackdropClick = (event: MouseEvent) => {
+        if (event.target !== dialog) return;
+        const rect = dialog.getBoundingClientRect();
+        const isDialogContent =
+          rect.top <= event.clientY &&
+          event.clientY <= rect.top + rect.height &&
+          rect.left <= event.clientX &&
+          event.clientX <= rect.left + rect.width;
+        if (isDialogContent) return;
+        dialog.close();
+      };
+      dialog.addEventListener('click', handleBackdropClick);
+      return () => dialog.removeEventListener('click', handleBackdropClick);
+    }
+  }, []);
+
+  function openGuideDialog() {
+    const dialog = guideDialogRef.current;
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+    }
+  }
+
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
+
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/comments/bot', { signal: controller.signal }).then(async (res) => {
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error('bot');
-      if (!controller.signal.aborted) setBotSettings(json.data);
-    }).catch(() => { if (!controller.signal.aborted) setBotError(true); });
+    fetch('/api/comments/bot', { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok || !json.ok) throw new Error('bot');
+        if (!controller.signal.aborted) setBotSettings(json.data);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setBotError(true);
+      });
     return () => controller.abort();
   }, []);
 
-  const load = useCallback(async (cursor?: string): Promise<boolean> => {
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    inFlight.current = true;
-    setLoading(true);
-    const params = new URLSearchParams({ status, q: query });
-    if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
-    if (cursor) params.set('cursor', cursor);
-    try {
-      const res = await fetch(`/api/comments?${params}`, { signal: controller.signal });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json.error?.message_th ?? 'โหลดคอมเมนต์ไม่สำเร็จ');
-      if (controller.signal.aborted) return false;
-      const data = json.data as Feed;
-      setFeed((prev) => cursor ? { ...data, comments: mergeCommentPage(prev.comments, data.comments) } : data);
-      setSelected((prev) => prev ? data.comments.find((c) => c.id === prev.id) ?? prev : null);
-      historyRef.current = Boolean(cursor);
-      setHistoryLoaded(Boolean(cursor));
-      setUpdatedAt(new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }));
-      setError(null);
-      return true;
-    } catch (err) {
-      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'ติดต่อเซิร์ฟเวอร์ไม่ได้');
-      return false;
-    } finally {
-      if (!controller.signal.aborted) { inFlight.current = false; setLoading(false); }
-    }
-  }, [query, selectedPageId, status]);
+  const load = useCallback(
+    async (cursor?: string): Promise<boolean> => {
+      request.current?.abort();
+      const controller = new AbortController();
+      request.current = controller;
+      inFlight.current = true;
+      setLoading(true);
+      const params = new URLSearchParams({ status, q: query });
+      if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
+      if (cursor) params.set('cursor', cursor);
+      try {
+        const res = await fetch(`/api/comments?${params}`, { signal: controller.signal });
+        const json = await res.json();
+        if (!res.ok || !json.ok) throw new Error(json.error?.message_th ?? 'โหลดคอมเมนต์ไม่สำเร็จ');
+        if (controller.signal.aborted) return false;
+        const data = json.data as Feed;
+        setFeed((prev) =>
+          cursor ? { ...data, comments: mergeCommentPage(prev.comments, data.comments) } : data,
+        );
+        setSelected((prev) => (prev ? data.comments.find((c) => c.id === prev.id) ?? prev : null));
+        historyRef.current = Boolean(cursor);
+        setHistoryLoaded(Boolean(cursor));
+        setUpdatedAt(new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }));
+        setError(null);
+        return true;
+      } catch (err) {
+        if (!controller.signal.aborted)
+          setError(err instanceof Error ? err.message : 'ติดต่อเซิร์ฟเวอร์ไม่ได้');
+        return false;
+      } finally {
+        if (!controller.signal.aborted) {
+          inFlight.current = false;
+          setLoading(false);
+        }
+      }
+    },
+    [query, selectedPageId, status],
+  );
 
-  // Polling is read-only. Old responses cannot overwrite a newer filter or a newer page.
   useEffect(() => {
     const first = setTimeout(() => void load(), 0);
     const timer = setInterval(() => {
       if (!document.hidden && !historyRef.current && !inFlight.current) void load();
     }, POLL_MS);
-    return () => { clearTimeout(first); clearInterval(timer); request.current?.abort(); };
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+      request.current?.abort();
+    };
   }, [load]);
-  // A Meta import can outlive a filter change; always reload the current filter afterwards.
+
   const currentLoad = useRef(load);
-  useEffect(() => { currentLoad.current = load; }, [load]);
+  useEffect(() => {
+    currentLoad.current = load;
+  }, [load]);
 
   async function syncFromMeta() {
     if (syncLock.current) return;
     syncLock.current = true;
     setSyncing(true);
     try {
-      const result = await api<{ summary: { comments_saved: number; errors: Array<{ error_th: string }> } }>('/api/comments/sync', {
-        method: 'POST', body: JSON.stringify(selectedPageId === 'all' ? {} : { page_id: selectedPageId }),
+      const result = await api<{
+        summary: { comments_saved: number; errors: Array<{ error_th: string }> };
+      }>('/api/comments/sync', {
+        method: 'POST',
+        body: JSON.stringify(selectedPageId === 'all' ? {} : { page_id: selectedPageId }),
       });
       if (!result) return;
       await currentLoad.current();
-      if (result.summary.errors.length) toast.error('ดึงคอมเมนต์ได้ไม่ครบ', { description: result.summary.errors.map((e) => e.error_th).join(' · ') });
-      else toast.success(`เพิ่ม ${result.summary.comments_saved} คอมเมนต์ · ไม่ตอบย้อนหลังอัตโนมัติ`);
-    } finally { syncLock.current = false; setSyncing(false); }
+      notifySidebarCountsRefresh();
+      if (result.summary.errors.length) {
+        toast.error('ดึงคอมเมนต์ได้ไม่ครบ', {
+          description: result.summary.errors.map((e) => e.error_th).join(' · '),
+        });
+      } else {
+        toast.success(
+          result.summary.comments_saved > 0
+            ? `ดึงคอมเมนต์ใหม่เพิ่ม ${result.summary.comments_saved} รายการ`
+            : 'ข้อมูลคอมเมนต์เป็นปัจจุบันแล้ว (ไม่มีรายการใหม่)',
+        );
+      }
+    } finally {
+      syncLock.current = false;
+      setSyncing(false);
+    }
   }
 
   const replaceComment = useCallback((c: CommentRow) => {
     setSelected(c);
-    // Refresh the authoritative counters and filtered list immediately after an action.
-    setFeed((prev) => ({ ...prev, comments: prev.comments.map((x) => x.id === c.id ? c : x) }));
+    setFeed((prev) => ({
+      ...prev,
+      comments: prev.comments.map((x) => (x.id === c.id ? c : x)),
+    }));
     void currentLoad.current();
+    notifySidebarCountsRefresh();
   }, []);
-  function closeDetail() {
-    if (busy) { toast.info('กำลังทำรายการ กรุณารอให้เสร็จก่อน'); return; }
-    if (dirty) { setDiscardOpen(true); return; }
-    setSelected(null);
+
+  /**
+   * เมื่อคลิกเปิดดูคอมเมนต์:
+   * ถ้าคอมเมนต์ยังเป็น "ยังไม่อ่าน / รอตอบ" หรือ "ส่งไม่สำเร็จ (มีแจ้งเตือนค้าง)"
+   * ให้เคลียร์สถานะแจ้งเตือนเป็น "อ่านแล้ว" ทันทีเหมือนหน้าแชท Inbox
+   */
+  const handleSelectComment = useCallback(
+    async (comment: CommentRow) => {
+      setDirty(false);
+      setBusy(false);
+      setLastViewedError(comment.last_error_th);
+
+      const needsAutoRead = !comment.is_handled || comment.last_error_th !== null;
+      if (!needsAutoRead) {
+        setSelected(comment);
+        return;
+      }
+
+      const wasPending = !comment.is_handled && comment.last_error_th === null;
+      const wasReview = comment.last_error_th !== null;
+      const optimistic: CommentRow = {
+        ...comment,
+        is_handled: true,
+        last_error_th: null,
+      };
+
+      setSelected(optimistic);
+      setFeed((prev) => ({
+        ...prev,
+        unhandled_count: wasPending ? Math.max(0, prev.unhandled_count - 1) : prev.unhandled_count,
+        review_count: wasReview ? Math.max(0, prev.review_count - 1) : prev.review_count,
+        comments: prev.comments.map((x) => (x.id === comment.id ? optimistic : x)),
+      }));
+
+      try {
+        const res = await fetch(`/api/comments/${comment.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'handled', handled: true }),
+        });
+        const json = await res.json();
+        if (res.ok && json.ok && json.data?.comment) {
+          const updated = json.data.comment as CommentRow;
+          setSelected((curr) => (curr?.id === updated.id ? updated : curr));
+          setFeed((prev) => ({
+            ...prev,
+            comments: prev.comments.map((x) => (x.id === updated.id ? updated : x)),
+          }));
+        }
+      } catch {
+        // หากบันทึกเบื้องหลังไม่สำเร็จ รอบถัดไปจะซิงก์สถานะจริงกลับมาเอง
+      } finally {
+        notifySidebarCountsRefresh();
+        void currentLoad.current();
+      }
+    },
+    [],
+  );
+
+  /** ปุ่มกดเคลียร์แจ้งเตือนที่ค้างทั้งหมดในคลิกเดียว */
+  async function markAllVisibleAsRead() {
+    if (markingAll) return;
+    setMarkingAll(true);
+    try {
+      const params = new URLSearchParams({ status: 'all', q: '' });
+      if (selectedPageId !== 'all') params.set('page_id', selectedPageId);
+      const res = await fetch(`/api/comments?${params}`);
+      const json = await res.json();
+      const allLoaded: CommentRow[] =
+        res.ok && json.ok && Array.isArray(json.data?.comments)
+          ? (json.data.comments as CommentRow[])
+          : feed.comments;
+
+      const targets = allLoaded.filter((c) => !c.is_deleted && (!c.is_handled || c.last_error_th !== null));
+      await Promise.all(
+        targets.map((c) =>
+          fetch(`/api/comments/${c.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'handled', handled: true }),
+          }),
+        ),
+      );
+      await currentLoad.current();
+      notifySidebarCountsRefresh();
+      toast.success('เคลียร์แจ้งเตือนคอมเมนต์ทั้งหมดเป็นอ่านแล้ว');
+    } catch {
+      toast.error('เคลียร์แจ้งเตือนไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      setMarkingAll(false);
+    }
   }
+
+  function closeDetail() {
+    if (busy) {
+      toast.info('กำลังทำรายการ กรุณารอให้เสร็จก่อน');
+      return;
+    }
+    if (dirty) {
+      setDiscardOpen(true);
+      return;
+    }
+    setSelected(null);
+    setLastViewedError(null);
+  }
+
+  const totalAlerts = feed.unhandled_count + feed.review_count;
+
   const tabs: Array<{ value: typeof status; label: string; count?: number }> = [
-    { value: 'pending', label: 'รอจัดการ', count: feed.unhandled_count },
-    { value: 'review', label: 'ต้องตรวจสอบ', count: feed.review_count },
-    { value: 'handled', label: 'จัดการแล้ว' },
     { value: 'all', label: 'ทั้งหมด' },
+    { value: 'pending', label: 'ยังไม่อ่าน / รอตอบ', count: feed.unhandled_count },
+    { value: 'review', label: 'ส่งไม่สำเร็จ', count: feed.review_count },
+    { value: 'handled', label: 'อ่าน/ตอบแล้ว' },
     { value: 'deleted', label: 'ลบแล้ว' },
   ];
-  const botOn = botSettings && (botSettings.auto_reply_public || botSettings.auto_reply_private);
+
+  const botOn = Boolean(botSettings && (botSettings.auto_reply_public || botSettings.auto_reply_private));
   const selectedIndex = selected ? feed.comments.findIndex((c) => c.id === selected.id) : -1;
+
   function moveDetail(offset: number) {
     if (busy || dirty) return;
     const next = feed.comments[selectedIndex + offset];
-    if (next) setSelected(next);
+    if (next) void handleSelectComment(next);
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 pb-12">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-12">
+      {/* ส่วนหัวหน้า + ปุ่มคู่มือวิธีการทำงาน + ปุ่มซิงก์จากเพจ */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">คอมเมนต์</h1>
-          <p className="mt-1 text-sm text-muted-foreground">ดูงานที่รอ ตอบลูกค้า และตรวจผลการตอบจากที่เดียว</p>
+          <h1 className="text-2xl font-bold tracking-tight">คอมเมนต์ใต้โพสต์</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            คลิกที่คอมเมนต์เพื่อเปิดอ่านและเคลียร์แจ้งเตือนทันที · ตอบใต้โพสต์หรือดึงลูกค้าเข้าแชทได้ในที่เดียว
+          </p>
         </div>
-        <Button variant="outline" onClick={() => void syncFromMeta()} disabled={syncing} className="gap-2">
-          <RefreshCw className={cn('size-4', syncing && 'animate-spin')} />
-          {syncing ? 'กำลังดึงจาก Meta…' : 'ดึงคอมเมนต์จาก Meta'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={openGuideDialog}
+            className="gap-1.5 font-medium"
+            {...({ commandfor: 'comment-how-it-works-dialog', command: 'show-modal' } as Record<string, unknown>)}
+          >
+            <HelpCircle className="size-4 text-primary" />
+            ดูวิธีการทำงาน
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void syncFromMeta()}
+            disabled={syncing}
+            className="gap-2"
+          >
+            <RefreshCw className={cn('size-4', syncing && 'animate-spin')} />
+            {syncing ? 'กำลังดึงจากเพจ…' : 'ดึงคอมเมนต์เก่าจากเพจ'}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <button type="button" onClick={() => setStatus('pending')} className={cn('flex min-w-0 items-center gap-3 rounded-2xl border p-4 text-left transition-colors hover:border-primary/40', status === 'pending' ? 'border-primary/30 bg-primary/5' : 'bg-card')}>
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><MessageSquare className="size-5" /></span>
-          <span className="min-w-0"><span className="block text-2xl font-semibold tabular-nums">{feed.unhandled_count}</span><span className="block text-xs text-muted-foreground">คอมเมนต์รอจัดการ</span></span>
-        </button>
-        <button type="button" onClick={() => setStatus('review')} className={cn('flex min-w-0 items-center gap-3 rounded-2xl border p-4 text-left transition-colors hover:border-amber-500/40', status === 'review' ? 'border-amber-500/30 bg-amber-500/5' : 'bg-card')}>
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-300"><AlertTriangle className="size-5" /></span>
-          <span className="min-w-0"><span className="block text-2xl font-semibold tabular-nums">{feed.review_count}</span><span className="block text-xs text-muted-foreground">ต้องตรวจผลการตอบ</span></span>
-        </button>
-      </div>
-
+      {/* แถบสถานะบอทคอมเมนต์ — อธิบายสั้น กระชับ เข้าใจง่าย */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
         <div className="flex items-start gap-3">
-          <Bot className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+          <span
+            className={cn(
+              'mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg',
+              botOn
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'bg-muted text-muted-foreground',
+            )}
+          >
+            <Bot className="size-5" />
+          </span>
           <div>
-            <p className="text-sm font-medium">บอทตอบคอมเมนต์ · {botError ? 'ตรวจสถานะไม่ได้' : !botSettings ? 'กำลังตรวจสถานะ…' : botOn ? 'เปิดอยู่' : 'ปิดอยู่'}</p>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{botSettings ? `ตอบใต้โพสต์: ${botSettings.auto_reply_public ? 'เปิด' : 'ปิด'} · ทักส่วนตัว: ${botSettings.auto_reply_private ? 'เปิด' : 'ปิด'}` : 'สถานะการตั้งค่าบอทจะแสดงเมื่อโหลดสำเร็จ'}<br />การดึงย้อนหลังจะเพิ่มรายการเท่านั้น ไม่สั่งบอทตอบย้อนหลัง</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold">
+                บอทตอบคอมเมนต์อัตโนมัติ:{' '}
+                <span className={cn(botOn ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground')}>
+                  {botError ? 'ตรวจสถานะไม่ได้' : !botSettings ? 'กำลังโหลด…' : botOn ? 'เปิดทำงานอยู่' : 'ปิดอยู่'}
+                </span>
+              </p>
+              {botSettings && (
+                <span className="text-xs text-muted-foreground">
+                  (ตอบใต้โพสต์: {botSettings.auto_reply_public ? 'เปิด' : 'ปิด'} · ทักแชทส่วนตัว:{' '}
+                  {botSettings.auto_reply_private ? 'เปิด' : 'ปิด'} · ไลก์อัตโนมัติ:{' '}
+                  {botSettings.auto_like ? 'เปิด' : 'ปิด'})
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              เมื่อมีลูกค้าเมนต์ใหม่เข้ามา บอทจะทำงานให้อัตโนมัติและเปลี่ยนสถานะเป็น{' '}
+              <span className="font-medium text-foreground">“อ่าน/ตอบแล้ว”</span> ทันทีโดยไม่ค้างแจ้งเตือน
+            </p>
           </div>
         </div>
-        {canManageBot && <Button variant="ghost" size="sm" asChild><Link href="/settings/autoreply?tab=comments">ตั้งค่าบอท <ChevronRight className="ml-1 size-4" /></Link></Button>}
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={openGuideDialog} className="text-xs">
+            ขั้นตอนการทำงาน
+          </Button>
+          {canManageBot && (
+            <Button variant="outline" size="sm" asChild className="h-8 text-xs">
+              <Link href="/settings/autoreply?tab=comments">
+                ตั้งค่าบอท <ChevronRight className="ml-1 size-3.5" />
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
-      <section className="overflow-hidden rounded-2xl border bg-card" aria-label="รายการคอมเมนต์">
-        <div className="flex flex-wrap gap-2 border-b p-3" role="group" aria-label="กรองสถานะ">
-          {tabs.map((tab) => <button key={tab.value} type="button" aria-pressed={status === tab.value} onClick={() => setStatus(tab.value)} className={cn('flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary', status === tab.value ? 'bg-primary/10 text-primary' : 'text-muted-foreground')}>
-            {tab.label}{tab.count !== undefined && <span className={cn('rounded-md px-1.5 py-0.5 text-xs tabular-nums', tab.value === 'review' && tab.count ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-muted text-foreground')}>{tab.count}</span>}
-          </button>)}
+      {/* แถบแจ้งเตือนเมื่อมีรายการยังไม่อ่านหรือส่งไม่สำเร็จ — กดเคลียร์ทั้งหมดได้ในคลิกเดียว */}
+      {totalAlerts > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+          <div className="flex items-center gap-2.5 text-sm">
+            <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>
+              มีแจ้งเตือนคอมเมนต์ค้างอยู่ <strong>{totalAlerts} รายการ</strong>
+              {feed.unhandled_count > 0 && ` (ยังไม่อ่าน/รอตอบ ${feed.unhandled_count})`}
+              {feed.review_count > 0 && ` (ส่งคำตอบไม่สำเร็จ ${feed.review_count})`}
+              {' · '}คลิกที่รายการเพื่อเปิดอ่าน หรือกดเคลียร์แจ้งเตือนทั้งหมด
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {feed.review_count > 0 && status !== 'review' && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setStatus('review')}
+                className="h-8 text-xs"
+              >
+                ดูรายการที่ส่งไม่สำเร็จ ({feed.review_count})
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="default"
+              disabled={markingAll}
+              onClick={() => void markAllVisibleAsRead()}
+              className="h-8 gap-1.5 text-xs"
+            >
+              {markingAll ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCheck className="size-3.5" />}
+              เคลียร์แจ้งเตือน (อ่านแล้วทั้งหมด)
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row">
+      )}
+
+      {/* ตารางรายการคอมเมนต์ */}
+      <section className="overflow-hidden rounded-2xl border bg-card" aria-label="รายการคอมเมนต์">
+        {/* แท็บกรองสถานะ */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3" role="group" aria-label="กรองสถานะ">
+          <div className="flex flex-wrap gap-1.5">
+            {tabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                aria-pressed={status === tab.value}
+                onClick={() => setStatus(tab.value)}
+                className={cn(
+                  'flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs sm:text-sm font-medium transition hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary',
+                  status === tab.value ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'text-muted-foreground',
+                )}
+              >
+                {tab.label}
+                {tab.count !== undefined && tab.count > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.2 text-xs font-semibold tabular-nums',
+                      status === tab.value
+                        ? 'bg-primary-foreground/20 text-primary-foreground'
+                        : tab.value === 'review'
+                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                          : 'bg-primary/15 text-primary',
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void load()}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+            {historyLoaded ? 'กลับไปรายการล่าสุด' : 'รีเฟรชรายการ'}
+            {updatedAt && ` · ${updatedAt}`}
+          </button>
+        </div>
+
+        {/* ช่องค้นหาและตัวกรองเพจ */}
+        <div className="flex flex-col gap-3 border-b bg-muted/10 p-3.5 sm:flex-row">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
-            <input aria-label="ค้นหาคอมเมนต์" maxLength={200} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อลูกค้าหรือข้อความ…" className="h-10 w-full rounded-lg border bg-background pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/30" />
-            {search && <button aria-label="ล้างคำค้นหา" onClick={() => setSearch('')} className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button>}
+            <input
+              aria-label="ค้นหาคอมเมนต์"
+              maxLength={200}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ค้นหาชื่อลูกค้า หรือข้อความในคอมเมนต์…"
+              className="h-10 w-full rounded-lg border bg-background pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            {search && (
+              <button
+                aria-label="ล้างคำค้นหา"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
-          <select aria-label="เลือกเพจ" value={selectedPageId} onChange={(e) => setSelectedPageId(e.target.value)} className="h-10 min-w-0 rounded-lg border bg-background px-3 text-sm sm:max-w-64">
+          <select
+            aria-label="เลือกเพจ"
+            value={selectedPageId}
+            onChange={(e) => setSelectedPageId(e.target.value)}
+            className="h-10 min-w-0 rounded-lg border bg-background px-3 text-sm sm:max-w-64"
+          >
             <option value="all">ทุกเพจ ({pages.length})</option>
-            {pages.map((page) => <option key={page.id} value={page.id}>{page.display_name || page.page_name} · {page.platform === 'instagram' ? 'Instagram' : 'Facebook'}</option>)}
+            {pages.map((page) => (
+              <option key={page.id} value={page.id}>
+                {page.display_name || page.page_name} ·{' '}
+                {page.platform === 'instagram' ? 'Instagram' : 'Facebook'}
+              </option>
+            ))}
           </select>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground" aria-live="polite">
-          <span>{loading ? 'กำลังโหลดรายการ…' : `${feed.comments.length} รายการที่แสดง${query ? ` · ค้นหา “${query}”` : ''}`}</span>
-          <button disabled={loading} onClick={() => void load()} className="inline-flex min-h-8 items-center gap-1.5 hover:text-foreground disabled:opacity-50"><RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />{historyLoaded ? 'กลับไปรายการล่าสุด' : 'อัปเดตรายการ'}{updatedAt && ` · ${updatedAt}`}</button>
-        </div>
-        {error && <div role="alert" className="m-4 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><AlertTriangle className="size-4" />{error} · ข้อมูลที่เห็นอาจไม่ใช่รายการล่าสุด<Button variant="outline" size="sm" onClick={() => void load()}>ลองใหม่</Button></div>}
-        {!error && !loading && !feed.comments.length && <div className="flex flex-col items-center gap-2 px-6 py-16 text-center"><MessageCircle className="mb-2 size-8 text-muted-foreground/60" /><h2 className="font-semibold">{query ? 'ไม่พบคอมเมนต์ที่ตรงกับคำค้นหา' : status === 'pending' ? 'ไม่มีคอมเมนต์รอจัดการในรายการที่บันทึกไว้' : 'ไม่มีรายการในตัวกรองนี้'}</h2><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{query ? 'ลองเปลี่ยนคำค้นหาหรือเลือกสถานะ “ทั้งหมด”' : 'เปลี่ยนสถานะหรือเพจเพื่อดูรายการอื่น หากมีคอมเมนต์ใหม่ที่ยังไม่เข้า ใช้ปุ่มดึงคอมเมนต์จาก Meta'}</p></div>}
+
+        {error && (
+          <div
+            role="alert"
+            className="m-4 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            <AlertTriangle className="size-4" />
+            {error} · ข้อมูลที่เห็นอาจไม่ใช่รายการล่าสุด
+            <Button variant="outline" size="sm" onClick={() => void load()}>
+              ลองใหม่
+            </Button>
+          </div>
+        )}
+
+        {!error && !loading && !feed.comments.length && (
+          <div className="flex flex-col items-center gap-2 px-6 py-14 text-center">
+            <MessageCircle className="mb-1 size-8 text-muted-foreground/60" />
+            <h2 className="font-semibold">
+              {query
+                ? 'ไม่พบคอมเมนต์ที่ตรงกับคำค้นหา'
+                : status === 'pending'
+                  ? 'ไม่มีคอมเมนต์ค้างรอตอบ — ทุกคอมเมนต์ถูกอ่านหรือตอบเรียบร้อยแล้ว'
+                  : status === 'review'
+                    ? 'ไม่มีคอมเมนต์ที่ส่งผิดพลาด'
+                    : 'ยังไม่มีรายการคอมเมนต์ในหมวดนี้'}
+            </h2>
+            <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+              {status !== 'all'
+                ? 'กดดูที่แท็บ “ทั้งหมด” เพื่อดูประวัติคอมเมนต์ที่บอทหรือแอดมินตอบไปแล้ว'
+                : 'เมื่อลูกค้าคอมเมนต์ใต้โพสต์ รายการจะไหลเข้ามาที่นี่อัตโนมัติ'}
+            </p>
+            {status !== 'all' && (
+              <Button variant="outline" size="sm" onClick={() => setStatus('all')} className="mt-2">
+                ดูคอมเมนต์ทั้งหมด
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* รายการคอมเมนต์แต่ละแถว */}
         <div className={cn('divide-y', loading && 'opacity-60')} aria-busy={loading}>
           {feed.comments.map((comment) => {
             const page = pages.find((p) => p.id === comment.page_id);
             const state = commentStatus(comment);
-            return <button key={comment.id} type="button" disabled={loading} onClick={() => { setDirty(false); setBusy(false); setSelected(comment); }} className="group flex w-full items-start gap-3 p-4 text-left transition hover:bg-muted/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary sm:p-5">
-              <CustomerAvatar name={comment.from_name || comment.from_username || 'ลูกค้า'} src={comment.from_pic_url} platform={page?.platform} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"><span className="truncate text-sm font-semibold">{comment.from_name || comment.from_username || 'Meta ไม่ส่งชื่อผู้คอมเมนต์'}</span><span className={cn('rounded-md px-2 py-0.5 text-xs font-medium', state === 'review' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : state === 'pending' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground')}>{COMMENT_STATUS_LABEL[state]}</span></div>
-                <p className="mt-2 line-clamp-2 break-words text-sm leading-relaxed">{comment.message || (comment.attachment_url ? 'คอมเมนต์รูปภาพ' : 'ไม่มีข้อความ')}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><PlatformIcon platform={page?.platform ?? 'facebook'} size="xs" /><span>{page?.display_name || page?.page_name || 'เพจ'}</span><span>· {timeAgo(comment.commented_at ?? comment.created_at)}</span>{comment.replied_public && <span>· ตอบใต้โพสต์แล้ว</span>}{comment.replied_private && <span>· ทักส่วนตัวแล้ว</span>}</div>
-              </div>
-              <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground group-hover:text-primary" />
-            </button>;
+            const isUnreadOrAlert = state === 'pending' || state === 'review';
+
+            return (
+              <button
+                key={comment.id}
+                type="button"
+                disabled={loading}
+                onClick={() => void handleSelectComment(comment)}
+                className={cn(
+                  'group flex w-full items-start gap-3.5 p-4 text-left transition hover:bg-muted/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary sm:px-5 sm:py-4',
+                  isUnreadOrAlert && 'bg-primary/[0.03]',
+                )}
+              >
+                <div className="relative mt-0.5 shrink-0">
+                  <CustomerAvatar
+                    name={comment.from_name || comment.from_username || 'ลูกค้า'}
+                    src={comment.from_pic_url}
+                    platform={page?.platform}
+                    size="sm"
+                  />
+                  {isUnreadOrAlert && (
+                    <span
+                      className={cn(
+                        'absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-background',
+                        state === 'review' ? 'bg-amber-500' : 'bg-primary',
+                      )}
+                      title="ยังไม่อ่าน — คลิกเพื่อเปิดดูและเคลียร์แจ้งเตือน"
+                    />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  {/* บรรทัดบน: ชื่อลูกค้า + เพจ + เวลา + ป้ายสถานะ */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className={cn('truncate text-sm', isUnreadOrAlert ? 'font-bold text-foreground' : 'font-semibold text-foreground/90')}>
+                        {comment.from_name || comment.from_username || 'ลูกค้า (Meta ไม่ส่งชื่อ)'}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                        <PlatformIcon platform={page?.platform ?? 'facebook'} size="xs" />
+                        <span className="max-w-[120px] truncate">{page?.display_name || page?.page_name || 'เพจ'}</span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        · {timeAgo(comment.commented_at ?? comment.created_at)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {comment.replied_public && (
+                        <span className="rounded-md bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
+                          ตอบใต้โพสต์แล้ว
+                        </span>
+                      )}
+                      {comment.replied_private && (
+                        <span className="rounded-md bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-700 dark:text-purple-300">
+                          ทักแชทแล้ว
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          'rounded-md px-2 py-0.5 text-xs font-medium',
+                          state === 'review'
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            : state === 'pending'
+                              ? 'bg-primary/15 text-primary font-semibold'
+                              : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+                        )}
+                      >
+                        {state === 'review'
+                          ? 'ส่งไม่สำเร็จ (คลิกเพื่อดู)'
+                          : state === 'pending'
+                            ? 'ยังไม่อ่าน / รอตอบ'
+                            : state === 'deleted'
+                              ? 'ลบแล้ว'
+                              : 'อ่าน/จัดการแล้ว'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ข้อความคอมเมนต์ของลูกค้า */}
+                  <p className="line-clamp-2 break-words text-sm text-foreground leading-relaxed">
+                    {comment.message || (comment.attachment_url ? '📷 คอมเมนต์รูปภาพ' : '(สติกเกอร์ / ไม่มีข้อความ)')}
+                  </p>
+
+                  {/* แสดงคำตอบที่บอท/แอดมินตอบไปแล้วให้เห็นทันทีโดยไม่ต้องคลิกเข้าไปดูทีละอัน */}
+                  {(comment.public_reply_text || comment.private_reply_text) && (
+                    <div className="mt-1 flex flex-col gap-1 rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      {comment.public_reply_text && (
+                        <p className="line-clamp-1">
+                          <span className="font-semibold text-sky-600 dark:text-sky-400">💬 ตอบใต้โพสต์: </span>
+                          {comment.public_reply_text}
+                        </p>
+                      )}
+                      {comment.private_reply_text && (
+                        <p className="line-clamp-1">
+                          <span className="font-semibold text-purple-600 dark:text-purple-400">✉️ ทักส่วนตัว: </span>
+                          {comment.private_reply_text}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {comment.last_error_th && (
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                      ⚠️ {comment.last_error_th} (คลิกเปิดดูเพื่อรับทราบและเคลียร์แจ้งเตือน)
+                    </p>
+                  )}
+                </div>
+
+                <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground group-hover:text-primary" />
+              </button>
+            );
           })}
         </div>
-        {feed.has_more && feed.next_cursor && <div className="border-t p-4 text-center"><Button variant="outline" disabled={loading} onClick={() => void load(feed.next_cursor!)}>{loading ? 'กำลังโหลด…' : 'โหลดคอมเมนต์เพิ่มเติม'}</Button></div>}
-        {historyLoaded && <p className="border-t px-4 py-3 text-center text-xs text-muted-foreground">กำลังดูรายการย้อนหลัง · กด “กลับไปรายการล่าสุด” เพื่อรับรายการใหม่</p>}
+
+        {feed.has_more && feed.next_cursor && (
+          <div className="border-t p-4 text-center">
+            <Button variant="outline" disabled={loading} onClick={() => void load(feed.next_cursor!)}>
+              {loading ? 'กำลังโหลด…' : 'โหลดคอมเมนต์เพิ่มเติม'}
+            </Button>
+          </div>
+        )}
       </section>
 
-      <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) closeDetail(); }}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader><DialogTitle>รายละเอียดคอมเมนต์</DialogTitle><DialogDescription>ตรวจข้อความและผลการตอบก่อนทำรายการ</DialogDescription></DialogHeader>
+      {/* หน้าต่างรายละเอียดและจัดการคอมเมนต์ */}
+      <Dialog
+        open={Boolean(selected)}
+        onOpenChange={(open) => {
+          if (!open) closeDetail();
+        }}
+      >
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>จัดการคอมเมนต์ลูกค้า</DialogTitle>
+            <DialogDescription>
+              เมื่อเปิดดูรายการนี้ ระบบได้เคลียร์สถานะแจ้งเตือนให้เรียบร้อยแล้ว · คุณสามารถตอบเพิ่มหรือเปิดห้องแชทต่อได้ทันที
+            </DialogDescription>
+          </DialogHeader>
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/40 p-2">
-            <span className="px-2 text-xs text-muted-foreground">{selectedIndex >= 0 ? `รายการ ${selectedIndex + 1} จาก ${feed.comments.length} ที่โหลดไว้` : 'รายการที่เลือก'}</span>
+            <span className="px-2 text-xs text-muted-foreground">
+              {selectedIndex >= 0
+                ? `รายการที่ ${selectedIndex + 1} จาก ${feed.comments.length}`
+                : 'รายการที่เลือก'}
+            </span>
             <div className="flex gap-1">
-              <Button variant="ghost" size="sm" disabled={busy || dirty || selectedIndex <= 0} onClick={() => moveDetail(-1)}>ก่อนหน้า</Button>
-              <Button variant="ghost" size="sm" disabled={busy || dirty || selectedIndex < 0 || selectedIndex >= feed.comments.length - 1} onClick={() => moveDetail(1)}>ถัดไป <ChevronRight className="size-4" /></Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || dirty || selectedIndex <= 0}
+                onClick={() => moveDetail(-1)}
+              >
+                ก่อนหน้า
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || dirty || selectedIndex < 0 || selectedIndex >= feed.comments.length - 1}
+                onClick={() => moveDetail(1)}
+              >
+                ถัดไป <ChevronRight className="size-4" />
+              </Button>
             </div>
-            {dirty && <p className="w-full px-2 text-xs text-muted-foreground">มีข้อความร่างอยู่ · ส่งหรือล้างร่างก่อนเปลี่ยนรายการ</p>}
+            {dirty && (
+              <p className="w-full px-2 text-xs text-amber-600">
+                มีข้อความที่กำลังพิมพ์ค้างอยู่ · กดส่งหรือยกเลิกก่อนเปลี่ยนรายการ
+              </p>
+            )}
           </div>
-          {selected && <CommentCard key={selected.id} comment={selected} page={pages.find((p) => p.id === selected.page_id)} onChanged={replaceComment} setBusy={setBusy} onDirtyChange={setDirty} />}
+          {selected && (
+            <CommentCard
+              key={selected.id}
+              comment={selected}
+              previousErrorNote={lastViewedError}
+              page={pages.find((p) => p.id === selected.page_id)}
+              onChanged={replaceComment}
+              setBusy={setBusy}
+              onDirtyChange={setDirty}
+            />
+          )}
         </DialogContent>
       </Dialog>
+
+      {/* ยืนยันการทิ้งข้อความร่าง */}
       <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
-        <DialogContent><DialogHeader><DialogTitle>ยังมีข้อความที่ไม่ได้ส่ง</DialogTitle><DialogDescription>ต้องการปิดรายละเอียดและทิ้งข้อความร่างนี้หรือไม่?</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDiscardOpen(false)}>เขียนต่อ</Button><Button variant="destructive" onClick={() => { setDiscardOpen(false); setDirty(false); setSelected(null); }}>ทิ้งข้อความร่าง</Button></DialogFooter></DialogContent>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ยังมีข้อความที่ยังไม่ได้ส่ง</DialogTitle>
+            <DialogDescription>ต้องการปิดหน้าต่างนี้และทิ้งข้อความที่พิมพ์ไว้หรือไม่?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDiscardOpen(false)}>
+              กลับไปพิมพ์ต่อ
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setDiscardOpen(false);
+                setDirty(false);
+                setSelected(null);
+                setLastViewedError(null);
+              }}
+            >
+              ทิ้งข้อความ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
+
+      {/* ================================================================== */}
+      {/* คู่มืออธิบายลำดับการทำงานของระบบคอมเมนต์ (<dialog closedby="any">)   */}
+      {/* ================================================================== */}
+      <dialog
+        ref={guideDialogRef}
+        id="comment-how-it-works-dialog"
+        {...({ closedby: 'any' } as Record<string, unknown>)}
+        aria-labelledby="comment-guide-title"
+        className="m-auto w-[calc(100%-2rem)] max-w-2xl rounded-2xl border bg-card p-0 text-card-foreground shadow-2xl backdrop:bg-black/50 backdrop:backdrop-blur-xs"
+      >
+        <div className="flex max-h-[85dvh] flex-col overflow-hidden">
+          <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+            <div>
+              <h2 id="comment-guide-title" className="text-lg font-bold">
+                คู่มือการทำงาน: ระบบคอมเมนต์และบอทตอบคอมเมนต์
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                สรุปลำดับการทำงานตั้งแต่ลูกค้าคอมเมนต์ จนถึงการดึงเข้าห้องแชทและการเคลียร์แจ้งเตือน
+              </p>
+            </div>
+            <form method="dialog">
+              <button
+                type="submit"
+                aria-label="ปิดหน้าต่างคู่มือ"
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-4 overflow-y-auto p-5 text-sm leading-relaxed">
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <h3 className="font-semibold text-primary">
+                ขั้นที่ 1: คอมเมนต์เข้ามาในระบบได้อย่างไร? (2 ช่องทาง)
+              </h3>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs sm:text-sm text-foreground/90">
+                <li>
+                  <strong>เข้าอัตโนมัติทันที (Webhook):</strong> เมื่อลูกค้าคอมเมนต์ใต้โพสต์เพจ Facebook หรือ Instagram ระบบจะรับเข้ามาแสดงในหน้านี้ภายใน 1–3 วินาที
+                </li>
+                <li>
+                  <strong>กดปุ่ม “ดึงคอมเมนต์เก่าจากเพจ”:</strong> ใช้สำหรับดึงคอมเมนต์เก่าๆ บนโพสต์ที่เกิดก่อนเชื่อมเพจ (การดึงย้อนหลังจะนำเข้าข้อความมาให้อ่านอย่างเดียว บอทจะไม่ไปไล่ตอบคอมเมนต์เก่าซ้ำ)
+                </li>
+              </ul>
+            </div>
+
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <h3 className="font-semibold text-emerald-600 dark:text-emerald-400">
+                ขั้นที่ 2: บอทตอบคอมเมนต์อัตโนมัติทำงานอย่างไร?
+              </h3>
+              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
+                เมื่อมีคอมเมนต์ใหม่เข้ามา ระบบจะเช็กการตั้งค่าในหน้า <strong>ตั้งค่าบอท</strong> และทำงานตามลำดับนี้:
+              </p>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs sm:text-sm text-foreground/90">
+                <li>
+                  <strong>ตรวจคำกรอง (คีย์เวิร์ด):</strong> หากตั้งเป็น <em>“ตอบทุกคอมเมนต์”</em> บอทจะตอบทุกข้อความ แต่หากตั้งเป็น <em>“เฉพาะคีย์เวิร์ด”</em> (เช่น สนใจ, ราคา, CF) บอทจะตอบเฉพาะเมนต์ที่มีคำนั้น
+                </li>
+                <li>
+                  <strong>กดถูกใจ (Like) อัตโนมัติ:</strong> กดไลก์ให้คอมเมนต์ลูกค้าทันที (รองรับ Facebook)
+                </li>
+                <li>
+                  <strong>ตอบกลับใต้โพสต์ (Public Reply):</strong> ถ้าตรงกฎคีย์เวิร์ดจะใช้คำตอบตามกฎนั้น ถ้าไม่ตรงจะให้ <strong>AI (Gemini)</strong> ช่วยคิดคำตอบตามข้อมูลสินค้า หรือใช้ข้อความมาตรฐานที่ตั้งไว้
+                </li>
+                <li>
+                  <strong>ทักแชทส่วนตัว (Private Reply / DM):</strong> ส่งข้อความทักเข้าอินบ็อกซ์ของลูกค้าอัตโนมัติ (Meta กำหนดให้ทักได้ <strong>1 ครั้งต่อ 1 คอมเมนต์</strong> ภายใน 7 วัน) เมื่อลูกค้าตอบกลับมา ห้องแชทจะเด้งเข้าหน้า <strong>อินบ็อกซ์</strong> ทันที
+                </li>
+              </ol>
+            </div>
+
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <h3 className="font-semibold text-amber-600 dark:text-amber-400">
+                ขั้นที่ 3: สถานะแจ้งเตือนสีแดงทำงานอย่างไร?
+              </h3>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs sm:text-sm text-foreground/90">
+                <li>
+                  คอมเมนต์ที่ <strong>บอทตอบให้สำเร็จแล้ว</strong> จะถูกทำเครื่องหมายเป็น <strong>“อ่าน/จัดการแล้ว”</strong> อัตโนมัติ ไม่ขึ้นเลขแจ้งเตือนค้างกวนใจ
+                </li>
+                <li>
+                  ตัวเลขแจ้งเตือนจะขึ้นเฉพาะ <strong>คอมเมนต์ที่บอทยังไม่ได้ตอบ</strong> หรือ <strong>ส่งคำตอบไม่สำเร็จ</strong> (เช่น ลูกค้าลบเมนต์ไปแล้ว)
+                </li>
+                <li>
+                  <strong>คลิกเปิดอ่าน = หายแจ้งเตือนทันที:</strong> เพียงแอดมินคลิกเปิดดูคอมเมนต์ หรือกดปุ่ม <strong>“เคลียร์แจ้งเตือน (อ่านแล้วทั้งหมด)”</strong> ตัวเลขแจ้งเตือนจะหายไปทันที
+                </li>
+              </ul>
+            </div>
+
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <h3 className="font-semibold text-sky-600 dark:text-sky-400">
+                ขั้นที่ 4: ความหมายของปุ่มกดในแต่ละคอมเมนต์
+              </h3>
+              <div className="mt-2 grid gap-2 text-xs sm:text-sm sm:grid-cols-2">
+                <div className="rounded-lg border bg-background p-2.5">
+                  <strong>💬 ตอบใต้โพสต์:</strong> พิมพ์ตอบกลับสาธารณะใต้คอมเมนต์ (มีปุ่ม <em>ให้ AI ช่วยคิด</em> ช่วยร่างคำตอบให้)
+                </div>
+                <div className="rounded-lg border bg-background p-2.5">
+                  <strong>✉️ ทักแชทส่วนตัว:</strong> ส่งข้อความเข้าแชท Messenger / IG ของลูกค้าเพื่อดึงเข้า Inbox
+                </div>
+                <div className="rounded-lg border bg-background p-2.5">
+                  <strong>👁️ ซ่อนคอมเมนต์:</strong> ซ่อนไม่ให้คนอื่นเห็นใต้โพสต์ (เช่น เมนต์ที่มีเบอร์โทร/เลขบัญชี หรือสแปม)
+                </div>
+                <div className="rounded-lg border bg-background p-2.5">
+                  <strong>🗑️ ลบคอมเมนต์:</strong> ลบคอมเมนต์นั้นออกจากโพสต์บน Facebook / Instagram ถาวร
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border-t bg-muted/20 px-5 py-3">
+            {canManageBot ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/settings/autoreply?tab=comments">ไปหน้าตั้งค่าบอทคอมเมนต์</Link>
+              </Button>
+            ) : (
+              <span />
+            )}
+            <form method="dialog">
+              <Button type="submit" size="sm">
+                เข้าใจแล้ว ปิดหน้าต่าง
+              </Button>
+            </form>
+          </div>
+        </div>
+      </dialog>
     </div>
   );
 }
@@ -323,12 +995,14 @@ export default function CommentsClient({ initial, initialError, pages = [], canM
 
 function CommentCard({
   comment: c,
+  previousErrorNote,
   page,
   onChanged,
   setBusy,
   onDirtyChange,
 }: {
   comment: CommentRow;
+  previousErrorNote?: string | null;
   page?: SafePage;
   onChanged: (c: CommentRow) => void;
   setBusy: (v: boolean) => void;
@@ -336,19 +1010,26 @@ function CommentCard({
 }) {
   const [mode, setMode] = useState<'none' | 'public' | 'private'>('none');
   const [text, setText] = useState('');
-  const [selectedImage, setSelectedImage] = useState<{ url: string; preview_url: string; id?: string } | null>(null);
+  const [selectedImage, setSelectedImage] = useState<{
+    url: string;
+    preview_url: string;
+    id?: string;
+  } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sending, setSending] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [showReplies, setShowReplies] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const actionLock = useRef(false);
-  useEffect(() => { onDirtyChange(Boolean(text.trim() || selectedImage)); }, [text, selectedImage, onDirtyChange]);
-  useEffect(() => { setBusy(sending || aiLoading || uploadingImage); }, [sending, aiLoading, uploadingImage, setBusy]);
+  useEffect(() => {
+    onDirtyChange(Boolean(text.trim() || selectedImage));
+  }, [text, selectedImage, onDirtyChange]);
+  useEffect(() => {
+    setBusy(sending || aiLoading || uploadingImage);
+  }, [sending, aiLoading, uploadingImage, setBusy]);
 
   const supportsImage = !(page?.platform === 'instagram' && mode === 'public');
   const oldForPrivate = tooOldForPrivate(c.commented_at);
@@ -387,7 +1068,7 @@ function CommentCard({
             }
           }, 50);
         }
-        toast.success('AI จำลองคำตอบตามบอทที่เทรนไว้เรียบร้อยแล้ว');
+        toast.success('AI ร่างคำตอบให้เรียบร้อยแล้ว');
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'เรียก AI ไม่สำเร็จ');
@@ -436,10 +1117,12 @@ function CommentCard({
       if (replying && supportsImage && selectedImage?.url) {
         payload.attachment_url = selectedImage.url;
       }
-      const d = await api<{ ok: boolean; message_th: string; outcome_unknown: boolean; comment: CommentRow }>(
-        `/api/comments/${c.id}`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
+      const d = await api<{
+        ok: boolean;
+        message_th: string;
+        outcome_unknown: boolean;
+        comment: CommentRow;
+      }>(`/api/comments/${c.id}`, { method: 'POST', body: JSON.stringify(payload) });
       if (!d) return;
       onChanged(d.comment);
 
@@ -460,164 +1143,172 @@ function CommentCard({
     }
   }
 
-  const hasReplied = Boolean(c.replied_public || c.replied_private || c.public_reply_text || c.private_reply_text);
-  const hasBadges = Boolean(c.is_liked || c.replied_public || c.replied_private || c.is_handled || c.is_hidden || c.is_deleted || c.matched_keyword);
+  const errorMessage = c.last_error_th || previousErrorNote;
+  const hasReplied = Boolean(
+    c.replied_public || c.replied_private || c.public_reply_text || c.private_reply_text,
+  );
 
   return (
     <div
       className={cn(
         'flex min-w-0 flex-col gap-4 break-words rounded-xl border bg-card p-4 sm:p-5',
-        c.is_handled && 'bg-card/85 border-border/70',
         c.is_deleted && 'opacity-60',
       )}
     >
-      {/* แถวหัวข้อ: โปรไฟล์ลูกค้า + เวลา (จัดชิดซ้ายและขวา ไม่เบียดกัน) */}
-      <div className="flex items-center justify-between gap-2">
+      {/* ส่วนหัว: ข้อมูลผู้คอมเมนต์ + ลิงก์ไปดูโพสต์จริง */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="relative shrink-0">
-            <CustomerAvatar
-              name={c.from_name || c.from_username || 'ลูกค้า'}
-              src={c.from_pic_url}
-              platform={page?.platform}
-              size="sm"
-            />
-          </div>
-
-          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-            <span className="text-sm font-semibold text-foreground truncate max-w-[140px] sm:max-w-xs">
-              {c.from_name || c.from_username || 'ไม่ทราบชื่อ'}
-            </span>
-            {c.from_username && c.from_username !== c.from_name && (
-              <span className="text-xs text-muted-foreground font-mono truncate max-w-[100px]">
-                @{c.from_username}
+          <CustomerAvatar
+            name={c.from_name || c.from_username || 'ลูกค้า'}
+            src={c.from_pic_url}
+            platform={page?.platform}
+            size="sm"
+          />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-sm font-bold text-foreground truncate">
+                {c.from_name || c.from_username || 'ไม่ทราบชื่อผู้คอมเมนต์'}
               </span>
-            )}
-            {page && (
-              <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground shrink-0">
-                <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: page.tag_color }} />
-                <span className="max-w-[90px] truncate">{page.display_name || page.page_name}</span>
-              </span>
-            )}
+              {c.from_username && c.from_username !== c.from_name && (
+                <span className="text-xs text-muted-foreground font-mono">@{c.from_username}</span>
+              )}
+              {page && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+                  <span
+                    className="size-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: page.tag_color }}
+                  />
+                  <span>{page.display_name || page.page_name}</span>
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              คอมเมนต์เมื่อ {timeAgo(c.commented_at ?? c.created_at)}
+            </p>
           </div>
         </div>
 
-        {/* เวลา และ ลิงก์โพสต์ต้นทาง อยู่ขวาบน บรรทัดเดียว สบายตา */}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-          <span className="whitespace-nowrap">{timeAgo(c.commented_at ?? c.created_at)}</span>
-          {c.post_permalink && (
-            <a
-              href={c.post_permalink}
-              target="_blank"
-              rel="noreferrer"
-              className="text-muted-foreground hover:text-primary transition p-0.5"
-              title="เปิดดูโพสต์ต้นทาง"
-            >
-              <ExternalLink className="size-3" />
+        {c.post_permalink && (
+          <Button variant="outline" size="sm" asChild className="h-8 gap-1.5 text-xs">
+            <a href={c.post_permalink} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-3.5" />
+              เปิดดูโพสต์ต้นทาง
             </a>
-          )}
-        </div>
+          </Button>
+        )}
       </div>
 
-      {/* แถบป้ายสถานะ (จัดเรียงเป็นแถวเฉพาะ ไม่แย่งพื้นที่ชื่อลูกค้า) */}
-      {hasBadges && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {c.replied_public && (
-            <Badge variant="outline" className="text-xs border-sky-500/30 text-sky-600 bg-sky-50 dark:bg-sky-950/30 gap-1 h-6 font-normal">
-              <MessageSquare className="size-2.5" /> ตอบแล้ว
-            </Badge>
+      {/* ป้ายสถานะปัจจุบันของคอมเมนต์ */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge
+          variant="secondary"
+          className={cn(
+            'text-xs h-6 font-medium gap-1',
+            c.is_handled
+              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+              : 'bg-primary/10 text-primary border border-primary/20',
           )}
-          {c.replied_private && (
-            <Badge variant="outline" className="text-xs border-purple-500/30 text-purple-600 bg-purple-50 dark:bg-purple-950/30 gap-1 h-6 font-normal">
-              <Send className="size-2.5" /> ทักส่วนตัวแล้ว
-            </Badge>
+        >
+          <Check className="size-3" />
+          {c.is_handled ? 'อ่านแล้ว / เคลียร์แจ้งเตือนแล้ว' : 'ยังไม่อ่าน'}
+        </Badge>
+        {c.replied_public && (
+          <Badge
+            variant="outline"
+            className="text-xs border-sky-500/30 text-sky-700 dark:text-sky-300 bg-sky-500/10 gap-1 h-6 font-normal"
+          >
+            <MessageSquare className="size-3" /> ตอบใต้โพสต์แล้ว
+          </Badge>
+        )}
+        {c.replied_private && (
+          <Badge
+            variant="outline"
+            className="text-xs border-purple-500/30 text-purple-700 dark:text-purple-300 bg-purple-500/10 gap-1 h-6 font-normal"
+          >
+            <Send className="size-3" /> ทักส่วนตัวแล้ว
+          </Badge>
+        )}
+        {c.is_liked && (
+          <Badge variant="secondary" className="text-xs gap-1 h-6 font-normal">
+            <ThumbsUp className="size-3 fill-current text-primary" /> กดถูกใจแล้ว
+          </Badge>
+        )}
+        {c.is_hidden && <Badge variant="secondary" className="text-xs h-6 font-normal">ซ่อนจากหน้าเพจอยู่</Badge>}
+        {c.is_deleted && <Badge variant="destructive" className="text-xs h-6 font-normal">ลบแล้ว</Badge>}
+        {c.matched_keyword && (
+          <Badge className="bg-amber-500 text-xs text-white hover:bg-amber-500 h-6 font-normal">
+            ตรงคีย์เวิร์ด: {c.matched_keyword}
+          </Badge>
+        )}
+      </div>
+
+      {/* กล่องข้อความคอมเมนต์ของลูกค้า */}
+      <div className="rounded-xl border bg-muted/20 p-3.5">
+        <p className="text-xs font-medium text-muted-foreground mb-1">ข้อความที่ลูกค้าคอมเมนต์:</p>
+        <p
+          className={cn(
+            'text-base text-foreground break-words whitespace-pre-wrap leading-relaxed font-medium',
+            c.is_deleted && 'line-through text-muted-foreground',
           )}
-          {c.is_liked && (
-            <Badge variant="secondary" className="text-xs text-primary border-primary/20 bg-primary/10 gap-1 h-6 font-normal">
-              <ThumbsUp className="size-2.5 fill-current" /> ไลก์แล้ว
-            </Badge>
+        >
+          {c.message || (c.attachment_url ? '📷 รูปภาพจากลูกค้า' : '(สติกเกอร์ / ไม่มีข้อความ)')}
+        </p>
+        {c.attachment_url && (
+          <a href={c.attachment_url} target="_blank" rel="noreferrer" className="mt-2 block w-fit">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={c.attachment_url}
+              alt="รูปภาพในคอมเมนต์ของลูกค้า"
+              className="max-h-64 max-w-full rounded-lg border object-contain"
+            />
+          </a>
+        )}
+      </div>
+
+      {/* แสดงข้อความที่บอทหรือแอดมินตอบกลับไปแล้วให้เห็นชัดเจนทันที */}
+      {hasReplied && (
+        <div className="rounded-xl border border-border/70 bg-muted/15 p-3.5 space-y-2.5 text-xs">
+          <p className="font-semibold text-foreground">ประวัติการตอบกลับของคอมเมนต์นี้:</p>
+          {c.public_reply_text && (
+            <div className="space-y-1">
+              <span className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1">
+                <MessageSquare className="size-3.5" /> ข้อความที่ตอบใต้โพสต์ (สาธารณะ):
+              </span>
+              <div className="rounded-lg bg-background p-2.5 border text-foreground whitespace-pre-wrap leading-relaxed text-sm">
+                {c.public_reply_text}
+              </div>
+            </div>
           )}
-          {c.is_handled && (
-            <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20 gap-1 h-6 font-normal">
-              <Check className="size-2.5" /> จัดการแล้ว
-            </Badge>
+
+          {c.private_reply_text && (
+            <div className="space-y-1">
+              <span className="font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                <Send className="size-3.5" /> ข้อความที่ทักแชทส่วนตัว (Messenger / IG DM):
+              </span>
+              <div className="rounded-lg bg-background p-2.5 border text-foreground whitespace-pre-wrap leading-relaxed text-sm">
+                {c.private_reply_text}
+              </div>
+            </div>
           )}
-          {c.is_hidden && <Badge variant="secondary" className="text-xs h-6 font-normal">ซ่อนอยู่</Badge>}
-          {c.is_deleted && <Badge variant="destructive" className="text-xs h-6 font-normal">ลบแล้ว</Badge>}
-          {c.matched_keyword && (
-            <Badge className="bg-amber-500 text-xs text-white hover:bg-amber-500 h-6 font-normal">
-              คีย์เวิร์ด: {c.matched_keyword}
-            </Badge>
+
+          {!c.public_reply_text && !c.private_reply_text && (
+            <p className="text-muted-foreground italic">
+              ระบบบันทึกว่าตอบกลับแล้ว
+            </p>
           )}
         </div>
       )}
 
-      {/* เนื้อหาคอมเมนต์ของลูกค้า */}
-      <div className="flex flex-col gap-1 px-0.5">
-        <p className={cn('text-base text-foreground break-words whitespace-pre-wrap leading-relaxed', c.is_deleted && 'line-through text-muted-foreground')}>
-          {c.message || (c.attachment_url ? 'รูปภาพจากลูกค้า' : '(ไม่มีข้อความ)')}
-        </p>
-
-        {c.attachment_url && <a href={c.attachment_url} target="_blank" rel="noreferrer" className="my-2 block w-fit">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={c.attachment_url} alt="รูปภาพในคอมเมนต์ของลูกค้า" className="max-h-64 max-w-full rounded-lg border object-contain" />
-        </a>}
-        {/* ส่วนแสดงข้อความที่เคยตอบกลับไปแล้ว (ปิดตาไว้ก่อน กดดูถึงจะเปิด) */}
-        {hasReplied && (
-          <div className="flex flex-col gap-1 pt-0.5">
-            <button
-              type="button"
-              onClick={() => setShowReplies(!showReplies)}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-medium transition w-fit py-0.5"
-            >
-              {showReplies ? <EyeOff className="size-3 text-primary" /> : <Eye className="size-3" />}
-              <span>{showReplies ? 'ซ่อนข้อความที่ตอบกลับ' : 'ดูข้อความที่ตอบกลับไปแล้ว'}</span>
-            </button>
-
-            {showReplies && (
-              <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5 flex flex-col gap-2 text-xs">
-                {c.public_reply_text && (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1 text-xs">
-                      <MessageSquare className="size-3" /> ข้อความที่ตอบใต้โพสต์:
-                    </span>
-                    <div className="rounded-md bg-background/90 p-2 border border-border/40 text-foreground/90 whitespace-pre-wrap leading-relaxed">
-                      {c.public_reply_text}
-                    </div>
-                  </div>
-                )}
-
-                {c.private_reply_text && (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1 text-xs">
-                      <Send className="size-3" /> ข้อความที่ทักแชทส่วนตัว (Messenger / IG DM):
-                    </span>
-                    <div className="rounded-md bg-background/90 p-2 border border-border/40 text-foreground/90 whitespace-pre-wrap leading-relaxed">
-                      {c.private_reply_text}
-                    </div>
-                  </div>
-                )}
-
-                {!c.public_reply_text && !c.private_reply_text && (
-                  <p className="text-muted-foreground italic text-xs">
-                    (ระบบได้บันทึกว่าตอบกลับแล้ว แต่อาจเป็นรายการที่ตอบก่อนเปิดระบบบันทึกข้อความ)
-                  </p>
-                )}
-              </div>
-            )}
+      {/* แจ้งเตือนประวัติข้อผิดพลาด (ถ้าเคยมี) */}
+      {errorMessage && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+          <AlertTriangle className="size-4 shrink-0 mt-0.5 text-amber-600" />
+          <div className="space-y-0.5">
+            <p className="font-semibold">หมายเหตุการส่งคำตอบก่อนหน้า:</p>
+            <p>{errorMessage}</p>
           </div>
-        )}
-
-        {/* กล่องแจ้งเตือนข้อผิดพลาด (ถ้ามี) */}
-        {c.last_error_th && (
-          <div className="rounded-xl border border-red-200/80 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/30 p-2.5 text-xs text-red-700 dark:text-red-300 flex items-start gap-2">
-            <AlertTriangle className="size-4 shrink-0 mt-0.5 text-red-500" />
-            <div className="flex flex-col gap-0.5">
-              <span className="font-semibold text-red-800 dark:text-red-200">ข้อผิดพลาดในการดำเนินการ:</span>
-              <span>{c.last_error_th}</span>
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Dialog ยืนยันการลบ */}
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
@@ -625,7 +1316,8 @@ function CommentCard({
           <DialogHeader>
             <DialogTitle>ยืนยันการลบคอมเมนต์</DialogTitle>
             <DialogDescription>
-              คุณต้องการลบคอมเมนต์นี้ออกจาก {page?.platform === 'instagram' ? 'Instagram' : 'Facebook'} ใช่หรือไม่? การกระทำนี้ไม่สามารถเรียกคืนได้
+              คุณต้องการลบคอมเมนต์นี้ออกจาก{' '}
+              {page?.platform === 'instagram' ? 'Instagram' : 'Facebook'} ใช่หรือไม่? การกระทำนี้ไม่สามารถเรียกคืนได้
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -641,7 +1333,7 @@ function CommentCard({
                 void act({ action: 'delete' });
               }}
             >
-              ลบคอมเมนต์
+              ลบคอมเมนต์ถาวร
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -653,7 +1345,9 @@ function CommentCard({
         kind="image"
         onClose={() => setPickerOpen(false)}
         onSelect={(item: LibraryItem) => {
-          const fullUrl = item.public_url ? toAbsoluteUrl(item.public_url) : toAbsoluteUrl(item.preview_url);
+          const fullUrl = item.public_url
+            ? toAbsoluteUrl(item.public_url)
+            : toAbsoluteUrl(item.preview_url);
           setSelectedImage({
             url: fullUrl,
             preview_url: item.preview_url,
@@ -663,123 +1357,131 @@ function CommentCard({
         }}
       />
 
-      {/* แถบปุ่มจัดการ (เมื่อไม่ได้เปิดฟอร์มตอบ) */}
+      {/* แผงปุ่มกด — แยกหมวดหมู่ชัดเจน ไม่ปนกัน */}
       {mode === 'none' && (
-        <div className="flex flex-wrap items-center justify-between gap-1 border-t border-border/40 pt-1.5 mt-0">
-          {/* แถบปุ่มหลัก (ตอบกลับ / ทักแชท / ไลก์) */}
-          <div className="flex flex-wrap items-center gap-1">
-            {!c.is_deleted && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-9 gap-1 text-xs font-medium rounded-lg hover:border-primary/50"
-                onClick={() => {
-                  setMode('public');
-                  setTimeout(() => textareaRef.current?.focus(), 50);
-                }}
-              >
-                <MessageSquare className="size-3 text-sky-500" />
-                ตอบใต้โพสต์
-              </Button>
-            )}
-
-            {!c.replied_private && !oldForPrivate && !c.is_deleted && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-9 gap-1 text-xs font-medium rounded-lg text-purple-700 border-purple-200 hover:bg-purple-50 dark:border-purple-900/50 dark:text-purple-400 dark:hover:bg-purple-950/30"
-                onClick={() => {
-                  setMode('private');
-                  setTimeout(() => textareaRef.current?.focus(), 50);
-                }}
-              >
-                <Send className="size-3" />
-                ทักส่วนตัว
-              </Button>
-            )}
-
-            {!c.replied_private && oldForPrivate && !c.is_deleted && (
-              <span className="text-xs text-muted-foreground px-1.5 py-0.5 bg-muted/40 rounded">
-                {c.commented_at ? 'เกิน 7 วัน · ทักส่วนตัวไม่ได้' : 'ไม่ทราบเวลาคอมเมนต์ · ทักส่วนตัวไม่ได้'}
-              </span>
-            )}
-
-            {!c.is_deleted && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={sending || (c.is_liked && page?.platform !== 'instagram')}
-                title={c.is_liked && page?.platform !== 'instagram' ? 'Facebook ไม่รองรับการยกเลิกไลก์ผ่านระบบนี้' : undefined}
-                onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
-                className={cn('h-9 gap-1 text-xs rounded-lg px-2', c.is_liked && 'text-primary font-semibold')}
-              >
-                <ThumbsUp className={cn('size-3', c.is_liked && 'fill-current text-primary')} />
-                {c.is_liked ? page?.platform === 'instagram' ? 'เลิกถูกใจ' : 'ถูกใจแล้ว' : 'ถูกใจ'}
-              </Button>
-            )}
-
-            {/* ถ้าตอบครบทั้งสองแบบแล้ว */}
-            {c.replied_public && c.replied_private && !c.last_error_th && (
-              <span className="text-xs text-muted-foreground py-0.5">
-                ตอบกลับครบแล้ว
-              </span>
-            )}
-          </div>
-
-          {/* ปุ่มจัดการเสริม (ซ่อน, จัดการแล้ว, ลบ, ไปที่แชท) */}
-          <div className="flex items-center gap-0.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={sending}
-              onClick={() => void act({ action: 'handled', handled: !c.is_handled })}
-              className="h-9 gap-1 text-xs text-muted-foreground hover:text-foreground rounded-lg px-2"
-              title={c.is_handled ? 'กดเพื่อทำเครื่องหมายว่ายังไม่จัดการ' : 'กดเมื่อจัดการเสร็จแล้ว'}
-            >
-              <Check className={cn('size-3.5', c.is_handled && 'text-emerald-600 font-bold')} />
-              <span>{c.is_handled ? 'ย้ายกลับรอจัดการ' : 'ทำเครื่องหมายว่าเสร็จ'}</span>
-            </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button aria-label="การจัดการเพิ่มเติม" disabled={sending} variant="ghost" size="icon" className="size-9 rounded-lg text-muted-foreground">
-                  <MoreHorizontal className="size-3.5" />
+        <div className="space-y-3 border-t pt-3">
+          {/* กลุ่มที่ 1: ปุ่มตอบกลับลูกค้า */}
+          {!c.is_deleted && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-muted-foreground">1. ตอบกลับลูกค้า</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="h-9 gap-1.5 text-xs font-medium"
+                  onClick={() => {
+                    setMode('public');
+                    setTimeout(() => textareaRef.current?.focus(), 50);
+                  }}
+                >
+                  <MessageSquare className="size-3.5" />
+                  {c.replied_public ? 'ตอบใต้โพสต์เพิ่มอีกครั้ง' : 'ตอบกลับใต้โพสต์ (สาธารณะ)'}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40 text-xs">
-                {!c.is_deleted && (
-                  <DropdownMenuItem
-                    className="cursor-pointer gap-2"
-                    onClick={() => void act({ action: 'hide', hidden: !c.is_hidden })}
+
+                {!c.replied_private && !oldForPrivate && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9 gap-1.5 text-xs font-medium border-purple-500/40 text-purple-700 hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-950/30"
+                    onClick={() => {
+                      setMode('private');
+                      setTimeout(() => textareaRef.current?.focus(), 50);
+                    }}
                   >
-                    {c.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-                    <span>{c.is_hidden ? 'เลิกซ่อนคอมเมนต์' : 'ซ่อนคอมเมนต์'}</span>
-                  </DropdownMenuItem>
+                    <Send className="size-3.5" />
+                    ทักแชทส่วนตัว (ดึงเข้า Inbox)
+                  </Button>
+                )}
+
+                {c.replied_private && (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-purple-500/10 px-2.5 py-1.5 text-xs font-medium text-purple-700 dark:text-purple-300">
+                    <Check className="size-3.5" /> ทักแชทส่วนตัวแล้ว (Meta จำกัด 1 ครั้ง/คอมเมนต์)
+                  </span>
+                )}
+
+                {!c.replied_private && oldForPrivate && (
+                  <span className="text-xs text-muted-foreground px-2.5 py-1.5 bg-muted rounded-lg">
+                    คอมเมนต์เกิน 7 วัน · ทักส่วนตัวไม่ได้ตามกฎ Meta
+                  </span>
                 )}
 
                 {c.conversation_id && (
-                  <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                  <Button size="sm" variant="secondary" asChild className="h-9 gap-1.5 text-xs font-medium">
                     <Link href={`/inbox?c=${c.conversation_id}`}>
-                      <MessageCircle className="size-3.5" />
-                      <span>เปิดห้องแชท</span>
+                      <MessageCircle className="size-3.5 text-primary" />
+                      เปิดห้องแชทใน Inbox
                     </Link>
-                  </DropdownMenuItem>
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* กลุ่มที่ 2: จัดการคอมเมนต์บนเพจและสถานะการอ่าน */}
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-muted-foreground">2. จัดการคอมเมนต์บนเพจ</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {!c.is_deleted && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={sending || (c.is_liked && page?.platform !== 'instagram')}
+                    title={
+                      c.is_liked && page?.platform !== 'instagram'
+                        ? 'Facebook ไม่รองรับการยกเลิกไลก์ผ่านระบบนี้'
+                        : undefined
+                    }
+                    onClick={() => void act({ action: c.is_liked ? 'unlike' : 'like' })}
+                    className={cn('h-8 gap-1.5 text-xs', c.is_liked && 'border-primary/40 text-primary')}
+                  >
+                    <ThumbsUp className={cn('size-3.5', c.is_liked && 'fill-current')} />
+                    {c.is_liked
+                      ? page?.platform === 'instagram'
+                        ? 'เลิกถูกใจ'
+                        : 'ถูกใจแล้ว'
+                      : 'กดถูกใจ'}
+                  </Button>
                 )}
 
                 {!c.is_deleted && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-destructive focus:text-destructive"
-                      onClick={() => setConfirmDelete(true)}
-                    >
-                      <Trash2 className="size-3.5" />
-                      <span>ลบคอมเมนต์</span>
-                    </DropdownMenuItem>
-                  </>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={sending}
+                    onClick={() => void act({ action: 'hide', hidden: !c.is_hidden })}
+                    className="h-8 gap-1.5 text-xs"
+                  >
+                    {c.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                    {c.is_hidden ? 'เลิกซ่อนจากหน้าเพจ' : 'ซ่อนคอมเมนต์จากเพจ'}
+                  </Button>
                 )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+
+                {!c.is_deleted && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={sending}
+                    onClick={() => setConfirmDelete(true)}
+                    className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="size-3.5" />
+                    ลบคอมเมนต์
+                  </Button>
+                )}
+              </div>
+
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={sending}
+                onClick={() => void act({ action: 'handled', handled: !c.is_handled })}
+                className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <Check className={cn('size-3.5', c.is_handled && 'text-emerald-600')} />
+                {c.is_handled ? 'ทำเครื่องหมายว่ายังไม่อ่าน' : 'ทำเครื่องหมายว่าอ่านแล้ว'}
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -787,7 +1489,6 @@ function CommentCard({
       {/* ฟอร์มตอบกลับ (Public หรือ Private) */}
       {mode !== 'none' && (
         <div className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/[0.02] p-3.5">
-          {/* ส่วนหัวกล่องตอบกลับ */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
@@ -805,12 +1506,11 @@ function CommentCard({
               </span>
               <span className="text-xs text-muted-foreground">
                 {mode === 'public'
-                  ? '· ทุกคนบนโซเชียลจะเห็นข้อความนี้'
-                  : '· ส่งได้ 1 ครั้งต่อคอมเมนต์ (กฎ 7 วันของ Meta)'}
+                  ? '· ทุกคนที่ดูโพสต์จะเห็นข้อความนี้'
+                  : '· ส่งเข้าอินบ็อกซ์ลูกค้า (ได้ 1 ครั้งต่อคอมเมนต์)'}
               </span>
             </div>
 
-            {/* เครื่องมือช่วยคิด/แนบสื่อ */}
             <div className="flex items-center gap-1.5">
               <Button
                 type="button"
@@ -818,10 +1518,14 @@ function CommentCard({
                 variant="outline"
                 disabled={aiLoading || sending}
                 onClick={() => void askAi()}
-                className="h-9 gap-1 px-2.5 text-xs text-primary border-primary/30 hover:bg-primary/10 rounded-lg"
+                className="h-8 gap-1 px-2.5 text-xs text-primary border-primary/30 hover:bg-primary/10 rounded-lg"
               >
-                {aiLoading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3 text-amber-500" />}
-                <span>{aiLoading ? 'AI กำลังจำลอง...' : 'ให้ AI ช่วยคิด'}</span>
+                {aiLoading ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3 text-amber-500" />
+                )}
+                <span>{aiLoading ? 'AI กำลังคิด...' : 'ให้ AI ช่วยคิดคำตอบ'}</span>
               </Button>
 
               <Button
@@ -830,11 +1534,10 @@ function CommentCard({
                 variant="outline"
                 disabled={sending || uploadingImage || !supportsImage}
                 onClick={() => setPickerOpen(true)}
-                className="h-9 gap-1 px-2.5 text-xs rounded-lg text-muted-foreground hover:text-foreground"
-                title="เลือกรูปจากคลังสื่อ"
+                className="h-8 gap-1 px-2.5 text-xs rounded-lg"
               >
                 <ImageIcon className="size-3" />
-                <span className="hidden sm:inline">คลังสื่อ</span>
+                <span>คลังสื่อ</span>
               </Button>
 
               <input
@@ -851,16 +1554,18 @@ function CommentCard({
                 variant="outline"
                 disabled={sending || uploadingImage || !supportsImage}
                 onClick={() => fileInputRef.current?.click()}
-                className="h-9 gap-1 px-2.5 text-xs rounded-lg text-muted-foreground hover:text-foreground"
-                title="อัปโหลดรูปจากอุปกรณ์"
+                className="h-8 gap-1 px-2.5 text-xs rounded-lg"
               >
-                {uploadingImage ? <Loader2 className="size-3 animate-spin" /> : <Paperclip className="size-3" />}
-                <span className="hidden sm:inline">แนบรูป</span>
+                {uploadingImage ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Paperclip className="size-3" />
+                )}
+                <span>แนบรูป</span>
               </Button>
             </div>
           </div>
 
-          {/* พรีวิวรูปภาพที่แนบ (ถ้ามี) */}
           {selectedImage && (
             <div className="flex items-center gap-2.5 rounded-lg border bg-background p-2 w-fit">
               <div className="relative size-12 rounded-md overflow-hidden bg-muted border">
@@ -869,23 +1574,20 @@ function CommentCard({
               </div>
               <div className="flex flex-col gap-0.5 text-xs pr-2">
                 <span className="font-medium text-foreground">แนบรูปภาพแล้ว</span>
-                <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                  จะถูกส่งไปพร้อมกับข้อความตอบกลับ
-                </span>
+                <span className="text-xs text-muted-foreground">จะส่งไปพร้อมกับข้อความตอบกลับ</span>
               </div>
               <button
                 type="button"
                 aria-label="เอารูปแนบออก"
                 disabled={sending || aiLoading}
                 onClick={() => setSelectedImage(null)}
-                className="size-5 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 transition"
+                className="size-5 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"
               >
                 <X className="size-3" />
               </button>
             </div>
           )}
 
-          {/* กล่องพิมพ์ข้อความหลายบรรทัด (Textarea ขยายได้) */}
           <textarea
             ref={textareaRef}
             aria-label={mode === 'public' ? 'ข้อความตอบใต้โพสต์' : 'ข้อความทักส่วนตัว'}
@@ -893,28 +1595,30 @@ function CommentCard({
             onChange={handleTextChange}
             placeholder={
               mode === 'public'
-                ? 'พิมพ์ข้อความตอบกลับใต้คอมเมนต์... (เช่น ขอบคุณที่สนใจครับ สินค้าพร้อมส่งนะคะ)'
-                : 'พิมพ์ข้อความทักส่วนตัวเข้า Messenger / IG... (เช่น สวัสดีค่ะ แอดมินทักมาให้ข้อมูลโปรโมชั่นเพิ่มเติมนะคะ)'
+                ? 'พิมพ์ข้อความตอบกลับใต้คอมเมนต์... (หรือกดปุ่ม "ให้ AI ช่วยคิดคำตอบ" ด้านบน)'
+                : 'พิมพ์ข้อความทักส่วนตัวเข้า Messenger / IG... (เมื่อลูกค้าตอบกลับ แชทจะเด้งเข้าเมนูอินบ็อกซ์)'
             }
             disabled={sending || aiLoading || uploadingImage}
             rows={3}
             maxLength={1000}
-            className="w-full min-h-[84px] max-h-[260px] resize-y rounded-xl border bg-background p-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/20 transition placeholder:text-muted-foreground/60"
+            className="w-full min-h-[84px] max-h-[260px] resize-y rounded-xl border bg-background p-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/20"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 if (!sending && !aiLoading && !uploadingImage && text.trim()) {
-                  void act({ action: mode === 'public' ? 'reply_public' : 'reply_private', text: text.trim() });
+                  void act({
+                    action: mode === 'public' ? 'reply_public' : 'reply_private',
+                    text: text.trim(),
+                  });
                 }
               }
             }}
           />
 
-          <p className="text-xs text-muted-foreground">{text.length}/1,000 ตัวอักษร · ต้องมีข้อความก่อนส่ง{!supportsImage ? ' · การตอบใต้โพสต์ Instagram รองรับข้อความเท่านั้น' : selectedImage && mode === 'private' ? ' · รูปภาพในข้อความส่วนตัวจะส่งเป็นลิงก์' : ''}</p>
-          {/* แถบล่างของกล่องตอบกลับ */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">
-              กด <kbd className="px-1 py-0.5 bg-muted rounded text-xs font-mono border">Ctrl</kbd> + <kbd className="px-1 py-0.5 bg-muted rounded text-xs font-mono border">Enter</kbd> หรือกดปุ่มส่ง
+              {text.length}/1,000 ตัวอักษร · กด <kbd className="px-1 py-0.5 bg-muted rounded border">Ctrl</kbd>+
+              <kbd className="px-1 py-0.5 bg-muted rounded border">Enter</kbd> เพื่อส่ง
             </span>
 
             <div className="flex items-center gap-2">
@@ -928,7 +1632,6 @@ function CommentCard({
                   setText('');
                   setSelectedImage(null);
                 }}
-                className="h-8 text-xs rounded-lg"
               >
                 ยกเลิก
               </Button>
@@ -943,10 +1646,16 @@ function CommentCard({
                     text: text.trim(),
                   })
                 }
-                className="h-8 gap-1.5 text-xs font-semibold px-4 rounded-lg shadow-xs"
+                className="gap-1.5 font-semibold"
               >
                 {sending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-                <span>{sending ? 'กำลังส่ง...' : mode === 'public' ? 'ส่งตอบใต้โพสต์' : 'ส่งทักส่วนตัว'}</span>
+                <span>
+                  {sending
+                    ? 'กำลังส่ง...'
+                    : mode === 'public'
+                      ? 'ส่งตอบใต้โพสต์'
+                      : 'ส่งทักแชทส่วนตัว'}
+                </span>
               </Button>
             </div>
           </div>

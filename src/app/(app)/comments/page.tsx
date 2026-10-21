@@ -25,7 +25,7 @@ export default async function CommentsPage() {
 
   try {
     const [f, p] = await Promise.all([
-      listComments(result.admin, { status: 'pending' }),
+      listComments(result.admin, { status: 'all' }),
       listPagesFor(result.admin),
     ]);
     feed = f;

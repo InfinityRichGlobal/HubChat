@@ -263,7 +263,7 @@ export async function getComment(admin: PublicAdmin, id: string): Promise<Commen
   return row;
 }
 
-/** ทำเครื่องหมายว่าจัดการแล้ว / ยังไม่จัดการ */
+/** ทำเครื่องหมายว่าจัดการแล้ว / ยังไม่จัดการ (เมื่อรับทราบแล้วให้ล้างสถานะ error ค้างด้วย) */
 export async function setHandled(
   admin: PublicAdmin,
   id: string,
@@ -276,6 +276,7 @@ export async function setHandled(
       is_handled: handled,
       handled_by: handled ? admin.id : null,
       handled_at: handled ? new Date().toISOString() : null,
+      ...(handled ? { last_error_th: null } : {}),
     })
     .eq('id', id);
   if (error) throw new CommentError(`บันทึกสถานะไม่สำเร็จ: ${error.message}`);

@@ -136,11 +136,14 @@ export default function AppShell({
     void fetchCounts();
     const timer = setInterval(() => void fetchCounts(), 15000);
     const onVisibility = () => { if (!document.hidden) void fetchCounts(); };
+    const onRefreshCounts = () => { void fetchCounts(); };
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('hubchat:counts-refresh', onRefreshCounts);
     return () => {
       alive = false;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('hubchat:counts-refresh', onRefreshCounts);
     };
   }, []);
 
