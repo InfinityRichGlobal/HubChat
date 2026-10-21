@@ -604,34 +604,44 @@ export default function InboxClient({
     <div className={cn('flex h-full w-full gap-3 bg-muted/20', (active || activeId) ? 'p-0 md:p-3' : 'p-2 md:p-3')}>
       {/* ---------------- ลิสต์แชท ---------------- */}
       <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
-        <div className="flex flex-col gap-2 px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-baseline gap-2 min-w-0">
-              <h1 className="text-base font-semibold tracking-tight shrink-0">กล่องข้อความ</h1>
-              <p className="truncate text-[11px] text-muted-foreground">ทุกบทสนทนา ดูแลต่อได้ในที่เดียว</p>
+        <div className="flex flex-col gap-1.5 px-2.5 py-2">
+          {/* บรรทัดที่ 1: ชื่อหน้า + ช่องค้นหา + ปุ่มรีเฟรช อยู่บรรทัดเดียวกัน */}
+          <div className="flex items-center gap-2">
+            <h1 className="text-sm font-semibold tracking-tight shrink-0">กล่องข้อความ</h1>
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="ชื่อ เบอร์ ออเดอร์ หรือเลขพัสดุ"
+                aria-label="ค้นหาบทสนทนา"
+                className="h-7.5 rounded-full bg-muted/40 pl-7 pr-7 text-xs"
+              />
+              {search && (
+                <button
+                  type="button"
+                  aria-label="ล้างคำค้นหา"
+                  onClick={() => setSearch('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
             </div>
-            <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="อัปเดตรายการแชท" onClick={() => void loadList()}><RefreshCw className="size-3.5" /></Button>
-          </div>
-          {/* ช่องค้นหาเดสก์ท็อป */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ชื่อ เบอร์ ออเดอร์ หรือเลขพัสดุ"
-              aria-label="ค้นหาบทสนทนา"
-              className="h-8 rounded-lg bg-muted/40 pl-8 pr-8 text-xs sm:text-sm"
-            />
-            {search && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-3.5" /></button>}
-          </div>
-          <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted/60 p-0.5" role="group" aria-label="กลุ่มบทสนทนา">
-            {([{ value: 'all', label: 'ทั้งหมด' }, { value: 'unread', label: 'ยังไม่อ่าน' }, { value: 'follow_up', label: 'ติดตาม' }, { value: 'done', label: 'เรียบร้อย' }] as const).map((tab) => (
-              <button key={tab.value} type="button" aria-pressed={inboxGroup === tab.value} onClick={() => setInboxGroup(tab.value)} className={cn('min-h-7.5 rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary', inboxGroup === tab.value ? 'bg-background text-primary shadow-xs' : 'text-muted-foreground hover:text-foreground')}>{tab.label}</button>
-            ))}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0"
+              aria-label="อัปเดตรายการแชท"
+              onClick={() => void loadList()}
+            >
+              <RefreshCw className="size-3.5" />
+            </Button>
           </div>
 
+          {/* บรรทัดที่ 2: แท็บสถานะ + ปุ่มตัวกรองทั้งหมด รวมอยู่บรรทัดเดียวกัน */}
           <div
-            className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none touch-pan-x select-none md:flex-wrap"
+            className="flex items-center gap-1 overflow-x-auto scrollbar-none touch-pan-x select-none"
             onTouchStart={handleFilterTouchStart}
             onTouchMove={handleFilterTouchMove}
             onTouchEnd={handleFilterTouchEnd}
@@ -642,14 +652,43 @@ export default function InboxClient({
               }
             }}
           >
+            <div
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-muted/60 p-0.5"
+              role="group"
+              aria-label="กลุ่มบทสนทนา"
+            >
+              {(
+                [
+                  { value: 'all', label: 'ทั้งหมด' },
+                  { value: 'unread', label: 'ยังไม่อ่าน' },
+                  { value: 'follow_up', label: 'ติดตาม' },
+                  { value: 'done', label: 'เรียบร้อย' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  aria-pressed={inboxGroup === tab.value}
+                  onClick={() => setInboxGroup(tab.value)}
+                  className={cn(
+                    'h-6.5 rounded-full px-2 text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-primary',
+                    inboxGroup === tab.value
+                      ? 'bg-background text-primary shadow-xs font-semibold'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
             {/* 1. ปุ่มตัวกรองหลัก */}
             <Button
               variant={filterCount > 0 ? 'secondary' : 'outline'}
               size="sm"
-              className="h-8 rounded-full px-3 text-xs shrink-0 whitespace-nowrap"
+              className="h-7 rounded-full px-2.5 text-[11px] shrink-0 whitespace-nowrap"
               onClick={() => setFiltersOpen(true)}
             >
-              <SlidersHorizontal className="size-3.5" />
+              <SlidersHorizontal className="size-3" />
               ตัวกรอง
               {filterCount > 0 && (
                 <span className="rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">

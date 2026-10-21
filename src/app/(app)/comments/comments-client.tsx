@@ -396,20 +396,31 @@ export default function CommentsClient({
         className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-xs"
         aria-label="รายการคอมเมนต์"
       >
-        {/* ส่วนควบคุมด้านบนแบบกระชับ */}
-        <div className="flex flex-col gap-2 px-3 py-2.5">
-          {/* แถวที่ 1: ชื่อหน้า + ปุ่มเครื่องมือขนาดกะทัดรัดในบรรทัดเดียว */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-baseline gap-2 min-w-0">
-              <h1 className="text-base font-semibold tracking-tight shrink-0">คอมเมนต์</h1>
-              {totalAlerts > 0 ? (
-                <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive shrink-0">
-                  แจ้งเตือน {totalAlerts}
-                </span>
-              ) : (
-                <p className="truncate text-[11px] text-muted-foreground">
-                  คลิกเปิดอ่านเพื่อเคลียร์แจ้งเตือน
-                </p>
+        {/* ส่วนควบคุมด้านบนแบบกระชับ 2 บรรทัด (เหมือนหน้า กล่องข้อความ) */}
+        <div className="flex flex-col gap-1.5 px-2.5 py-2">
+          {/* บรรทัดที่ 1: ชื่อหน้า + ช่องค้นหา + ปุ่มวิธีทำงาน/ซิงก์/รีเฟรช อยู่บรรทัดเดียวกัน */}
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-sm font-semibold tracking-tight shrink-0">คอมเมนต์</h1>
+
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                aria-label="ค้นหาคอมเมนต์"
+                maxLength={200}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="ค้นหาชื่อ หรือข้อความ…"
+                className="h-7.5 w-full rounded-full border bg-muted/40 pl-7 pr-7 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+              />
+              {search && (
+                <button
+                  type="button"
+                  aria-label="ล้างคำค้นหา"
+                  onClick={() => setSearch('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted"
+                >
+                  <X className="size-3.5" />
+                </button>
               )}
             </div>
 
@@ -417,7 +428,7 @@ export default function CommentsClient({
               <button
                 type="button"
                 onClick={openGuideDialog}
-                className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted transition"
+                className="inline-flex h-7 items-center gap-1 rounded-full border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted transition"
                 title="ดูวิธีการทำงานของระบบคอมเมนต์"
                 {...({
                   commandfor: 'comment-how-it-works-dialog',
@@ -432,11 +443,11 @@ export default function CommentsClient({
                 type="button"
                 disabled={syncing}
                 onClick={() => void syncFromMeta()}
-                className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50 transition"
+                className="inline-flex h-7 items-center gap-1 rounded-full border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50 transition"
                 title="ดึงคอมเมนต์เก่าจากเพจ Facebook / IG"
               >
                 <RefreshCw className={cn('size-3', syncing && 'animate-spin')} />
-                <span>{syncing ? 'ดึง…' : 'ดึงจากเพจ'}</span>
+                <span>{syncing ? 'ดึง…' : 'ซิงก์เพจ'}</span>
               </button>
 
               <Button
@@ -452,74 +463,49 @@ export default function CommentsClient({
             </div>
           </div>
 
-          {/* แถวที่ 2: ช่องค้นหาทรงเดียวกับ Inbox */}
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              aria-label="ค้นหาคอมเมนต์"
-              maxLength={200}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ค้นหาชื่อลูกค้า หรือข้อความในคอมเมนต์…"
-              className="h-8 w-full rounded-lg border bg-muted/40 pl-8 pr-8 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            {search && (
-              <button
-                type="button"
-                aria-label="ล้างคำค้นหา"
-                onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* แถวที่ 3: แท็บ 4 ช่องทรงเดียวกับหน้า กล่องข้อความ (Inbox) */}
-          <div
-            className="grid grid-cols-4 gap-1 rounded-lg bg-muted/60 p-0.5"
-            role="group"
-            aria-label="กรองสถานะ"
-          >
-            {(
-              [
-                { value: 'all', label: 'ทั้งหมด' },
-                { value: 'pending', label: 'ยังไม่อ่าน', count: feed.unhandled_count },
-                { value: 'review', label: 'ส่งไม่สำเร็จ', count: feed.review_count },
-                { value: 'handled', label: 'อ่านแล้ว' },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.value}
-                type="button"
-                aria-pressed={status === tab.value}
-                onClick={() => setStatus(tab.value)}
-                className={cn(
-                  'flex min-h-7.5 items-center justify-center gap-1 rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary',
-                  status === tab.value
-                    ? 'bg-background text-primary shadow-xs font-semibold'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                <span className="truncate">{tab.label}</span>
-                {'count' in tab && tab.count !== undefined && tab.count > 0 && (
-                  <span
-                    className={cn(
-                      'rounded-full px-1.5 text-[10px] font-bold tabular-nums',
-                      tab.value === 'review'
-                        ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
-                        : 'bg-primary/15 text-primary',
-                    )}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* แถวที่ 4: แถบชิปแนวนอน (เลือกเพจ · สถานะบอท · ตั้งค่าบอท · ลบแล้ว · เคลียร์แจ้งเตือน) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+          {/* บรรทัดที่ 2: แท็บสถานะ + ตัวเลือกเพจ + สถานะบอท/ตั้งค่าบอท รวมอยู่บรรทัดเดียวกัน */}
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+            <div
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-muted/60 p-0.5"
+              role="group"
+              aria-label="กรองสถานะ"
+            >
+              {(
+                [
+                  { value: 'all', label: 'ทั้งหมด' },
+                  { value: 'pending', label: 'ยังไม่อ่าน', count: feed.unhandled_count },
+                  { value: 'review', label: 'ต้องตรวจ', count: feed.review_count },
+                  { value: 'handled', label: 'อ่านแล้ว' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  aria-pressed={status === tab.value}
+                  onClick={() => setStatus(tab.value)}
+                  className={cn(
+                    'inline-flex h-6.5 items-center gap-1 rounded-full px-2 text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-primary',
+                    status === tab.value
+                      ? 'bg-background text-primary shadow-xs font-semibold'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <span>{tab.label}</span>
+                  {'count' in tab && tab.count !== undefined && tab.count > 0 && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1 text-[10px] font-bold tabular-nums',
+                        tab.value === 'review'
+                          ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                          : 'bg-primary/15 text-primary',
+                      )}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
             {/* ตัวเลือกเพจแบบ Pill กระชับ */}
             <select
               aria-label="เลือกเพจ"
