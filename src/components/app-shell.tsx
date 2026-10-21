@@ -95,48 +95,31 @@ export default function AppShell({
     return () => window.removeEventListener('hubchat:1on1-chat', handler);
   }, []);
 
-  // แก้บั๊ก iOS PWA (standalone + viewport-fit=cover): ตอนเปิดแอปครั้งแรก 100dvh คำนวณสั้นเกิน
-  // ทำให้มีพื้นที่ว่างใต้แถบเมนูล่างจนกว่าจะแตะ/เลื่อนจอ — วัดความสูงจริงจาก window.innerHeight
-  // แล้วตั้งเป็นตัวแปร --app-height ซ้ำหลายจังหวะหลังโหลด และทุกครั้งที่จอเปลี่ยนขนาด/กลับเข้าแอป
+  // แก้บั๊ก iOS PWA (standalone + viewport-fit=cover): ตอนเปิดแอป iOS วาดพื้นที่แอปสั้นกว่าจอจริง
+  // เหลือช่องว่างใต้เมนูล่าง จนกว่าผู้ใช้จะขยับจอ (iOS ถึงคำนวณพื้นที่ใหม่)
+  // วิธีแก้: จำลอง "ขยับจอ" ให้อัตโนมัติ — เลื่อนหน้าลง 1px แล้วกลับ หลังโหลด/กลับเข้าแอป/หมุนจอ
   useEffect(() => {
-    const root = document.documentElement;
-    const isStandalone = () =>
-      window.matchMedia('(display-mode: standalone)').matches
-      || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    const sync = () => {
-      // เฉพาะตอนเปิดเป็นแอปจากหน้าจอโฮม: iOS รายงาน innerHeight/100dvh สั้นกว่าจอจริง
-      // (และค้างค่าผิดไม่อัปเดต) จึงใช้ความสูงหน้าจอจริงของเครื่องแทน
-      // ส่วนการเปิดผ่านเบราว์เซอร์ปกติ ปล่อยให้ 100dvh ทำงานตามเดิม
-      if (!isStandalone()) {
-        root.style.removeProperty('--app-height');
-        return;
-      }
-      const portrait = window.innerHeight >= window.innerWidth;
-      const screenH = portrait
-        ? Math.max(window.screen.height, window.screen.width)
-        : Math.min(window.screen.height, window.screen.width);
-      // ใช้ค่าหน้าจอเฉพาะเมื่อแอปกินเต็มความกว้างจอ (iPhone) — iPad แบ่งจอให้ใช้ innerHeight
-      const screenW = portrait
-        ? Math.min(window.screen.height, window.screen.width)
-        : Math.max(window.screen.height, window.screen.width);
-      const fullWidth = Math.abs(window.innerWidth - screenW) <= 2;
-      const h = fullWidth ? Math.max(window.innerHeight, screenH) : window.innerHeight;
-      if (h > 0) root.style.setProperty('--app-height', `${h}px`);
+    const kick = () => {
+      if (window.innerWidth >= 768) return;
+      const body = document.body;
+      const prevMinHeight = body.style.minHeight;
+      body.style.minHeight = 'calc(100% + 2px)';
+      window.scrollTo(0, 1);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+        body.style.minHeight = prevMinHeight;
+      });
     };
-    sync();
-    const raf = requestAnimationFrame(sync);
-    const timers = [100, 300, 800, 1500].map((ms) => setTimeout(sync, ms));
-    const onVisible = () => { if (!document.hidden) { sync(); setTimeout(sync, 300); } };
-    window.addEventListener('resize', sync);
-    window.addEventListener('orientationchange', sync);
-    window.addEventListener('pageshow', sync);
+    const timers = [50, 400, 1200].map((ms) => setTimeout(kick, ms));
+    const onVisible = () => { if (!document.hidden) setTimeout(kick, 100); };
+    const onResize = () => setTimeout(kick, 100);
+    window.addEventListener('pageshow', kick);
+    window.addEventListener('orientationchange', onResize);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      cancelAnimationFrame(raf);
       timers.forEach(clearTimeout);
-      window.removeEventListener('resize', sync);
-      window.removeEventListener('orientationchange', sync);
-      window.removeEventListener('pageshow', sync);
+      window.removeEventListener('pageshow', kick);
+      window.removeEventListener('orientationchange', onResize);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
@@ -240,7 +223,7 @@ export default function AppShell({
   const show1on1Mobile = isInbox && is1on1Chat;
 
   return (
-    <div className="fixed inset-x-0 top-0 flex h-[var(--app-height,100dvh)] w-full flex-col overflow-hidden md:flex-row bg-background">
+    <div className="flex h-dvh w-full flex-col overflow-hidden md:flex-row bg-background">
       <Suspense fallback={null}>
         <ChatParamTracker onChange={setIs1on1Chat} />
       </Suspense>
