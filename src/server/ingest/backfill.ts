@@ -236,6 +236,19 @@ export async function backfillPageConversations(
           .update({ name: customer.name, profile_synced_at: new Date().toISOString() })
           .eq('page_id', page.id)
           .eq('psid', customer.id);
+      } else if (customer.username) {
+        const cleanUsername = customer.username.replace(/^@/, '');
+        await db()
+          .from('customers')
+          .update({ username: cleanUsername })
+          .eq('page_id', page.id)
+          .eq('psid', customer.id);
+        await db()
+          .from('customers')
+          .update({ name: cleanUsername, profile_synced_at: new Date().toISOString() })
+          .eq('page_id', page.id)
+          .eq('psid', customer.id)
+          .is('name', null);
       }
 
       /**

@@ -27,6 +27,15 @@ describe('แปลข้อผิดพลาดของ Meta ตอนซิ�
     }
   });
 
+  it('298 = ใช้ System User Token แทน Page Access Token → บอกให้ใช้ Page Access Token', () => {
+    expect(explainSyncError(298, '-')).toContain('Page Access Token');
+  });
+
+  it('-2 = ติดจำกัด Standard Access ของ Instagram → อธิบายเรื่อง Advanced Access', () => {
+    expect(explainSyncError(-2, '-')).toContain('instagram_manage_messages');
+    expect(explainSyncError(-2, '-')).toContain('Advanced Access');
+  });
+
   it('รหัสที่ไม่รู้จัก ต้องคืนข้อความเดิมของ Meta ไม่ใช่กลบด้วยคำกลาง ๆ', () => {
     expect(explainSyncError(99999, 'ข้อความจริงจาก Meta')).toBe('ข้อความจริงจาก Meta');
     expect(explainSyncError(null, 'ข้อความจริงจาก Meta')).toBe('ข้อความจริงจาก Meta');

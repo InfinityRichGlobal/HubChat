@@ -60,18 +60,27 @@ export async function fetchConversationsPage(
     `messages.limit(${opts.messagesPerConversation})` +
     `{id,created_time,from,message,attachments}`;
 
+  const isIg = page.platform === 'instagram';
   const params: Record<string, string> = {
     fields,
-    limit: String(opts.conversationsPerPage),
+    // สำหรับ Instagram: ใช้ limit=1 ต่อหน้าเพื่อไม่ให้ชน timeout 10 วินาทีของ Graph API
+    // เมื่อสแกนเจอห้องของลูกค้าทั่วไปที่ยังไม่ได้รับสิทธิ์ Advanced Access (error -2 / subcode 2534084)
+    limit: String(isIg ? 1 : opts.conversationsPerPage),
     // Instagram ต้องระบุ platform ชัดเจน ไม่งั้นจะได้ของ Messenger
-    ...(page.platform === 'instagram' ? { platform: 'instagram' } : {}),
+    ...(isIg ? { platform: 'instagram' } : {}),
     ...(opts.after ? { after: opts.after } : {}),
   };
 
-  const result = await metaGet(page, `${page.page_id}/conversations`, params);
+  // สำหรับ Instagram บน Graph API v26.0 ต้องเรียกผ่าน me/conversations (ด้วย Page Access Token ของเพจที่ผูกไว้)
+  // เพราะการเรียก /{ig_business_id}/conversations จะค้างจน timeout และคืนรายการว่าง
+  const endpoint = isIg ? 'me/conversations' : `${page.page_id}/conversations`;
+  const result = await metaGet(page, endpoint, params);
 
   if (!result.ok) {
-    return { ok: false, error_th: explainSyncError(result.error.code, result.error.message_th) };
+    return {
+      ok: false,
+      error_th: explainSyncError(result.error.code, result.error.message_th, result.error.kind, isIg),
+    };
   }
 
   const body = result.data as {
@@ -91,7 +100,12 @@ export async function fetchConversationsPage(
  * แปลข้อผิดพลาดของ Meta เป็นคำแนะนำที่ทำตามได้
  * 🔴 บทเรียนจาก D-31 : ข้อความกลาง ๆ ทำให้ไล่ปัญหาต่อไม่ได้เลย
  */
-export function explainSyncError(code: number | null, fallback: string): string {
+export function explainSyncError(
+  code: number | null,
+  fallback: string,
+  kind?: string,
+  isInstagram?: boolean,
+): string {
   if (code === 190) {
     return 'token ของเพจหมดอายุหรือถูกเพิกถอน — สร้าง token ใหม่ในหน้าตั้งค่าเพจ';
   }
@@ -104,6 +118,15 @@ export function explainSyncError(code: number | null, fallback: string): string 
   }
   if (code === 4 || code === 17 || code === 32 || code === 613) {
     return 'เรียก Meta ถี่เกินโควตาชั่วโมงนี้ — รอสัก 15-30 นาทีแล้วกดซิงก์ใหม่ (ของที่ดึงมาแล้วไม่หาย)';
+  }
+  if (code === 298) {
+    return 'token ที่ใช้ไม่ใช่ Page Access Token ของเพจ Facebook ที่ผูกกับ Instagram — กรุณาใช้ Page Access Token ของเพจแทน System User Token';
+  }
+  if (code === -2 || (isInstagram && kind === 'ambiguous')) {
+    return (
+      'ดึงแชทของบัญชีที่มีบทบาทในแอป/ผู้ทดสอบครบแล้ว — ' +
+      'สำหรับแชทของลูกค้าทั่วไปบน Instagram จะดึงและรับ Webhook ได้อัตโนมัติเมื่อ Meta อนุมัติสิทธิ์ instagram_manage_messages เป็น Advanced Access'
+    );
   }
   return fallback;
 }
