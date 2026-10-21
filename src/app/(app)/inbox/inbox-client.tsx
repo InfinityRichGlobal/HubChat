@@ -604,26 +604,29 @@ export default function InboxClient({
     <div className={cn('flex h-full w-full gap-3 bg-muted/20', (active || activeId) ? 'p-0 md:p-3' : 'p-2 md:p-3')}>
       {/* ---------------- ลิสต์แชท ---------------- */}
       <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm md:max-w-sm', (active || activeId) && 'hidden md:flex')}>
-        <div className="flex flex-col gap-3 p-3">
-          <div className="flex items-center justify-between">
-            <div><h1 className="text-xl font-semibold tracking-tight">กล่องข้อความ</h1><p className="mt-0.5 text-xs text-muted-foreground">ทุกบทสนทนา ดูแลต่อได้ในที่เดียว</p></div>
-            <Button variant="ghost" size="icon" aria-label="อัปเดตรายการแชท" onClick={() => void loadList()}><RefreshCw className="size-4" /></Button>
+        <div className="flex flex-col gap-2 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <h1 className="text-base font-semibold tracking-tight shrink-0">กล่องข้อความ</h1>
+              <p className="truncate text-[11px] text-muted-foreground">ทุกบทสนทนา ดูแลต่อได้ในที่เดียว</p>
+            </div>
+            <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="อัปเดตรายการแชท" onClick={() => void loadList()}><RefreshCw className="size-3.5" /></Button>
           </div>
           {/* ช่องค้นหาเดสก์ท็อป */}
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="ชื่อ เบอร์ ออเดอร์ หรือเลขพัสดุ"
               aria-label="ค้นหาบทสนทนา"
-              className="rounded-xl bg-muted/40 pl-8 pr-9"
+              className="h-8 rounded-lg bg-muted/40 pl-8 pr-8 text-xs sm:text-sm"
             />
-            {search && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button>}
+            {search && <button type="button" aria-label="ล้างคำค้นหา" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-3.5" /></button>}
           </div>
-          <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted/60 p-1" role="group" aria-label="กลุ่มบทสนทนา">
+          <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted/60 p-0.5" role="group" aria-label="กลุ่มบทสนทนา">
             {([{ value: 'all', label: 'ทั้งหมด' }, { value: 'unread', label: 'ยังไม่อ่าน' }, { value: 'follow_up', label: 'ติดตาม' }, { value: 'done', label: 'เรียบร้อย' }] as const).map((tab) => (
-              <button key={tab.value} type="button" aria-pressed={inboxGroup === tab.value} onClick={() => setInboxGroup(tab.value)} className={cn('min-h-9 rounded-lg px-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary', inboxGroup === tab.value ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{tab.label}</button>
+              <button key={tab.value} type="button" aria-pressed={inboxGroup === tab.value} onClick={() => setInboxGroup(tab.value)} className={cn('min-h-7.5 rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary', inboxGroup === tab.value ? 'bg-background text-primary shadow-xs' : 'text-muted-foreground hover:text-foreground')}>{tab.label}</button>
             ))}
           </div>
 
