@@ -12,6 +12,18 @@
 - หน้าเชื่อมเพจใช้ Page/Instagram ID และ token ที่แอดมินตั้งค่าฝั่งเซิร์ฟเวอร์ อย่าอ้างในคลิปว่ามีปุ่ม Facebook Login สำหรับ onboarding หากยังไม่มี
 - ผลทดสอบจำลองและ webhook ตัวอย่างไม่แทนคลิปข้อความ/คอมเมนต์จากบัญชีทดสอบจริง
 
+### บันทึกแบบร่างใน Meta วันที่ 21 ตุลาคม (รอบกรอกข้อมูล)
+
+- บันทึกคำแนะนำทดสอบเว็บและ URL `/login` แล้ว ระบุชัดว่า staff ใช้บัญชี HubChat ไม่ใช่ Facebook Login; ยังไม่ได้ส่ง credential ให้ Meta
+- เจ้าของยืนยันว่าไม่เคยให้ข้อมูลผู้ใช้แก่หน่วยงานรัฐตามคำขอด้านความมั่นคงแห่งชาติใน 12 เดือนที่ผ่านมา จึงเลือก “ไม่ได้ให้”; เจ้าของแจ้งว่าไม่เคยจัดทำขั้นตอนดังกล่าว จึงเลือก “ไม่ใช่ทุกข้อที่กล่าวมา” ไม่อ้างว่ามีนโยบายเฉพาะที่ใช้งานอยู่
+- บันทึกคำอธิบายการใช้งานจริง 10 รายการ: `pages_messaging`, `instagram_manage_comments`, `pages_read_user_content`, `pages_manage_engagement`, `pages_manage_metadata`, `instagram_manage_messages`, `pages_read_engagement`, `instagram_basic`, Business Asset User Profile Access และ `pages_show_list`
+- Messenger เลือกเพจ Blisse Thailand และใส่ขั้นตอนทดสอบรับข้อความ → Inbox → ตอบหนึ่งครั้ง → ตรวจฝั่ง Messenger; เปิดแบบฟอร์มซ้ำยืนยันข้อความและเพจยังอยู่
+- Meta แสดง API test completed สำหรับ `pages_messaging`, `instagram_manage_comments`, `pages_read_user_content`, `pages_manage_engagement`, `pages_manage_metadata`, `pages_read_engagement`, `instagram_basic` ที่เปิดตรวจ ข้อนี้ไม่ใช่ผลผ่าน App Review หรือหลักฐาน end-to-end จากลูกค้าทั่วไป
+- พบ dependency ในแบบฟอร์มจริง: `pages_show_list` จำเป็นร่วมกับสิทธิ์อ่าน/จัดการคอมเมนต์ อ่านโพสต์ และสมัคร webhook จึงคงไว้และอธิบายตรง ๆ ว่าแอปยังไม่มี `/me/accounts` onboarding
+- ยังไม่ได้ติ๊กข้อตกลงการใช้งานรายสิทธิ์ อัปโหลดคลิป หรือกดส่งคำขอ; การกดบันทึกคำอธิบายทำได้โดยไม่ต้องรับรองว่าหลักฐานครบ
+- ตรวจสินทรัพย์ใน HubChat พบเพียง Blisse Thailand สองช่องทาง (Facebook 35 บทสนทนา/74 คอมเมนต์, Instagram 2 บทสนทนา/1 คอมเมนต์ ณ เวลาตรวจ) จึงยังไม่มีสินทรัพย์ทดสอบแยกที่ยืนยันว่าปลอดข้อมูลลูกค้าจริง การเลือกเพจในฟอร์ม Messenger ไม่ใช่การเปิดประวัติ HubChat ให้ผู้ตรวจ
+- แบบจัดการข้อมูลยังต้องระบุผู้ประมวลผลพร้อมประเทศที่ประมวลผลจริง ไม่ใช้ประเทศสำนักงานใหญ่แทนประเทศประมวลผล และไม่เดาประเทศจากชื่อผู้ให้บริการ
+
 ## รายการคำขอปัจจุบันที่พบใน Meta
 
 หน้าร่างคำขอวันที่ 20 ต.ค. มี 20 รายการ:
@@ -47,7 +59,7 @@
 
 - `instagram_business_*`: เป็นชุดชื่อสิทธิ์อีกเส้นทางหนึ่ง ร่างปัจจุบันปนกับ `instagram_*`; โค้ดที่ตรวจใช้ Graph client กับบัญชีที่เชื่อมเพจ ไม่พบ onboarding ผ่าน Instagram Login จึงไม่ควรอ้างว่าใช้ทั้งสองเส้นทางโดยไม่มีหลักฐาน
 - `instagram_business_content_publish`, `instagram_business_manage_insights`: ไม่พบ flow เผยแพร่โพสต์หรืออ่าน Instagram Insights สำหรับสาธิต Dashboard ของ HubChat ใช้ข้อมูลภายใน ไม่ใช่หลักฐานการใช้ Instagram Insights
-- `pages_show_list`, `public_profile`: ไม่พบ flow OAuth แสดงรายชื่อเพจจาก `/me/accounts` ใน UI ปัจจุบัน การมีรายการเพจในฐานข้อมูลไม่ใช่หลักฐานการใช้สิทธิ์นี้
+- `public_profile`: ไม่พบ flow OAuth ใน UI ปัจจุบัน; ส่วน `pages_show_list` เป็น dependency ที่ Meta ระบุในแบบฟอร์ม ต้องคงไว้ระหว่างตรวจความจำเป็น ไม่อ้างว่ารายการเพจจากฐานข้อมูลเป็นการเรียก `/me/accounts`
 - `pages_utility_messaging`: ต้องมีเทมเพลตจริงที่อนุมัติและเส้นทางส่งที่เปิดใช้งาน ไม่ใช้ตัวอย่าง STANDARD message แทน
 - Human Agent: ใช้เฉพาะมนุษย์ตอบตามเงื่อนไขที่อนุมัติ ต้องมีหลักฐานการใช้งานจริงก่อนเปิด ไม่ใช้เพื่อบอทหรือขยายเวลาขายอัตโนมัติ
 
