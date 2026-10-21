@@ -95,6 +95,33 @@ export default function AppShell({
     return () => window.removeEventListener('hubchat:1on1-chat', handler);
   }, []);
 
+  // แก้บั๊ก iOS PWA (standalone + viewport-fit=cover): ตอนเปิดแอปครั้งแรก 100dvh คำนวณสั้นเกิน
+  // ทำให้มีพื้นที่ว่างใต้แถบเมนูล่างจนกว่าจะแตะ/เลื่อนจอ — วัดความสูงจริงจาก window.innerHeight
+  // แล้วตั้งเป็นตัวแปร --app-height ซ้ำหลายจังหวะหลังโหลด และทุกครั้งที่จอเปลี่ยนขนาด/กลับเข้าแอป
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => {
+      const h = window.innerHeight;
+      if (h > 0) root.style.setProperty('--app-height', `${h}px`);
+    };
+    sync();
+    const raf = requestAnimationFrame(sync);
+    const timers = [100, 300, 800, 1500].map((ms) => setTimeout(sync, ms));
+    const onVisible = () => { if (!document.hidden) { sync(); setTimeout(sync, 300); } };
+    window.addEventListener('resize', sync);
+    window.addEventListener('orientationchange', sync);
+    window.addEventListener('pageshow', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelAnimationFrame(raf);
+      timers.forEach(clearTimeout);
+      window.removeEventListener('resize', sync);
+      window.removeEventListener('orientationchange', sync);
+      window.removeEventListener('pageshow', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
   const savePrimaryHrefs = (hrefs: string[]) => {
     try {
       setPrimaryHrefs(hrefs);
@@ -194,7 +221,7 @@ export default function AppShell({
   const show1on1Mobile = isInbox && is1on1Chat;
 
   return (
-    <div className="flex h-dvh w-full flex-col overflow-hidden md:flex-row bg-background">
+    <div className="fixed inset-x-0 top-0 flex h-[var(--app-height,100dvh)] w-full flex-col overflow-hidden md:flex-row bg-background">
       <Suspense fallback={null}>
         <ChatParamTracker onChange={setIs1on1Chat} />
       </Suspense>

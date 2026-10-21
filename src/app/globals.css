@@ -102,6 +102,9 @@
   html {
     /* กันหน้าเว็บซูมเองตอนแตะช่องพิมพ์บน iOS */
     -webkit-text-size-adjust: 100%;
+    /* ให้พื้นหลังเต็มจอถึงขอบล่าง (ใต้ Home Indicator) และไม่เด้งยืดทั้งหน้า */
+    background-color: var(--background);
+    overscroll-behavior: none;
   }
   body {
     background-color: var(--background);
