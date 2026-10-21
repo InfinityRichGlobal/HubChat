@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { KeyRound, Loader2, ShieldAlert } from 'lucide-react';
+import { KeyRound, Loader2, LogOut, ShieldAlert } from 'lucide-react';
+import { clearInboxDrafts } from '@/lib/inbox/use-inbox-drafts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,7 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 
 /** ฟอร์มตั้งรหัสผ่านใหม่ */
-export default function ChangePasswordForm({ forced, name }: { forced: boolean; name: string }) {
+export default function ChangePasswordForm({ forced, name, adminId }: { forced: boolean; name: string; adminId: string }) {
   const router = useRouter();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -113,6 +114,19 @@ export default function ChangePasswordForm({ forced, name }: { forced: boolean; 
             เปลี่ยนแล้วระบบจะออกจากระบบทุกอุปกรณ์อื่นโดยอัตโนมัติ
           </p>
         </form>
+        <div className="mt-4 flex flex-col gap-2 border-t pt-4">
+          {forced && (
+            <p className="text-center text-xs text-muted-foreground">
+              ลืมหรือทำรหัสชั่วคราวหาย? ออกจากบัญชีนี้ แล้วให้เจ้าของร้านตั้งรหัสชั่วคราวใหม่
+            </p>
+          )}
+          <Button asChild variant="outline" className="w-full">
+            <a href="/api/auth/logout" onClick={() => clearInboxDrafts(adminId)}>
+              <LogOut />
+              ออกจากระบบ / ใช้บัญชีอื่น
+            </a>
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

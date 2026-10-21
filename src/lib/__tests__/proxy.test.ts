@@ -6,6 +6,16 @@ const secret='test-session-secret-for-proxy-only-123456';
 beforeEach(()=>{process.env.SESSION_SECRET=secret;});
 async function ticket() { return signSession({sub:'test',sv:1,role:'owner',mcp:true},secret,1); }
 describe('proxy public access and session recovery',()=>{
+  it('lets a password-reset session log out while still blocking protected pages',async()=>{
+    const cookie = `${SESSION_COOKIE}=${await ticket()}`;
+    for (const method of ['GET', 'POST']) {
+      const res = await proxy(new NextRequest('https://app.test/api/auth/logout', { method, headers: { cookie, origin: 'https://app.test' } }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('location')).toBeNull();
+    }
+    const protectedPage = await proxy(new NextRequest('https://app.test/inbox', { headers: { cookie } }));
+    expect(protectedPage.headers.get('location')).toBe('https://app.test/change-password');
+  });
   it('allows public compliance and offline pages even with a password-reset ticket',async()=>{
     for(const path of ['/privacy','terms','/offline.html','/api/compliance/data-deletion-status?code=test','/api/webhooks/meta/data-deletion']) {
       const res=await proxy(new NextRequest(new URL(path,'https://app.test'),{headers:{cookie:`${SESSION_COOKIE}=${await ticket()}`}}));

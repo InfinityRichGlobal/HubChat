@@ -14,7 +14,7 @@ export default async function ChangePasswordPage() {
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-muted/30 px-4 py-10">
-      <ChangePasswordForm forced={result.admin.must_change_password} name={result.admin.name} />
+      <ChangePasswordForm forced={result.admin.must_change_password} name={result.admin.name} adminId={result.admin.id} />
     </main>
   );
 }
