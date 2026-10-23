@@ -70,7 +70,10 @@ export async function sendInstagramPrivateReply(
   }
 
   // แปลผล error เฉพาะของ Instagram private reply
-  let errorMsg = explainCommentError(result.error.code, result.error.message_th, 'instagram');
+  let errorMsg = explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message);
+  if (result.error.code === 200) {
+    errorMsg = 'Instagram ไม่อนุญาตให้ทักส่วนตัวจากคอมเมนต์นี้ — ตรวจสิทธิ์ส่งข้อความของแอพและการอนุญาตเข้าถึงข้อความในบัญชี Instagram (รหัส 200)';
+  }
   if (result.error.code === 100 || result.error.code === 10) {
     errorMsg = 'Meta ไม่อนุญาตให้ทักส่วนตัวจากคอมเมนต์นี้ (อาจเกิน 7 วัน หรือผู้ใช้ปิดรับข้อความ)';
   }
