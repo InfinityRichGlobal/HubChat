@@ -8,7 +8,7 @@ import 'server-only';
  *    - มี Platform Capability Matrix ชัดเจน
  *    - กฎสถาปัตยกรรม: การยิง HTTP ทั้งหมดอยู่ภายใต้ server/meta เท่านั้น
  */
-import { MetaNotConfiguredError, type MetaPage } from './client';
+import { metaGet, MetaNotConfiguredError, type MetaPage } from './client';
 import {
   type CommentActionResult,
   type WebhookSubscribeResult,
@@ -163,4 +163,10 @@ export async function fetchPageRecentComments(
     return fetchInstagramRecentComments(page, limit);
   }
   return fetchFacebookRecentComments(page, limit);
+}
+
+/** Read-only: resolve the actual Instagram media permalink, never invent a shortcode. */
+export async function getCommentPostPermalink(page: MetaPage, mediaId: string): Promise<string | null> {
+  const media = await metaGet(page, mediaId, { fields: 'permalink' });
+  return media.ok && typeof media.data.permalink === 'string' ? media.data.permalink : null;
 }

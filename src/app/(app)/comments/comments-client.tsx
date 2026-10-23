@@ -9,7 +9,6 @@ import {
   CheckCheck,
   ChevronRight,
   Search,
-  ExternalLink,
   Eye,
   EyeOff,
   HelpCircle,
@@ -38,6 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import CustomerAvatar from '@/components/customer-avatar';
+import CommentNavigation from '@/components/comment-navigation';
 import { MediaLibraryPicker, type LibraryItem } from '@/components/media-library-picker';
 import { commentStatus, mergeCommentPage, type CommentStatus } from '@/lib/comment-feed';
 import type { CommentFeed, CommentRow } from '@/server/comments/service';
@@ -1253,15 +1253,10 @@ function CommentCard({
           </div>
         </div>
 
-        {c.post_permalink && (
-          <Button variant="outline" size="sm" asChild className="h-7 gap-1 px-2.5 text-xs">
-            <a href={c.post_permalink} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-3" />
-              โพสต์ต้นทาง
-            </a>
-          </Button>
-        )}
+
       </div>
+
+      <CommentNavigation id={c.id} platform={page?.platform} />
 
       {/* ป้ายสถานะปัจจุบันของคอมเมนต์ */}
       <div className="flex flex-wrap items-center gap-1">
