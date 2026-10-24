@@ -1,24 +1,30 @@
-# HubChat — ระบบรวมแชท FB + IG + LINE สำหรับร้านค้าและทีมแอดมิน
+# HubChat — ระบบรวมแชท Facebook/Instagram สำหรับทีมแอดมิน
 
-ระบบบริหารจัดการแชท ออเดอร์ คลังสื่อ และการตอบกลับลูกค้าอัตโนมัติสำหรับธุรกิจออนไลน์ รองรับทั้ง Facebook Messenger, Instagram Direct และ Line เชื่อมต่อกับ Supabase และใช้งานบน Vercel ได้ทันที พร้อมระบบความปลอดภัยระดับสากลและ Message Policy Engine
+ระบบบริหารแชท คอมเมนต์ ลูกค้า ออเดอร์ คลังสื่อ และการตอบอัตโนมัติ เชื่อม Supabase และ deploy บน Vercel มี Message Policy Engine และกลไกกันส่งซ้ำ
+
+> **สถานะ 24 ต.ค. 2026:** โค้ด `62bb33c` deploy สำเร็จ; App Review ของ HubChat อยู่ระหว่างการตรวจสอบ ยังไม่ยืนยัน IG DM/Private Reply กับลูกค้าทั่วไปครบวงจร และต้องตรวจเส้นทาง DM ปกติเพิ่ม ไม่ใช่ระบบที่รับรอง 100% ทุกช่องทาง
+>
+> อ่าน [สรุปส่งต่อ Antigravity](docs/HANDOFF_ANTIGRAVITY_TH.md) · [สถานะและ log ล่าสุด](docs/WORK_STATUS_TH.md) · [ผลแก้ Instagram](docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md) · [App Review](docs/META_APP_REVIEW_TH.md)
+>
+> LINE messaging ยังไม่ได้เชื่อมต่อจริง การมีไอคอน LINE ไม่ใช่หลักฐานรองรับช่องทางนี้
 
 | ส่วนสำคัญ | รายละเอียดและความพร้อม |
 |---|---|
 | **สแต็กระบบ** | Next.js 16 (App Router) + TypeScript + Tailwind CSS + shadcn/ui |
-| **ฐานข้อมูล** | Supabase PostgreSQL (**37 ตาราง** พร้อม RLS, Functions และ Triggers) |
-| **ที่เก็บไฟล์** | Supabase Storage (`media` bucket แบบ Public CDN รองรับรูป สลิป วิดีโอ 100%) |
+| **ฐานข้อมูล** | Supabase PostgreSQL (check-db ตรวจ **40 ตาราง** พร้อม RLS, Functions และ Triggers) |
+| **ที่เก็บไฟล์** | Supabase Storage (`media` bucket แบบ Public CDN สำหรับรูป สลิป และวิดีโอ) |
 | **การส่งข้อความ** | Message Policy Engine + Idempotency ป้องกันส่งซ้ำ + รองรับ Meta Graph API ล่าสุด |
 | **ซิงก์ชื่อลูกค้า** | ดึงชื่อและโปรไฟล์จริงจาก Meta อัตโนมัติ (แก้ไขปัญหา 'ลูกค้า xxxxxx') |
 | **ระบบโปรไฟล์ & โลโก้** | ระบบตัดรูป 1:1 อัตโนมัติ รองรับโลโก้เว็บ และรูปโปรไฟล์แอดมินแสดงในแถบเมนูและแชท |
 | **คลังสื่อ & หมวดหมู่** | Media Library แยกแฟ้ม (โปรโมชั่น, สินค้า, รีวิว/สลิป, ทั่วไป), พรีวิว Lightbox, คัดลอกลิงก์, ลบไฟล์ |
 | **ตัวกรองแชท** | กรองตามจำนวนออเดอร์ (ลูกค้าใหม่ 0 ออเดอร์ vs ลูกค้าเก่า 1+ ออเดอร์) และแอดมินที่ดูแล |
-| **ชุดทดสอบ** | 29 ไฟล์ทดสอบ ผ่านครบ **608 ข้อ (100% Pass)** |
+| **ชุดทดสอบ** | **703 tests / 38 files** ผ่าน ณ 24 ต.ค. 2026; ไม่แทนผลรับส่งกับลูกค้าจริง |
 
 📄 คู่มือแยกเรื่อง : [เชื่อมเพจ Facebook/IG](docs/META_SETUP_TH.md) · [ดึงแชทเก่า](docs/BACKFILL_TH.md) · [นำเข้าเลขพัสดุ](docs/TRACKING_TH.md) · [แจ้งเตือน](docs/NOTIFICATIONS.md)
 
 ---
 
-## ฟีเจอร์หลักในระบบ (Production Ready)
+## ฟีเจอร์ที่มีในโค้ด (สถานะใช้งานจริงดู log ล่าสุด)
 
 1. **อินบ็อกซ์รวมแชทอัจฉริยะ (Unified Inbox)**
    - รวมแชท Facebook Page และ Instagram Direct ไว้ในหน้าจอเดียว
@@ -46,9 +52,9 @@
 
 5. **ระบบออเดอร์และการเงิน (Orders & Payments)**
    - สร้างออเดอร์จากแชทโดยตรง ดึงข้อมูลที่อยู่ลูกค้าจากข้อความอัตโนมัติ
-   - ตรวจสอบสลิปโอนเงิน พร้อมเก็บหลักฐานถาวรใน Storage
+   - แนบ/เปิดดูสลิปและบันทึกผลตรวจโดยแอดมิน พร้อมเก็บใน Storage ไม่ใช่การยืนยันยอดกับธนาคารอัตโนมัติ
    - รองรับเก็บเงินปลายทาง (COD) และการโอนเงิน
-   - นำเข้าเลขพัสดุผ่าน Excel/CSV พร้อมส่งข้อความแจ้งลูกค้าอัตโนมัติ
+   - นำเข้าเลขพัสดุผ่าน CSV UTF-8 (ไฟล์ Excel ต้องแปลงก่อน) แล้วเลือกแจ้งลูกค้าแยกจากการลงเลข โดยผ่าน policy
 
 6. **ระบบตอบกลับอัตโนมัติ (Auto-Reply & AI Ready)**
    - ดักจับคีย์เวิร์ดตอบข้อความและส่งรูปภาพอัตโนมัติ
@@ -85,37 +91,17 @@ npm install
 3. ตั้ง Database Password แล้ว**จดไว้**
 4. รอสร้างเสร็จประมาณ 2 นาที
 
-### ขั้น 3 — สร้างตารางทั้งหมด
+### ขั้น 3 — สร้างตารางสำหรับการติดตั้งใหม่
 
-1. ใน Supabase เมนูซ้าย → **SQL Editor** → **New query**
-2. เปิดไฟล์ `supabase/migrations/0001_init.sql` ในโปรเจกต์นี้
-3. **คัดลอกทั้งไฟล์** ไปวางในช่อง แล้วกด **Run** (มุมขวาล่าง)
-4. ต้องขึ้น `Success. No rows returned`
-5. ทำซ้ำกับไฟล์ที่เหลือ **ตามลำดับเลข ห้ามข้าม ห้ามสลับ** :
+ใช้ไฟล์ `.sql` **ทั้งหมด** ใน `supabase/migrations/` เรียงตามชื่อไฟล์ ตั้งแต่ `0001_init.sql` จนถึงไฟล์ล่าสุด ไม่หยุดที่ `0013_notifications.sql` รายการปัจจุบันดูได้ด้วย:
 
-```
-0002_policy_engine.sql
-0003_messaging_hardening.sql
-0004_function_search_path.sql
-0005_ingest.sql
-0006_inbox.sql
-0007_admin_tools.sql
-0008_orders.sql
-0009_autoreply_shipping.sql
-0010_media_assets.sql
-0011_tracking_import.sql
-0012_dashboard_comments.sql
-0013_notifications.sql
+```bash
+rg --files supabase/migrations | sort
 ```
 
-> 🔴 **ต้องรันให้ครบทุกไฟล์** ไฟล์หลัง ๆ แก้ไขของที่ไฟล์ก่อนหน้าสร้างไว้
-> ถ้ารันไม่ครบ ระบบจะพังแบบหาสาเหตุยาก (เช่นเปิดหน้าออเดอร์ / หน้าคอมเมนต์ / หน้าแจ้งเตือน แล้วขึ้น error 500)
+สำหรับฐานใหม่ ให้ใช้ SQL Editor รันตามลำดับและตรวจผลแต่ละไฟล์ ส่วนฐาน production เดิมต้องตรวจ migration ที่ใช้แล้ว สำรองข้อมูล และลงเฉพาะที่ขาดหลังอ่าน SQL ห้ามรันทั้งชุดซ้ำโดยถือว่าทุก migration ปลอดภัยต่อข้อมูลเสมอ
 
-> ไฟล์พวกนี้รันซ้ำได้ ไม่พัง และมีตัวตรวจตัวเองอยู่ท้ายไฟล์
-> ถ้ามีอะไรผิดจะขึ้น error ทันที ไม่ปล่อยผ่านครึ่ง ๆ กลาง ๆ
-> ถ้าไม่แน่ใจว่ารันครบ กด Run ใหม่ทั้งหมดตามลำดับได้เลย
-
-**วิธีเช็คว่าครบไหม** : รัน `npm run check-db` ในเทอร์มินัล
+ล่าสุดมี migration ถึง `20261019_worker_schedule.sql`; `npm run check-db` ตรวจ 40 ตาราง พร้อมคอลัมน์/RPC และ scheduler ที่ระบบต้องใช้ แต่ไม่ใช่หลักฐานยืนยัน migration history ทุกบรรทัด
 
 ### ขั้น 4 — ใส่ค่าตั้งระบบ
 
@@ -151,7 +137,7 @@ OWNER_PASSWORD=รหัสชั่วคราว        # เว้นว่�
 ### ขั้น 5 — ตรวจว่าต่อติดแล้วสร้างบัญชีเจ้าของ
 
 ```bash
-npm run check-db      # ต้องขึ้น ✅ ครบทั้ง 26 ตาราง
+npm run check-db      # ตรวจ 40 ตารางและ RPC/คอลัมน์ที่ต้องใช้
 npm run create-owner  # สร้างบัญชีเจ้าของ — รันได้ครั้งเดียว
 ```
 
@@ -176,11 +162,11 @@ npm run dev
 | `npm run build` | สร้างเวอร์ชันจริง (ต้องผ่านก่อน deploy เสมอ) |
 | `npm start` | รันเวอร์ชันจริง |
 | `npm run typecheck` | ตรวจว่าโค้ดไม่มีที่ผิดชนิดข้อมูล |
-| `npm test` | รันชุดทดสอบ (531 ข้อ — ไม่ต้องมีฐานข้อมูล) |
+| `npm test` | รัน unit/architecture tests (703 ข้อ ณ 24 ต.ค. 2026 — ใช้ external services จำลอง) |
 | `npm run test:pg` | รันชุดทดสอบกับ PostgreSQL จริง — ต้องเปิดฐานข้อมูลทดสอบก่อน ถ้าต่อไม่ได้จะ fail ไม่ข้ามเงียบ ๆ (ดู `docs/META_DELIVERY_REPAIR_TH.md`) |
-| `npm run worker` | ตัวกวาดคิว webhook (ตาข่ายกันพลาด — ปกติไม่ต้องรัน) |
+| `npm run worker` | ตัวกวาดคิวแบบ CLI; production ใช้ Supabase scheduler ตาม RUNTIME_OPERATIONS_TH.md |
 | `npm run vapid` | สร้างกุญแจแจ้งเตือน PWA (ทำครั้งเดียวตอนติดตั้ง) |
-| `npm run notify` | ตัวเดินตรวจแชทค้าง + ส่งแจ้งเตือน (🔴 ต้องรัน ไม่งั้นขาดแจ้งเตือน 2 อย่าง) |
+| `npm run notify` | ตัวแจ้งเตือนแบบ CLI; production ตั้ง Supabase scheduler ทุก 5 นาทีแล้ว |
 | `npm run lint` | ตรวจว่าไม่มีใครข้าม Policy Engine |
 | `npm run check-db` | ตรวจว่าตารางในฐานข้อมูลครบไหม |
 | `npm run create-owner` | สร้างบัญชีเจ้าของ (ครั้งเดียว) |
@@ -227,7 +213,7 @@ src/
 │   ├── meta/                  ⭐ ที่เดียวที่ยิง graph.facebook.com
 │   │   ├── client.ts
 │   │   └── errors.ts          แยก error ชั่วคราว vs เชิงนโยบาย
-│   └── queue/                 คิว webhook (รอบถัดไป)
+│   └── ingest/                parser/processor/คิว webhook และ backfill
 ├── types/db.ts                ชนิดข้อมูลของทุกตาราง
 └── proxy.ts                   ด่านตรวจ session ก่อนเข้าทุกหน้า
 ```
@@ -828,12 +814,12 @@ Apple ไม่อนุญาตให้เว็บในแท็บ Safari 
 
 ## การติดตั้งและใช้งานบน Production (Vercel + Supabase)
 
-HubChat พร้อมใช้งานบน Production ผ่าน Vercel และเชื่อมต่อกับ Supabase ได้ทันที:
+HubChat deploy บน Vercel และเชื่อม Supabase แล้ว วิธีด้านล่างใช้สำหรับติดตั้งใหม่หรือดูแล deployment; ความพร้อม Meta และผลรับส่งจริงต้องดู log แยก:
 
 ### 1. ฐานข้อมูลและที่เก็บไฟล์ (Supabase)
 - **Supabase URL & Keys**: คัดลอกจาก Supabase Dashboard (`Project Settings` → `API`)
 - **Supabase Storage**: สร้าง Bucket ชื่อ `media` ตั้งค่าเป็น `Public: true` (อนุญาตการเข้าถึงรูปและสลิปได้ทันที)
-- **Migrations**: ตารางทั้งหมด **37 ตาราง** รองรับโครงสร้างครบถ้วน ตรวจสอบได้ด้วย `npm run check-db`
+- **Migrations**: check-db ตรวจ **40 ตาราง** พร้อมคอลัมน์และ RPC ที่ระบบต้องใช้
 
 ### 2. ติดตั้งขึ้น Vercel (Production Deployment)
 1. นำโปรเจกต์ขึ้น GitHub: `git push origin main`
@@ -858,17 +844,17 @@ HubChat พร้อมใช้งานบน Production ผ่าน Vercel �
 
 ---
 
-## สถานะความพร้อมของระบบ (Production Ready Checklist)
+## สถานะการตรวจล่าสุด (24 ตุลาคม 2026)
 
-- [x] ตารางฐานข้อมูลครบถ้วน **37 ตาราง** บน Supabase พร้อมฟังก์ชันและ Triggers
-- [x] ระบบที่เก็บไฟล์ **Supabase Storage (Public CDN)** รองรับรูป สลิป และวิดีโอ 100%
-- [x] ระบบดึงชื่อและโปรไฟล์ลูกค้าจริงจาก Meta API อัตโนมัติ (แก้ไขปัญหา 'ลูกค้า xxxxxx')
-- [x] ระบบตัดรูป 1:1 อัตโนมัติ สำหรับโลโก้เว็บ และรูปแอดมินทุกคน
-- [x] รูปแอดมินแสดงในแถบเมนูบน และข้างฟองข้อความตอบกลับในแชท
-- [x] ไอคอนทางการครบถ้วน (Facebook, Instagram, Line)
-- [x] ตัวเลือกสินค้าพร้อมจัดรูปแบบกระสุน ยอดรวม และ Live Preview Box
-- [x] ตัวกรองแชทตามประวัติออเดอร์ (0 vs 1+) และแอดมินผู้ดูแล
-- [x] คลังสื่อ Media Library แยกแฟ้ม, พรีวิว Lightbox, คัดลอกลิงก์, ลบไฟล์
-- [x] Message Policy Engine ผ่านการทดสอบ Idempotency ป้องกันส่งซ้ำ 100%
-- [x] ผ่านการทดสอบ Unit & Architectural Tests ครบถ้วน **608 ข้อ (100% Pass)**
-- [x] พร้อม Deploy และใช้งานจริงบน Vercel (https://hubchat-omega.vercel.app)
+- [x] TypeScript และ ESLint ผ่าน (ไม่มี warning)
+- [x] Unit/architecture **703 tests / 38 files** ผ่าน
+- [x] ฐานจริง check-db ผ่าน **40 ตาราง**, RPC กันซ้ำ, scheduler และบัญชีเจ้าของ
+- [x] โค้ด `62bb33c` build ผ่านและ Vercel deployment สำเร็จ
+- [x] Scheduler production เปิดอยู่ และไม่พบงานคิวรอ/ล้มเหลว ณ เวลาตรวจ
+- [x] App Review ของ **HubChat `1762855681523459`** ส่งแล้ว สถานะอยู่ระหว่างการตรวจสอบ
+- [ ] IG ลูกค้าทั่วไปรับส่งครบวงจร: ยังไม่มีหลักฐานผ่าน; ขาด Advanced Access ที่ Meta ระบุ และต้องตรวจ DM ปกติแยกจาก Private Reply
+- [ ] ยืนยันปลายทาง Telegram/Web Push บนอุปกรณ์จริงตาม acceptance checklist
+- PostgreSQL regression รอบก่อนผ่าน **318 tests / 19 files**; รอบจัดเอกสารไม่ได้รันซ้ำ
+- ไม่รวม LINE messaging, `.xlsx` โดยตรง, self-service OAuth หรือการเปิด Utility/Marketing โดยไม่มีหลักฐานรองรับ
+
+ดูขอบเขต หลักฐานรายโมดูล และเกณฑ์จบที่ [HANDOFF_ANTIGRAVITY_TH.md](docs/HANDOFF_ANTIGRAVITY_TH.md) บันทึก “รอบ” ต่าง ๆ ใน README เป็นรายละเอียดพัฒนาการ ไม่ใช่วันที่ตรวจ production ล่าสุด

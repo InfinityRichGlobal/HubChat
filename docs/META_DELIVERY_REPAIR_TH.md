@@ -1,6 +1,6 @@
 # บันทึกซ่อมทางรับข้อความและการตอบคอมเมนต์ — 18 ตุลาคม 2026
 
-> บันทึกย้อนหลังวันที่ 18 ต.ค. สถานะล่าสุดวันที่ 20 ต.ค.: ส่ง Business Verification แล้วและรอตรวจ งานโค้ดและ scheduler มีการปรับต่อแล้ว ดู [WORK_STATUS_TH.md](WORK_STATUS_TH.md) และ [META_APP_REVIEW_TH.md](META_APP_REVIEW_TH.md)
+> บันทึกย้อนหลังวันที่ 18 ต.ค. ไม่ใช่สถานะล่าสุด: ณ 24 ต.ค. Business Verification ผ่านแล้ว, App Review ส่งแล้วและรอตรวจ, scheduler ทำงานจริง และ IG Private Reply มีการแก้ endpoint ต่อใน `62bb33c` ดู [WORK_STATUS_TH.md](WORK_STATUS_TH.md), [META_APP_REVIEW_TH.md](META_APP_REVIEW_TH.md) และ [INSTAGRAM_PRIVATE_REPLY_FIX_TH.md](INSTAGRAM_PRIVATE_REPLY_FIX_TH.md)
 
 
 ## สาเหตุที่แก้

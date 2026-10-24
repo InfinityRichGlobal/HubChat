@@ -1,8 +1,30 @@
-# ชุดเตรียม App Review — HubChat
+# App Review — สถานะปัจจุบันและประวัติเตรียมคำขอ HubChat
 
-อัปเดต 21 ตุลาคม 2026 — เป็นร่างสำหรับตรวจและใช้กรอก ยังไม่ได้ส่ง App Review
+อัปเดต 24 ตุลาคม 2026 ประมาณ 22:10 น. ไทย — **ส่งแล้ว อยู่ระหว่างการตรวจสอบ**
 
-## สถานะและขอบเขต
+## สถานะปัจจุบัน
+
+- App **HubChat `1762855681523459`**, Business `112620037485313`, submission `1763008511508176`
+- ตรวจ [หน้า App Review](https://developers.facebook.com/apps/1762855681523459/app-review/?business_id=112620037485313) เห็นข้อความ **“อยู่ระหว่างการตรวจสอบ”** พร้อมรายละเอียดคำขอใหม่
+- หน้าแสดงว่าคำขอส่วนใหญ่ตรวจภายใน 20 วัน และอาจนานขึ้นเมื่อขอข้อมูลเพิ่ม นี่เป็นข้อความของ Meta ไม่ใช่กำหนดวันอนุมัติที่ยืนยันได้
+- รายการที่อยู่ในคำขอปัจจุบัน **15 รายการ**: `instagram_manage_comments`, `instagram_manage_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `pages_show_list`, `pages_manage_metadata`, `pages_utility_messaging`, `pages_messaging`, `business_management`, `instagram_manage_messages`, `pages_read_engagement`, `public_profile`, `instagram_basic`, Human Agent, Business Asset User Profile Access
+- App Published, API test completed และ Business Verified เป็นคนละสถานะกับสิทธิ์ Advanced Access; การมีชื่อ permission ใน token ก็ไม่แทนผลอนุมัติ
+- อ่าน conversation ของลูกค้าทั่วไปวันที่ 24 ต.ค. ได้ `200/2534048` ระบุว่าไม่มี Advanced Access ของ `instagram_manage_messages` และผู้รับไม่มีบทบาทในแอป; ดู [incident log](INSTAGRAM_PRIVATE_REPLY_FIX_TH.md)
+- App `2229730894588783` ที่เปิดอยู่อีกแท็บชื่อ **SuperiCez Studio** ไม่ใช่คำขอนี้ และ runtime HubChat ยังใช้ App ID เดิม
+- ไม่ยกเลิกหรือเริ่มยื่นใหม่จากข้อความทั่วไป “ต้องดำเนินการทุกขั้นตอนก่อนส่ง” ในหน้าร่าง ให้ดูสถานะหน้า App Review/ผลรายสิทธิ์ของ App ID ที่ถูกต้อง
+- การได้รับอนุมัติ permission ไม่ได้แปลว่า transport Human Agent/Utility/Marketing ของระบบพร้อมเปิด ต้องตรวจเอกสาร payload/eligibility และเงื่อนไขของฟังก์ชันนั้นด้วย
+
+## ขอบเขตระบบที่อธิบายแก่ผู้ตรวจ
+
+- เป็นเครื่องมือภายในสำหรับสินทรัพย์ที่แอดมินตั้งค่าเอง ยังไม่มี self-service Facebook/Instagram OAuth onboarding สำหรับร้านค้าอื่น
+- ระบบ staff ใช้ HubChat login; token อยู่ฝั่ง server ไม่แสดงในคลิปหรือเอกสาร
+- บัญชีตรวจเฉพาะจำกัดสิทธิ์เพจที่เจ้าของอนุญาตไว้ ไม่ใช่ owner; ไม่จัดเก็บ credential ใน Git หรือ log นี้ และไม่ได้เปลี่ยนรหัสในรอบจัดเอกสาร
+- ขั้นตอนหลังผลตรวจ: ยืนยัน Advanced Access ที่ใช้จริง ตรวจ token/สินทรัพย์ แล้วทดสอบจากบัญชีไม่มีบทบาทในแอปให้ครบวงจร หากปฏิเสธให้แก้ตามเหตุผลจริง
+- สรุปงานถัดไป: [HANDOFF_ANTIGRAVITY_TH.md](HANDOFF_ANTIGRAVITY_TH.md)
+
+## ประวัติสถานะและขอบเขต ณ 21 ตุลาคม
+
+ส่วนต่อไปเก็บที่มาของคำตอบ/แผนคลิปและข้อมูลในวันที่ระบุ ข้อความ “ยังไม่ส่ง/ยังไม่ได้กรอก/ยังไม่ได้ให้ credential” ด้านล่างเป็นประวัติ ไม่ใช่งานที่ต้องย้อนทำทันที และไม่ใช่สถานะล่าสุด
 
 - Business Verification แสดง **ตรวจสอบยืนยันแล้ว** (วันที่ใน Meta: 20 ตุลาคม 2026)
 - App Review ยังไม่ได้ส่ง แต่หน้า Developer แสดงแอปเผยแพร่แล้ว; การเผยแพร่ไม่ยืนยันว่า Advanced Access ผ่าน
@@ -26,7 +48,7 @@
 - เจ้าของอนุญาตอย่างชัดเจนให้ผู้ตรวจ Meta เข้าถึงประวัติแชท คอมเมนต์ และออเดอร์ของ Blisse Thailand ทั้ง Facebook และ Instagram แล้ว สร้างบัญชี `meta-review@blisseglobal.com` ชื่อ Meta App Review ระดับ admin ให้เฉพาะสองสินทรัพย์นี้ ไม่ให้ owner หรือสิทธิ์จัดการ token
 - บัญชีถูกสร้างและ UI ยืนยันสิทธิ์ทั้งสองช่องทาง แต่หน้าต่างรหัสชั่วคราวไม่ได้คงอยู่ จึงยังไม่ได้ส่ง password ให้ Meta หรือทดสอบ login บัญชีนี้ ต้องให้เจ้าของตั้ง credential ตามขั้นตอนส่งมอบของเครื่องมือเบราว์เซอร์ ไม่ใส่รหัสผ่านใน Git หรือแชท
 
-## รายการคำขอปัจจุบันที่พบใน Meta
+## ประวัติรายการร่างที่พบใน Meta วันที่ 20 ตุลาคม
 
 หน้าร่างคำขอวันที่ 20 ต.ค. มี 20 รายการ:
 

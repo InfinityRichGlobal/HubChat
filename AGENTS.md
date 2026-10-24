@@ -16,7 +16,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## 1. ภาพรวมระบบและ Tech Stack
 - **Framework:** Next.js `16.3.2` (App Router), React `19`, TypeScript `5`, Tailwind CSS `v4`
-- **Database:** Supabase PostgreSQL (37+ ตาราง พร้อม RLS, RPC Functions และ Triggers)
+- **Database:** Supabase PostgreSQL (check-db ตรวจ 40 ตาราง ณ 24 ต.ค. 2026 พร้อม RLS, RPC Functions และ Triggers)
 - **File Storage:** Supabase Storage (Bucket ชื่อ `media` แบบ Public CDN สำหรับเก็บรูปแชท สลิปโอนเงิน และวิดีโอถาวร)
 - **Hosting & Deployment:** Vercel (`.vercel/project.json` ผูกกับโปรเจกต์ `hubchat`)
 - **Integrations:**
@@ -47,8 +47,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - `src/app/(app)/` — หน้าจอฝั่งแอดมินทั้งหมด (ต้องล็อกอิน):
   - `inbox/` — หน้าแชทรวมศูนย์ (Messenger / IG), แท็ก, โน้ตลูกค้า, สร้างออเดอร์, ส่งรูป/สลิป
   - `comments/` — ระบบจัดการคอมเมนต์โพสต์และตั้งค่าบอทตอบคอมเมนต์/ทักแชทอัตโนมัติ (Private Reply)
-  - `orders/` & `shipping/` — จัดการออเดอร์ สลิป และนำเข้าเลขพัสดุ (Tracking Import)
-  - `autoreply/` — กฎตอบแชทอัตโนมัติและคีย์เวิร์ด
+  - `orders/` & `orders/tracking/` — จัดการออเดอร์ สลิป และนำเข้าเลขพัสดุ CSV (Tracking Import)
+  - `settings/autoreply/` — กฎตอบแชทอัตโนมัติและคีย์เวิร์ด
   - `dashboard/` — สถิติภาพรวมและ SLA การตอบแชท
   - `settings/` — จัดการเพจที่เชื่อมต่อ, แอดมิน, แจ้งเตือน, และตรวจสุขภาพระบบ
 - `src/app/api/` — API Route Handlers ทั้งหมด
@@ -85,3 +85,11 @@ npm run notify       # รันตัวตรวจแชทค้าง/แ�
 5. **การทำงานร่วมกันผ่าน `.git` (Antigravity + Codex):**
    - ก่อนเริ่มแก้ไขไฟล์ ให้เช็ก `git status` เสมอเพื่อดูว่ามีงานค้างจากอีก Agent หรือไม่
    - หลังแก้ไขเสร็จ ต้องรัน `npm run typecheck` และ `npm test` ให้ผ่านทุกครั้งก่อนจบงานหรือ commit
+
+## 6. สถานะและการส่งต่องาน
+
+- อ่าน [docs/HANDOFF_ANTIGRAVITY_TH.md](docs/HANDOFF_ANTIGRAVITY_TH.md) และ [docs/WORK_STATUS_TH.md](docs/WORK_STATUS_TH.md) ก่อนสรุปความพร้อม โดยดูวันที่ของหลักฐานเสมอ
+- Production ใช้ Meta App **HubChat `1762855681523459`**; App `2229730894588783` คือ **SuperiCez Studio** ไม่ใช่ตัวเดียวกัน ตรวจ runtime settings ก่อนเปลี่ยนการเชื่อมต่อ
+- Unit tests/build/deployment ผ่าน ไม่ใช่หลักฐานว่า Meta Advanced Access ผ่านหรือข้อความถึงลูกค้าจริงแล้ว
+- การแก้ IG Private Reply อยู่ใน [docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md](docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md); DM ปกติยังต้องตรวจแยก
+- `DEFERRED_REVIEW.md` เก็บประวัติรอบต้นด้วย ให้ใช้ตารางอัปเดตด้านบนก่อน ไม่เปิดงานเก่าซ้ำจากข้อความประวัติ

@@ -20,4 +20,28 @@ HubChat ใช้ Facebook Page Access Token บน `graph.facebook.com` แล�
 
 ตรวจแบบอ่านอย่างเดียวกับ token จริงแล้ว ยืนยันว่าการหาเพจ Facebook ที่เชื่อมกับ Instagram ทำงานสำเร็จ
 
-การทดสอบส่งก่อนแก้ได้รับ Meta error `200 / 2534066` และไม่สำเร็จ การผ่าน unit tests หรืออ่านตัวตนได้ยังไม่ใช่หลักฐานว่าข้อความส่งถึงผู้รับ ต้องตรวจผล Send API หลังแก้โดยได้รับอนุญาตให้ส่งถึงผู้รับทดสอบก่อน
+Commit `62bb33c` ขึ้น production สำเร็จ 24 ตุลาคม 2026 เวลา 21:32:49 น. ไทย ผ่าน typecheck, 703 unit/architecture tests ใน 38 files, lint และ build; check-db ผ่าน 40 ตาราง
+
+## Log ทดสอบจริงหลัง deploy
+
+เวลาทั้งหมดเป็นเวลาไทย วันที่ 24 ตุลาคม 2026 บันทึกเฉพาะผลเทคนิค ไม่เก็บชื่อ/ID ลูกค้า รหัสผ่าน หรือ token ในเอกสารนี้
+
+| รอบ | ผล Meta | ข้อสรุปที่ยืนยันได้ |
+|---|---|---|
+| ก่อนแก้ endpoint | `200 / 2534066`, trace `AET_FkV6dJvFnaTHnzZlceX` | ไม่สำเร็จ ไม่ใช่หลักฐานว่าแค่รอสิทธิ์แล้วโค้ดเดิมถูกต้อง |
+| หลัง `62bb33c` ประมาณ 21:39 น. | `-1 / 2534023`, trace `A9KNVUrquzHgFLvqdr37ITB` | ยังไม่สำเร็จ; `replied_private=false`, text/time ว่าง และไม่มี success activity log |
+| อ่าน conversation ของลูกค้ารายเดิมแบบ read-only | HTTP 403, `200 / 2534048`, trace `AwWOl-u01MUTErhdAkPjTFz` | Meta ระบุชัดว่าไม่มี Advanced Access ของ `instagram_manage_messages` และผู้รับไม่มีบทบาทบนแอป |
+
+Meta Business Suite มีบทสนทนาที่แอดมินคุยกับลูกค้ารายนี้ก่อนทดสอบ จึงไม่ใช่เคสสะอาดสำหรับ private reply ครั้งแรก ยังไม่ยืนยันความหมายของ `2534023` จากเอกสารทางการ จึงไม่สรุปจาก subcode เพียงอย่างเดียว และไม่นับข้อความที่ส่งจาก Business Suite เป็นผลสำเร็จของ HubChat
+
+ผู้ใช้ให้สิทธิ์ทดสอบส่งถึงลูกค้าจริงสองครั้งแยกกัน ใช้แล้วทั้งสองครั้ง รอบจัดเอกสารไม่ได้ส่งเพิ่มเติม การตรวจครั้งใหม่ควรใช้บัญชี/คอมเมนต์ทดสอบใหม่ที่ยังไม่เคย private reply พร้อมอำนาจให้ส่งที่ครอบคลุมการทดสอบนั้น
+
+## สิ่งที่การแก้นี้ยังไม่ครอบคลุม
+
+- General DM ผ่าน `src/server/meta/client.ts::sendToMeta` ยังประกอบ `/{page.page_id}/messages` ต้องตรวจชนิด token และ ID สำหรับ Facebook Login แยกจาก private reply ก่อนสรุปว่า IG messaging แก้ครบ
+- Scope อยู่ใน token ไม่เท่ากับ Advanced Access; App Published ไม่เท่ากับ App Review ผ่าน
+- Runtime App ID คือ `1762855681523459` (HubChat); `2229730894588783` เป็น SuperiCez Studio คนละแอป
+- ตรวจหน้า App Review ล่าสุด 24 ต.ค. ประมาณ 22:10 น. ยัง **อยู่ระหว่างการตรวจสอบ** ต้องยืนยันหลังสิทธิ์ผ่านด้วย DM/คอมเมนต์ใหม่จนเห็นผลฝั่งผู้รับ
+- อ่านคอมเมนต์แล้วคง error เป็นพฤติกรรมที่ถูกต้อง ห้ามล้าง failure/ตั้ง success เพื่อทำให้ยอด “ต้องตรวจสอบ” เป็นศูนย์
+
+แผนรับงานต่อและผลทดสอบรอบล่าสุด: [HANDOFF_ANTIGRAVITY_TH.md](HANDOFF_ANTIGRAVITY_TH.md), [WORK_STATUS_TH.md](WORK_STATUS_TH.md)
