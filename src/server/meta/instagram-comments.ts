@@ -6,6 +6,7 @@ import 'server-only';
  * เรียกใช้งานผ่าน client กลาง (server/meta/client.ts) เท่านั้น
  */
 import { metaPost, metaDelete, metaGet, type MetaPage } from './client';
+import { resolveInstagramMessagingPage } from './instagram-messaging-page';
 import { explainCommentError, type CommentActionResult, type WebhookSubscribeResult, type FetchedComment } from './comments-types';
 
 export const IG_SUBSCRIBED_FIELDS = [
@@ -44,7 +45,7 @@ export async function replyToInstagramComment(
  * กฎของ Meta:
  *   • ทำได้ครั้งเดียวต่อคอมเมนต์ภายใน 7 วัน
  *   • ส่งผ่าน Messenger API for Instagram (Send API) ด้วย recipient: { comment_id }
- *   • สิทธิ์ที่ต้องใช้: instagram_manage_messages
+ *   • Facebook Login: ใช้ Page Access Token, instagram_manage_comments และ pages_messaging
  */
 export async function sendInstagramPrivateReply(
   page: MetaPage,
@@ -52,6 +53,10 @@ export async function sendInstagramPrivateReply(
   message: string,
   attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
+  const sender = await resolveInstagramMessagingPage(page);
+  // This GET cannot deliver a message, even if it times out. Release the claim
+  // safely; no Send API request has been made yet.
+  if (!sender.ok) return { ok: false, error_th: sender.error_th, outcome_unknown: false };
   let text = message;
   if (attachmentUrl) {
     text = `${message}\n\n🖼️ แนบภาพ: ${attachmentUrl}`;
@@ -60,7 +65,7 @@ export async function sendInstagramPrivateReply(
     recipient: { comment_id: commentId },
     message: { text },
   };
-  const result = await metaPost(page, `${page.page_id}/messages`, payload);
+  const result = await metaPost(page, `${sender.facebook_page_id}/messages`, payload);
   if (result.ok) {
     const id =
       (result.data as { message_id?: string; id?: string } | null)?.message_id ??

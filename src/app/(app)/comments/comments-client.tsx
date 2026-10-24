@@ -295,25 +295,22 @@ export default function CommentsClient({
     setBusy(false);
     setLastViewedError(comment.last_error_th);
 
-    const needsAutoRead = !comment.is_handled || comment.last_error_th !== null;
+    const needsAutoRead = !comment.is_handled;
     if (!needsAutoRead) {
       setSelected(comment);
       return;
     }
 
     const wasPending = !comment.is_handled && comment.last_error_th === null;
-    const wasReview = comment.last_error_th !== null;
     const optimistic: CommentRow = {
       ...comment,
       is_handled: true,
-      last_error_th: null,
     };
 
     setSelected(optimistic);
     setFeed((prev) => ({
       ...prev,
       unhandled_count: wasPending ? Math.max(0, prev.unhandled_count - 1) : prev.unhandled_count,
-      review_count: wasReview ? Math.max(0, prev.review_count - 1) : prev.review_count,
       comments: prev.comments.map((x) => (x.id === comment.id ? optimistic : x)),
     }));
 
@@ -354,7 +351,7 @@ export default function CommentsClient({
           : feed.comments;
 
       const targets = allLoaded.filter(
-        (c) => !c.is_deleted && (!c.is_handled || c.last_error_th !== null),
+        (c) => !c.is_deleted && !c.is_handled,
       );
       await Promise.all(
         targets.map((c) =>
@@ -367,7 +364,7 @@ export default function CommentsClient({
       );
       await currentLoad.current();
       notifySidebarCountsRefresh();
-      toast.success('เคลียร์แจ้งเตือนคอมเมนต์ทั้งหมดแล้ว');
+      toast.success('ทำเครื่องหมายอ่านแล้ว — รายการส่งไม่สำเร็จยังอยู่ใน “ต้องตรวจสอบ”');
     } catch {
       toast.error('เคลียร์แจ้งเตือนไม่สำเร็จ กรุณาลองใหม่');
     } finally {
@@ -388,7 +385,6 @@ export default function CommentsClient({
     setLastViewedError(null);
   }
 
-  const totalAlerts = feed.unhandled_count + feed.review_count;
   const botOn = Boolean(
     botSettings && (botSettings.auto_reply_public || botSettings.auto_reply_private),
   );
@@ -596,8 +592,8 @@ export default function CommentsClient({
               <span>ลบแล้ว</span>
             </button>
 
-            {/* ปุ่มเคลียร์แจ้งเตือนทั้งหมด (แสดงเฉพาะเมื่อมีแจ้งเตือนค้าง) */}
-            {totalAlerts > 0 && (
+            {/* Reading does not resolve failed sends. */}
+            {(feed.unhandled_count > 0 || feed.comments.some(c => !c.is_handled && !c.is_deleted)) && (
               <button
                 type="button"
                 disabled={markingAll}
@@ -609,7 +605,7 @@ export default function CommentsClient({
                 ) : (
                   <CheckCheck className="size-3" />
                 )}
-                <span>อ่านแล้วทั้งหมด ({totalAlerts})</span>
+                <span>ทำเครื่องหมายอ่านแล้วทั้งหมด</span>
               </button>
             )}
           </div>
@@ -857,7 +853,7 @@ export default function CommentsClient({
           <DialogHeader>
             <DialogTitle>จัดการคอมเมนต์ลูกค้า</DialogTitle>
             <DialogDescription>
-              เปิดอ่านแล้วระบบเคลียร์แจ้งเตือนให้อัตโนมัติ · ตอบเพิ่มหรือเปิดห้องแชทต่อได้ทันที
+              เปิดดูแล้วทำเครื่องหมายอ่านให้อัตโนมัติ · ข้อผิดพลาดจะยังอยู่จนแก้ไขสำเร็จ
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/40 p-2">
@@ -1008,7 +1004,7 @@ export default function CommentsClient({
                   ตัวเลขแจ้งเตือนจะขึ้นเฉพาะ <strong>คอมเมนต์ที่บอทยังไม่ได้ตอบ</strong> หรือ <strong>ส่งคำตอบไม่สำเร็จ</strong>
                 </li>
                 <li>
-                  <strong>คลิกเปิดอ่าน = หายแจ้งเตือนทันที:</strong> เพียงแอดมินคลิกเปิดดูคอมเมนต์ หรือกดชิป <strong>“อ่านแล้วทั้งหมด”</strong> ตัวเลขแจ้งเตือนจะหายไปทันที
+                  <strong>คลิกเปิดดู = อ่านแล้ว:</strong> ระบบลดจำนวนที่ยังไม่อ่าน แต่รายการที่ส่งไม่สำเร็จจะยังอยู่ใน <strong>“ต้องตรวจสอบ”</strong> จนกว่าจะแก้ไขสำเร็จ
                 </li>
               </ul>
             </div>
@@ -1364,7 +1360,7 @@ function CommentCard({
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
           <AlertTriangle className="size-4 shrink-0 mt-0.5 text-amber-600" />
           <div>
-            <span className="font-semibold">หมายเหตุก่อนหน้า: </span>
+            <span className="font-semibold">{c.last_error_th ? 'รายการยังมีปัญหา: ' : 'หมายเหตุก่อนหน้า: '}</span>
             <span>{errorMessage}</span>
           </div>
         </div>

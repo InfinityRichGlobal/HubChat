@@ -164,7 +164,12 @@ describe('Comment Adapter Dispatcher', () => {
     );
   });
 
-  it('routes Instagram private reply to Send API /{page_id}/messages with recipient.comment_id', async () => {
+  it('uses the linked Facebook Page for Instagram private replies with Facebook Login', async () => {
+    vi.mocked(metaClient.metaGet).mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'linked-facebook-page', instagram_business_account: { id: igPage.page_id } },
+      http_status: 200,
+    });
     vi.mocked(metaClient.metaPost).mockResolvedValueOnce({
       ok: true,
       data: { message_id: 'ig-msg-1', recipient_id: 'ig-user-1' },
@@ -175,7 +180,7 @@ describe('Comment Adapter Dispatcher', () => {
     expect(res.ok).toBe(true);
     expect(metaClient.metaPost).toHaveBeenCalledWith(
       igPage,
-      'ig-page-456/messages',
+      'linked-facebook-page/messages',
       {
         recipient: { comment_id: 'ig-comm-2' },
         message: { text: 'ยินดีต้อนรับค่ะ' },
@@ -341,6 +346,9 @@ describe('Comment Adapter Dispatcher', () => {
 
 describe('Instagram private reply rejection diagnostics', () => {
   it.each([100, 10, 200])('does not claim expiry from code %s alone', async (code) => {
+    vi.mocked(metaClient.metaGet).mockResolvedValueOnce({
+      ok: true, data: { id: 'facebook-page', instagram_business_account: { id: 'ig' } }, http_status: 200,
+    });
     vi.mocked(metaClient.metaPost).mockResolvedValueOnce({
       ok: false, http_status: 400,
       error: { kind: 'policy', code, subcode: 123, message: 'Permission denied',
@@ -354,5 +362,44 @@ describe('Instagram private reply rejection diagnostics', () => {
       expect(result.error_th).toContain('trace-123');
       expect(result.outcome_unknown).toBe(false);
     }
+  });
+});
+
+describe('Instagram private reply sender safety', () => {
+  const page: MetaPage = { id: 'local-page', page_id: 'ig-account', platform: 'instagram', access_token: 'token' };
+  beforeEach(() => vi.resetAllMocks());
+
+  it.each([
+    { id: 'facebook-page', instagram_business_account: { id: 'different-ig' } },
+    { id: 'facebook-page' },
+    { id: 'ig-account', instagram_business_account: { id: 'ig-account' } },
+  ])('does not send with an unverified or mismatched Page: %j', async (identity) => {
+    vi.mocked(metaClient.metaGet).mockResolvedValueOnce({ ok: true, data: identity, http_status: 200 });
+    const result = await sendPrivateReply(page, 'comment', 'hello');
+    expect(result).toMatchObject({ ok: false, outcome_unknown: false });
+    expect(metaClient.metaPost).not.toHaveBeenCalled();
+  });
+
+  it('a failed identity lookup is safely unsent', async () => {
+    vi.mocked(metaClient.metaGet).mockResolvedValueOnce({
+      ok: false, http_status: 0,
+      error: { kind: 'ambiguous', code: null, subcode: null, message: 'timeout',
+        fbtrace_id: null, message_th: 'อ่านไม่สำเร็จ', window_actually_closed: false },
+    });
+    expect(await sendPrivateReply(page, 'comment', 'hello')).toMatchObject({ ok: false, outcome_unknown: false });
+    expect(metaClient.metaPost).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to another endpoint after an uncertain send', async () => {
+    vi.mocked(metaClient.metaGet).mockResolvedValueOnce({
+      ok: true, data: { id: 'facebook-page', instagram_business_account: { id: page.page_id } }, http_status: 200,
+    });
+    vi.mocked(metaClient.metaPost).mockResolvedValueOnce({
+      ok: false, http_status: 0,
+      error: { kind: 'ambiguous', code: null, subcode: null, message: 'timeout',
+        fbtrace_id: null, message_th: 'ไม่ทราบผล', window_actually_closed: false },
+    });
+    expect(await sendPrivateReply(page, 'comment', 'hello')).toMatchObject({ ok: false, outcome_unknown: true });
+    expect(metaClient.metaPost).toHaveBeenCalledTimes(1);
   });
 });
