@@ -36,9 +36,15 @@ Meta Business Suite มีบทสนทนาที่แอดมินคุ
 
 ผู้ใช้ให้สิทธิ์ทดสอบส่งถึงลูกค้าจริงสองครั้งแยกกัน ใช้แล้วทั้งสองครั้ง รอบจัดเอกสารไม่ได้ส่งเพิ่มเติม การตรวจครั้งใหม่ควรใช้บัญชี/คอมเมนต์ทดสอบใหม่ที่ยังไม่เคย private reply พร้อมอำนาจให้ส่งที่ครอบคลุมการทดสอบนั้น
 
-## สิ่งที่การแก้นี้ยังไม่ครอบคลุม
+## การแก้ General Instagram DM และ Upload Attachment (รอบปรับปรุงถัดมา)
 
-- General DM ผ่าน `src/server/meta/client.ts::sendToMeta` ยังประกอบ `/{page.page_id}/messages` ต้องตรวจชนิด token และ ID สำหรับ Facebook Login แยกจาก private reply ก่อนสรุปว่า IG messaging แก้ครบ
+- `src/server/meta/client.ts::sendToMeta` และ `uploadAttachmentToMeta`: ตรวจสอบหากเป็นเพจ Instagram (`page.platform === 'instagram'`) จะหา Facebook Page ID ที่เชื่อมต่อกับ Instagram ผ่าน `resolveInstagramMessagingPage(page, metaGet)` ก่อนส่ง
+- เพิ่ม in-memory cache ใน `resolveInstagramMessagingPage` (อายุ 5 นาที) เพื่อไม่ให้มี network overhead ทำ GET `/me` ซ้ำทุกข้อความ
+- หาก lookup ล้มเหลวหรือไม่ตรง จะหยุดส่งและคืนข้อผิดพลาดระดับ client โดยไม่เรียก Send API / Attachment API ป้องกันผลลัพธ์ไม่ทราบผล
+- เพิ่มชุดทดสอบ `src/server/meta/__tests__/send-to-meta-instagram.test.ts` (4 tests) ยืนยันว่า Facebook ยังยิงตรงตามเดิม ส่วน Instagram ยิงผ่าน Facebook Page ID พร้อมยืนยันการแคชและการป้องกันตัวตนไม่ตรง
+
+## สิ่งที่ยังต้องยืนยันหลังได้รับสิทธิ์จาก Meta
+
 - Scope อยู่ใน token ไม่เท่ากับ Advanced Access; App Published ไม่เท่ากับ App Review ผ่าน
 - Runtime App ID คือ `1762855681523459` (HubChat); `2229730894588783` เป็น SuperiCez Studio คนละแอป
 - ตรวจหน้า App Review ล่าสุด 24 ต.ค. ประมาณ 22:10 น. ยัง **อยู่ระหว่างการตรวจสอบ** ต้องยืนยันหลังสิทธิ์ผ่านด้วย DM/คอมเมนต์ใหม่จนเห็นผลฝั่งผู้รับ

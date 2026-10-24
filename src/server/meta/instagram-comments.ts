@@ -53,7 +53,7 @@ export async function sendInstagramPrivateReply(
   message: string,
   attachmentUrl?: string | null,
 ): Promise<CommentActionResult> {
-  const sender = await resolveInstagramMessagingPage(page);
+  const sender = await resolveInstagramMessagingPage(page, metaGet);
   // This GET cannot deliver a message, even if it times out. Release the claim
   // safely; no Send API request has been made yet.
   if (!sender.ok) return { ok: false, error_th: sender.error_th, outcome_unknown: false };

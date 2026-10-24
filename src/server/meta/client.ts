@@ -16,6 +16,7 @@ import 'server-only';
 import { decryptSecret } from '@/lib/crypto';
 import { getRuntimeSetting } from '@/server/settings/service';
 import { classifyMetaError, type MetaErrorInfo, type RawMetaError } from './errors';
+import { resolveInstagramMessagingPage } from './instagram-messaging-page';
 
 const GRAPH_HOST = 'https://graph.facebook.com';
 
@@ -89,7 +90,29 @@ function pageToken(page: MetaPage): string {
  */
 export async function sendToMeta(page: MetaPage, payload: MetaSendPayload): Promise<MetaSendResult> {
   const token = pageToken(page);
-  const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(page.page_id)}/messages`;
+  let senderPageId = page.page_id;
+
+  if (page.platform === 'instagram') {
+    const resolved = await resolveInstagramMessagingPage(page, metaGet);
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        http_status: 400,
+        error: {
+          kind: 'permanent',
+          code: 400,
+          subcode: null,
+          message: resolved.error_th,
+          message_th: resolved.error_th,
+          fbtrace_id: null,
+          window_actually_closed: false,
+        },
+      };
+    }
+    senderPageId = resolved.facebook_page_id;
+  }
+
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(senderPageId)}/messages`;
 
   let res: Response;
   try {
@@ -332,7 +355,29 @@ export async function uploadAttachmentToMeta(
   attachmentType: 'image' | 'video' | 'file' = 'image',
 ): Promise<MetaUploadResult> {
   const token = pageToken(page);
-  const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(page.page_id)}/message_attachments`;
+  let senderPageId = page.page_id;
+
+  if (page.platform === 'instagram') {
+    const resolved = await resolveInstagramMessagingPage(page, metaGet);
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        http_status: 400,
+        error: {
+          kind: 'permanent',
+          code: 400,
+          subcode: null,
+          message: resolved.error_th,
+          message_th: resolved.error_th,
+          fbtrace_id: null,
+          window_actually_closed: false,
+        },
+      };
+    }
+    senderPageId = resolved.facebook_page_id;
+  }
+
+  const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(senderPageId)}/message_attachments`;
 
   const form = new FormData();
   form.append(

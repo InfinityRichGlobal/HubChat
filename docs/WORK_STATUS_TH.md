@@ -33,7 +33,7 @@
 - Private Reply ก่อนแก้ endpoint ไม่สำเร็จ `200/2534066`; หลังแก้และ deploy ทดสอบอีกหนึ่งครั้งยังไม่สำเร็จ `-1/2534023` ไม่มี private-reply success ใน DB
 - ลูกค้าทดสอบเดิมมีบทสนทนาใน Meta Business Suite อยู่ก่อนแล้ว ไม่ใช่เคสเริ่ม private reply ใหม่ และไม่ใช่หลักฐาน HubChat ส่งสำเร็จ
 - อ่าน conversation ของลูกค้าทั่วไปได้ HTTP 403, `200/2534048` พร้อมข้อความว่าแอปไม่มี Advanced Access ของ `instagram_manage_messages` และผู้รับไม่มีบทบาทบนแอป จึงมีหลักฐานเรื่องสิทธิ์ที่ยังขาด
-- ทาง DM ปกติ `sendToMeta()` ยังใช้ `page.page_id/messages`; การแก้ Private Reply ไม่ครอบคลุมทางนี้ ต้องตรวจเอกสารและ regression เพิ่ม ไม่รอ Meta อย่างเดียว
+- ทาง DM ปกติ `sendToMeta()` และการอัปโหลดไฟล์แนบ `uploadAttachmentToMeta()` ได้รับการแก้ให้ resolve Facebook Page ID ที่ผูกกับ Instagram พร้อมแคช 5 นาที และมี unit test 4 ข้อกำกับแล้ว (unit tests รวมเป็น 707 ข้อ / 39 ไฟล์)
 - หลังสิทธิ์พร้อมต้องทดสอบ DM และคอมเมนต์ใหม่ที่ยังไม่เคย private reply จากบัญชีทดสอบไม่มีบทบาทในแอป รวม event → queue → DB → UI → ผู้รับจริง และไม่ส่งซ้ำ
 - การอนุญาตส่งถึงลูกค้าจริงก่อนหน้าจำกัดครั้งและใช้แล้ว ไม่ส่งเพิ่มในรอบจัดเอกสารนี้
 - Telegram/Web Push ต้องยืนยันถึงอุปกรณ์จริง; LINE, `.xlsx` โดยตรง และ OAuth onboarding ร้านค้าอื่นไม่ใช่ฟังก์ชันที่ยืนยันเสร็จแล้ว
