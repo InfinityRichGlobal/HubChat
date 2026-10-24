@@ -337,3 +337,22 @@ describe('Comment Adapter Dispatcher', () => {
     );
   });
 });
+
+
+describe('Instagram private reply rejection diagnostics', () => {
+  it.each([100, 10, 200])('does not claim expiry from code %s alone', async (code) => {
+    vi.mocked(metaClient.metaPost).mockResolvedValueOnce({
+      ok: false, http_status: 400,
+      error: { kind: 'policy', code, subcode: 123, message: 'Permission denied',
+        fbtrace_id: 'trace-123', message_th: 'ถูกปฏิเสธ', window_actually_closed: false },
+    });
+    const result = await sendPrivateReply({ page_id: 'ig', platform: 'instagram', access_token: 'token' } as MetaPage, 'comment', 'hello');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error_th).not.toContain('เกิน 7 วัน');
+      expect(result.error_th).toContain('รหัสย่อย 123');
+      expect(result.error_th).toContain('trace-123');
+      expect(result.outcome_unknown).toBe(false);
+    }
+  });
+});

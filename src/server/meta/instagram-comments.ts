@@ -69,14 +69,26 @@ export async function sendInstagramPrivateReply(
     return { ok: true, id };
   }
 
-  // แปลผล error เฉพาะของ Instagram private reply
-  let errorMsg = explainCommentError(result.error.code, result.error.message_th, 'instagram', result.error.message);
-  if (result.error.code === 200) {
-    errorMsg = 'Instagram ไม่อนุญาตให้ทักส่วนตัวจากคอมเมนต์นี้ — ตรวจสิทธิ์ส่งข้อความของแอพและการอนุญาตเข้าถึงข้อความในบัญชี Instagram (รหัส 200)';
+  // Codes 100/200/10 cover several failures; do not infer review status or
+  // expiry from the code alone. Keep Meta's diagnostic reference for support.
+  const { code, subcode, fbtrace_id, message: raw } = result.error;
+  let errorMsg = result.error.message_th;
+  if (code === 200 || code === 10) {
+    errorMsg = 'Meta ปฏิเสธสิทธิ์ทักส่วนตัวจากคอมเมนต์นี้ — ต้องตรวจรายละเอียดสิทธิ์ของแอพและบัญชี ยังยืนยันไม่ได้ว่าเกิดจากการรออนุมัติ';
+  } else if (code === 100) {
+    errorMsg = 'Meta ไม่รับคำขอทักส่วนตัวนี้ — ต้องตรวจคอมเมนต์และข้อมูลคำขอ';
   }
-  if (result.error.code === 100 || result.error.code === 10) {
-    errorMsg = 'Meta ไม่อนุญาตให้ทักส่วนตัวจากคอมเมนต์นี้ (อาจเกิน 7 วัน หรือผู้ใช้ปิดรับข้อความ)';
+  if (/already.*(?:replied|reply)|already.*private/i.test(raw)) {
+    errorMsg = 'คอมเมนต์นี้ได้รับข้อความส่วนตัวไปแล้ว — Meta อนุญาตให้ทักจากคอมเมนต์ได้ครั้งเดียว';
+  } else if (/outside.*(?:window|period)|(?:7|seven)[ -]days?|expired.*comment/i.test(raw)) {
+    errorMsg = 'พ้นระยะเวลาที่ Meta อนุญาตให้ทักส่วนตัวจากคอมเมนต์นี้แล้ว';
   }
+  const reference = [
+    code !== null ? `รหัส ${code}` : null,
+    subcode !== null ? `รหัสย่อย ${subcode}` : null,
+    fbtrace_id && /^[a-zA-Z0-9_-]+$/.test(fbtrace_id) ? `อ้างอิง ${fbtrace_id}` : null,
+  ].filter(Boolean).join(' · ');
+  if (reference) errorMsg += ` (${reference})`;
 
   return {
     ok: false,
