@@ -1,16 +1,16 @@
 # HubChat — ส่งต่องานให้ Antigravity
 
-อัปเดต 24 ตุลาคม 2026 ประมาณ 22:10 น. เวลาไทย (UTC+7)
+อัปเดต 24 ตุลาคม 2026 ประมาณ 23:12 น. เวลาไทย (UTC+7)
 
 ## 1. ข้อสรุปที่ต้องเข้าใจตรงกัน
 
-HubChat มีโค้ดและระบบ production แล้ว แต่ยังไม่รับรองว่าการรับส่ง Facebook/Instagram กับลูกค้าทั่วไปผ่านครบวงจร โดยเฉพาะ Instagram DM และ Private Reply ที่ยังไม่มีหลักฐานส่งสำเร็จหลังแก้ล่าสุด ห้ามสรุปว่า “100% เหลือแค่รอ Meta” เพราะยังต้องตรวจเส้นทาง DM ปกติและทดสอบจริงหลังสิทธิ์พร้อม
+HubChat มีโค้ดและระบบ production แล้ว แต่ยังไม่รับรองว่าการรับส่ง Facebook/Instagram กับลูกค้าทั่วไปผ่านครบวงจร โดยเฉพาะ Instagram DM และ Private Reply ที่ยังไม่มีหลักฐานส่งสำเร็จหลังแก้ล่าสุด General DM/Attachment routing แก้แล้วใน `0c77b53` และรอบตรวจต่อแก้ payload/cache/error เพิ่ม ต้องทดสอบจริงหลังสิทธิ์พร้อมก่อนรับรองการใช้งาน
 
 - Repo: `https://github.com/InfinityRichGlobal/HubChat.git` / branch `main`
 - Workspace: `/Users/ice/Documents/HubChat`
 - Production: `https://hubchat-omega.vercel.app`
-- โค้ดแอปล่าสุด: `62bb33c` — GitHub/Vercel รายงาน deployment สำเร็จ 24 ต.ค. 21:32:49 น. ไทย
-- ก่อนรอบจัดเอกสาร working tree สะอาด และ `main` ตรง `origin/main`; commit เอกสารภายหลังให้ดู `git log` โดยไม่ถือว่าเป็นการแก้โค้ดเพิ่ม
+- ลำดับโค้ด: `62bb33c` แก้ Private Reply → `0c77b53` แก้ General DM/Attachment (Vercel success 23:00:43 น.) → รอบตรวจต่อแก้ upload platform, cache token rotation และ lookup errors ดู `git log` และ WORK_STATUS_TH.md
+- ก่อนเริ่มทั้งรอบจัดเอกสารและตรวจ `0c77b53` working tree สะอาด และ `main` ตรง `origin/main`; แยก commit เอกสารกับ commit โค้ดเมื่ออ่านประวัติ
 - Next.js 16.3.2, React 19.2.8, TypeScript 5, Tailwind 4, Supabase PostgreSQL/Storage, Vercel, Meta Graph v26.0
 - ลำดับอ่าน: `AGENTS.md` → เอกสารนี้ → `WORK_STATUS_TH.md` → คู่มือเฉพาะส่วน
 
@@ -39,7 +39,7 @@ HubChat มีโค้ดและระบบ production แล้ว แต�
 | Comments | กรองสถานะ, ก่อนหน้า/ถัดไป, เตือนร่างค้าง, ชื่อ/รูปผู้ตอบหรือบอท, แยก public/private/error | เปิดอ่านไม่ล้างข้อผิดพลาดแล้ว; มี guard กันส่งซ้ำ แต่ไม่อ้าง exactly-once |
 | ลิงก์คอมเมนต์/แชท | เปิดโพสต์ต้นทาง/คอมเมนต์ FB, IG ใช้ media permalink, เปิดห้องลูกค้าจาก ID และเพจที่ตรงกัน | ไม่เดาจากชื่อ; กดเปิดแชทไม่ส่งข้อความ; ถ้ายังไม่มีห้องใน HubChat ไม่รับประกันว่าจะเปิดห้องได้; ไม่อ้างว่า IG กระโดดถึงคอมเมนต์รายอันได้เสมอ |
 | IG Private Reply | แก้ endpoint ให้ใช้ Facebook Page ที่เชื่อมและตรวจ IG ตรงกันก่อน POST | deploy แล้ว แต่ทดสอบจริงครั้งล่าสุดยังไม่สำเร็จ; รายละเอียดในหัวข้อ 4 |
-| DM ปกติและนโยบายส่ง | `sendMessage()` → policy → transport, claim/idempotency, เก็บผลส่ง/ไม่ทราบผล | `sendToMeta()` ยังใช้ `page.page_id/messages`; การแก้ private reply ไม่ครอบคลุมทางนี้ ต้องเทียบเอกสารของ Facebook Login ก่อนปิดงาน IG DM |
+| DM ปกติและนโยบายส่ง | `sendMessage()` → policy → transport, claim/idempotency; IG General DM/Attachment ใช้ linked Page แล้ว พร้อมแก้ upload platform/cache/error | regression ตรวจ endpoint/payload/การเปลี่ยน token/timeout แล้ว ยังต้องยืนยันผลจริงหลังสิทธิ์พร้อม |
 | Webhook/คิว | ตรวจลายเซ็น, กัน event ซ้ำ, แยกผลแต่ละ event, backoff/lease fencing, กู้คิวจาก scheduler | รอบนี้ pending/processing = 0, failed = 0; ล่าสุด #1796 done 22:02:18 น.; สถิติคิวไม่ยืนยันว่า event นั้นเป็น IG DM |
 | Auto-reply/AI | กฎคีย์เวิร์ด, human handoff, บอทคอมเมนต์, Gemini/AI assist และหน้าตั้งค่า | ต้องคง policy/claim; ยังไม่ได้ทดสอบสดทุกกฎ/ทุกช่องทางในรอบเอกสารนี้; การนำเข้าคอมเมนต์เก่าไม่ควรกระตุ้นตอบอัตโนมัติ |
 | ลูกค้า/ออเดอร์/สินค้า | ลูกค้าและโน้ต, สินค้า/โปรโมชัน, สร้างออเดอร์จากแชท, ผูกสลิป, COD/โอน, สถานะจัดส่ง | เส้นทางขายผ่าน PostgreSQL regression รอบก่อน; ไม่ใช่หลักฐานธุรกรรมเงินจริงหรือยืนยันสลิปกับธนาคาร |
@@ -76,18 +76,18 @@ HubChat มีโค้ดและระบบ production แล้ว แต�
 
 | การตรวจ | หลักฐานล่าสุด |
 |---|---|
-| TypeScript | รันซ้ำ 24 ต.ค. รอบส่งต่องาน ผ่าน |
-| Unit/architecture | รันซ้ำ ผ่าน **703 tests / 38 files** |
+| TypeScript | รันซ้ำ 24 ต.ค. รอบแก้ upload/cache/lookup ผ่าน |
+| Unit/architecture | รันซ้ำ ผ่าน **715 tests / 39 files** |
 | ESLint | รันซ้ำ ผ่าน ไม่มี error/warning |
-| `check-db` ฐานจริง | รันซ้ำ ผ่าน **40 ตาราง**, คอลัมน์/RPC กันซ้ำ, scheduler, บัญชีเจ้าของ |
-| Production build | ผ่านรอบแก้โค้ด `62bb33c` ก่อนจัดเอกสาร; รอบนี้ไม่ได้แก้ application code |
+| `check-db` ฐานจริง | รอบส่งต่องาน 22:10 น. ผ่าน **40 ตาราง**, คอลัมน์/RPC กันซ้ำ, scheduler, บัญชีเจ้าของ; รอบแก้ upload/cache ไม่มี migration |
+| Production build | รันผ่านหลังแก้ upload/cache/lookup ต่อจาก `0c77b53` |
 | PostgreSQL regression | หลักฐานรอบก่อน **318 tests / 19 files**; รอบนี้ไม่ได้รันซ้ำ เพราะ local port 55432 ไม่เปิด |
-| Vercel | commit `62bb33c` deployment completed/success |
+| Vercel | ยืนยัน `0c77b53` deployment completed/success เวลา 23:00:43 น.; commit แก้ต่อดูประวัติ Git/deployment ล่าสุด |
 | ลูกค้า IG รับส่งครบวงจร | **ยังไม่ผ่านการยืนยัน**; ห้ามอนุมานจาก unit tests/build/คิวว่าง |
 
 ## 6. งานถัดไปเรียงลำดับ พร้อมเกณฑ์จบ
 
-1. **ตรวจ IG DM ปกติระหว่างรอ Meta:** เทียบ `src/server/meta/client.ts::sendToMeta`, `transports/base.ts`, `standard.ts`, การส่งรูป และ conversations/backfill กับเอกสารทางการให้ตรงชนิด token/ID/host แก้เมื่อมีหลักฐานและเพิ่ม regression ที่ตรวจ endpoint จริง ห้ามแตะสิทธิ์ production เพื่อทำให้เทสต์ผ่าน
+1. **ยืนยัน IG DM ปกติ/รูปหลังแก้:** การเลือก linked Page, upload platform, cache เมื่อเปลี่ยน token และแยก GET/POST failure มี regression แล้ว ห้ามย้อนใช้ IG ID บน Page-token endpoint หรือข้าม policy การผ่าน tests ไม่ปิดงานทดสอบ conversations/backfill และผู้รับจริง
 2. **ติดตามคำขอ HubChat ตัวเดิม:** ต้องเห็น Advanced Access รายสิทธิ์จริง ไม่ใช้ Published/API test completed แทน ถ้าถูกปฏิเสธให้ใช้เหตุผลจริงแก้เฉพาะจุด ไม่ยกเลิก/ยื่นใหม่ขณะยัง pending โดยไม่จำเป็น
 3. **หลังสิทธิ์พร้อม ทดสอบด้วยบัญชีทดสอบที่ไม่มีบทบาทในแอป:** DM ใหม่และคอมเมนต์ใหม่ที่ยังไม่เคย private reply; ตาม timestamp + event/message ID → webhook → queue → DB → UI → ส่งครั้งเดียว → ตรวจฝั่งผู้รับ ทั้ง Facebook และ Instagram
 4. **ตรวจ recovery:** เหตุการณ์ซ้ำไม่ตอบซ้ำ, ผลไม่แน่นอนไม่ retry, เปิดอ่านไม่ล้าง error, ข้อมูลจากคน/เพจอื่นไม่ปน แล้วบันทึกผลผ่าน/ไม่ผ่านจริง

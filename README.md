@@ -2,7 +2,7 @@
 
 ระบบบริหารแชท คอมเมนต์ ลูกค้า ออเดอร์ คลังสื่อ และการตอบอัตโนมัติ เชื่อม Supabase และ deploy บน Vercel มี Message Policy Engine และกลไกกันส่งซ้ำ
 
-> **สถานะ 24 ต.ค. 2026:** โค้ด `62bb33c` deploy สำเร็จ; App Review ของ HubChat อยู่ระหว่างการตรวจสอบ ยังไม่ยืนยัน IG DM/Private Reply กับลูกค้าทั่วไปครบวงจร และต้องตรวจเส้นทาง DM ปกติเพิ่ม ไม่ใช่ระบบที่รับรอง 100% ทุกช่องทาง
+> **สถานะ 24 ต.ค. 2026:** General DM/Attachment routing ใน `0c77b53` deploy สำเร็จ และรอบตรวจต่อแก้ upload platform, cache หลังเปลี่ยน token และ lookup errors แล้ว App Review ล่าสุดที่ตรวจยังอยู่ระหว่างการตรวจสอบ ยังไม่ยืนยัน IG DM/Private Reply กับลูกค้าทั่วไปครบวงจร
 >
 > อ่าน [สรุปส่งต่อ Antigravity](docs/HANDOFF_ANTIGRAVITY_TH.md) · [สถานะและ log ล่าสุด](docs/WORK_STATUS_TH.md) · [ผลแก้ Instagram](docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md) · [App Review](docs/META_APP_REVIEW_TH.md)
 >
@@ -18,7 +18,7 @@
 | **ระบบโปรไฟล์ & โลโก้** | ระบบตัดรูป 1:1 อัตโนมัติ รองรับโลโก้เว็บ และรูปโปรไฟล์แอดมินแสดงในแถบเมนูและแชท |
 | **คลังสื่อ & หมวดหมู่** | Media Library แยกแฟ้ม (โปรโมชั่น, สินค้า, รีวิว/สลิป, ทั่วไป), พรีวิว Lightbox, คัดลอกลิงก์, ลบไฟล์ |
 | **ตัวกรองแชท** | กรองตามจำนวนออเดอร์ (ลูกค้าใหม่ 0 ออเดอร์ vs ลูกค้าเก่า 1+ ออเดอร์) และแอดมินที่ดูแล |
-| **ชุดทดสอบ** | **703 tests / 38 files** ผ่าน ณ 24 ต.ค. 2026; ไม่แทนผลรับส่งกับลูกค้าจริง |
+| **ชุดทดสอบ** | **715 tests / 39 files** ผ่าน ณ 24 ต.ค. 2026; ไม่แทนผลรับส่งกับลูกค้าจริง |
 
 📄 คู่มือแยกเรื่อง : [เชื่อมเพจ Facebook/IG](docs/META_SETUP_TH.md) · [ดึงแชทเก่า](docs/BACKFILL_TH.md) · [นำเข้าเลขพัสดุ](docs/TRACKING_TH.md) · [แจ้งเตือน](docs/NOTIFICATIONS.md)
 
@@ -162,7 +162,7 @@ npm run dev
 | `npm run build` | สร้างเวอร์ชันจริง (ต้องผ่านก่อน deploy เสมอ) |
 | `npm start` | รันเวอร์ชันจริง |
 | `npm run typecheck` | ตรวจว่าโค้ดไม่มีที่ผิดชนิดข้อมูล |
-| `npm test` | รัน unit/architecture tests (703 ข้อ ณ 24 ต.ค. 2026 — ใช้ external services จำลอง) |
+| `npm test` | รัน unit/architecture tests (715 ข้อ ณ 24 ต.ค. 2026 — ใช้ external services จำลอง) |
 | `npm run test:pg` | รันชุดทดสอบกับ PostgreSQL จริง — ต้องเปิดฐานข้อมูลทดสอบก่อน ถ้าต่อไม่ได้จะ fail ไม่ข้ามเงียบ ๆ (ดู `docs/META_DELIVERY_REPAIR_TH.md`) |
 | `npm run worker` | ตัวกวาดคิวแบบ CLI; production ใช้ Supabase scheduler ตาม RUNTIME_OPERATIONS_TH.md |
 | `npm run vapid` | สร้างกุญแจแจ้งเตือน PWA (ทำครั้งเดียวตอนติดตั้ง) |
@@ -847,12 +847,12 @@ HubChat deploy บน Vercel และเชื่อม Supabase แล้ว �
 ## สถานะการตรวจล่าสุด (24 ตุลาคม 2026)
 
 - [x] TypeScript และ ESLint ผ่าน (ไม่มี warning)
-- [x] Unit/architecture **703 tests / 38 files** ผ่าน
+- [x] Unit/architecture **715 tests / 39 files** ผ่าน
 - [x] ฐานจริง check-db ผ่าน **40 ตาราง**, RPC กันซ้ำ, scheduler และบัญชีเจ้าของ
-- [x] โค้ด `62bb33c` build ผ่านและ Vercel deployment สำเร็จ
+- [x] General DM/Attachment `0c77b53` deploy สำเร็จ; รอบแก้ upload/cache/lookup ต่อมา build ผ่าน
 - [x] Scheduler production เปิดอยู่ และไม่พบงานคิวรอ/ล้มเหลว ณ เวลาตรวจ
 - [x] App Review ของ **HubChat `1762855681523459`** ส่งแล้ว สถานะอยู่ระหว่างการตรวจสอบ
-- [ ] IG ลูกค้าทั่วไปรับส่งครบวงจร: ยังไม่มีหลักฐานผ่าน; ขาด Advanced Access ที่ Meta ระบุ และต้องตรวจ DM ปกติแยกจาก Private Reply
+- [ ] IG ลูกค้าทั่วไปรับส่งครบวงจร: ยังไม่มีหลักฐานผ่าน ต้องยืนยันสิทธิ์และทดสอบ DM/รูปภาพ/Private Reply จริงหลังแก้
 - [ ] ยืนยันปลายทาง Telegram/Web Push บนอุปกรณ์จริงตาม acceptance checklist
 - PostgreSQL regression รอบก่อนผ่าน **318 tests / 19 files**; รอบจัดเอกสารไม่ได้รันซ้ำ
 - ไม่รวม LINE messaging, `.xlsx` โดยตรง, self-service OAuth หรือการเปิด Utility/Marketing โดยไม่มีหลักฐานรองรับ

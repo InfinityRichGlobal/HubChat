@@ -95,19 +95,7 @@ export async function sendToMeta(page: MetaPage, payload: MetaSendPayload): Prom
   if (page.platform === 'instagram') {
     const resolved = await resolveInstagramMessagingPage(page, metaGet);
     if (!resolved.ok) {
-      return {
-        ok: false,
-        http_status: 400,
-        error: {
-          kind: 'permanent',
-          code: 400,
-          subcode: null,
-          message: resolved.error_th,
-          message_th: resolved.error_th,
-          fbtrace_id: null,
-          window_actually_closed: false,
-        },
-      };
+      return { ok: false, http_status: resolved.http_status, error: resolved.error };
     }
     senderPageId = resolved.facebook_page_id;
   }
@@ -360,19 +348,7 @@ export async function uploadAttachmentToMeta(
   if (page.platform === 'instagram') {
     const resolved = await resolveInstagramMessagingPage(page, metaGet);
     if (!resolved.ok) {
-      return {
-        ok: false,
-        http_status: 400,
-        error: {
-          kind: 'permanent',
-          code: 400,
-          subcode: null,
-          message: resolved.error_th,
-          message_th: resolved.error_th,
-          fbtrace_id: null,
-          window_actually_closed: false,
-        },
-      };
+      return { ok: false, http_status: resolved.http_status, error: resolved.error };
     }
     senderPageId = resolved.facebook_page_id;
   }
@@ -380,6 +356,10 @@ export async function uploadAttachmentToMeta(
   const url = `${GRAPH_HOST}/${await graphVersion()}/${encodeURIComponent(senderPageId)}/message_attachments`;
 
   const form = new FormData();
+  // The Page endpoint serves both channels. Meta requires this discriminator
+  // for uploads intended for Instagram, even with the correct linked Page ID.
+  // https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/attachment-upload
+  if (page.platform === 'instagram') form.append('platform', 'instagram');
   form.append(
     'message',
     JSON.stringify({ attachment: { type: attachmentType, payload: { is_reusable: true } } }),

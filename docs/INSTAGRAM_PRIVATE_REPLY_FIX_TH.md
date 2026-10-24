@@ -45,6 +45,18 @@ Meta Business Suite มีบทสนทนาที่แอดมินคุ
 
 ## สิ่งที่ยังต้องยืนยันหลังได้รับสิทธิ์จาก Meta
 
+### ตรวจซ้ำ commit `0c77b53` และแก้ต่อ — 24 ต.ค. 23:12 น. ไทย
+
+ยืนยัน `0c77b53` อยู่บน `main` และ Vercel deployment สำเร็จ 23:00:43 น. รัน typecheck และ tests เดิมผ่าน 707 ข้อ แต่ยังพบข้อผิดพลาดที่ tests เดิมไม่ครอบคลุม จึงยังไม่ควรรับรอง “พร้อม 100%”
+
+1. **Attachment Upload ขาด `platform=instagram`:** เอกสาร [Meta Attachment Upload](https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/attachment-upload) ระบุ field นี้สำหรับ Page endpoint ทั้งแบบ URL และไฟล์จาก server เพิ่มใน multipart เฉพาะ Instagram และตรวจ payload ใน regression test แล้ว
+2. **Cache ใช้ผลตัวตนเก่าหลังเปลี่ยน token:** cache เดิมผูกเฉพาะ record ID/IG ID เพิ่ม fingerprint ของ encrypted credential เพื่อให้เปลี่ยน token แล้วต้องตรวจ linked Page ใหม่ก่อน POST ยังคง TTL 5 นาที และทดสอบหมดอายุ/บัญชีเชื่อมไม่ตรงด้วย
+3. **Lookup failure ถูกทับเป็น permanent/400:** คืน HTTP/code/subcode/trace ของ Meta ตามจริง รักษา policy failure แบบห้าม retry และ transient failure แบบ retry ได้ เฉพาะ timeout ของ GET ตรวจตัวตนเป็น safely unsent ส่วน timeout หลัง POST ส่งข้อความยังเป็น ambiguous และห้ามส่งซ้ำตามเดิม
+
+เพิ่ม 8 tests และเพิ่มข้อยืนยัน payload ใน test เดิม: ก่อนแก้มี 6 เคส fail ยืนยันว่าจับปัญหาได้จริง หลังแก้ชุดเฉพาะ Meta/comment ผ่าน 43 ข้อ ไม่ใช้ live customer send ในรอบนี้ ผลตรวจเต็มชุดดู WORK_STATUS_TH.md
+
+### ข้อจำกัดที่ยังคงอยู่
+
 - Scope อยู่ใน token ไม่เท่ากับ Advanced Access; App Published ไม่เท่ากับ App Review ผ่าน
 - Runtime App ID คือ `1762855681523459` (HubChat); `2229730894588783` เป็น SuperiCez Studio คนละแอป
 - ตรวจหน้า App Review ล่าสุด 24 ต.ค. ประมาณ 22:10 น. ยัง **อยู่ระหว่างการตรวจสอบ** ต้องยืนยันหลังสิทธิ์ผ่านด้วย DM/คอมเมนต์ใหม่จนเห็นผลฝั่งผู้รับ

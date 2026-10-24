@@ -1,14 +1,23 @@
 # สถานะ HubChat และงานถัดไป
 
-อัปเดตล่าสุด 24 ตุลาคม 2026 ประมาณ 22:10 น. เวลาไทย
+อัปเดตล่าสุด 24 ตุลาคม 2026 ประมาณ 23:12 น. เวลาไทย
 
 ## สถานะปัจจุบัน — ใช้ส่วนนี้ส่งต่องาน
 
-**โค้ด production ล่าสุดคือ `62bb33c` และ deploy สำเร็จแล้ว แต่ยังไม่ยืนยัน IG DM/Private Reply กับลูกค้าทั่วไปครบวงจร** ไม่ควรรับรองทั้งระบบว่า 100% จากผลเทสต์ หรือสรุปว่างานโค้ดทุกเส้นทางจบแล้ว
+**General DM/Attachment routing เพิ่มแล้วใน `0c77b53` และ deploy สำเร็จ 23:00:43 น. ไทย; รอบตรวจต่อแก้ upload payload, cache หลังเปลี่ยน token และการจัดประเภท lookup error เพิ่ม** ยังไม่ยืนยัน IG DM/Private Reply กับลูกค้าทั่วไปครบวงจร ไม่ควรรับรองทั้งระบบว่า 100% จากผลเทสต์
 
 สรุปแต่ละโมดูล เกณฑ์จบงาน และคำแนะนำสำหรับ Agent ถัดไปอยู่ที่ [HANDOFF_ANTIGRAVITY_TH.md](HANDOFF_ANTIGRAVITY_TH.md)
 
-### ตรวจรอบส่งต่องาน 24 ตุลาคม
+### ตรวจและแก้ต่อจาก Antigravity `0c77b53`
+
+- ตรวจ Git สะอาดก่อนแก้; ยืนยัน commit และ deployment จริง ไม่อาศัยข้อความส่งต่อเพียงอย่างเดียว
+- Tests เดิมผ่าน 707 ข้อ แต่ regression ที่เพิ่มจับปัญหาได้ 6 เคสก่อนแก้: ไม่มี `platform=instagram` ในไฟล์แนบ, token ใหม่ใช้ cache เดิม, lookup error สูญเสียประเภท/code/subcode/trace
+- แก้ multipart สำหรับ IG, ผูก cache กับ credential fingerprint, รักษาข้อผิดพลาด Meta และทำ timeout ของ GET ก่อนส่งให้ retry ได้อย่างปลอดภัย โดยไม่เปลี่ยนข้อห้าม retry หลัง POST ไม่ทราบผล
+- ตรวจชุดเฉพาะ Meta/comment ผ่าน 43 ข้อ; ชุดเต็ม **715 tests / 39 files**, typecheck, lint และ production build ผ่าน รายละเอียดใน [incident log](INSTAGRAM_PRIVATE_REPLY_FIX_TH.md)
+- ไม่มี migration หรือการส่งข้อความถึงลูกค้าจริงในรอบนี้; App Review ล่าสุดที่เปิดตรวจยังเป็นผลเวลา 22:10 น. ไม่ได้อนุมานว่าอนุมัติจากการ deploy
+- งานหลังจากนี้ยังต้องยืนยัน Advanced Access และรับส่งจริงจากบัญชีไม่มีบทบาทในแอป รวม DM รูปภาพ และ private reply ใหม่
+
+### ประวัติตรวจรอบส่งต่องาน 24 ตุลาคม เวลา 22:10 น.
 
 - Git ก่อนแก้เอกสารสะอาด `main` ตรง `origin/main`; GitHub/Vercel ยืนยัน `62bb33c` deployment success เวลา 21:32:49 น. ไทย
 - รันซ้ำ: typecheck ผ่าน, unit/architecture **703 tests / 38 files** ผ่าน, lint ผ่านไม่มี warning, check-db ผ่าน **40 ตาราง** และ RPC/คอลัมน์กันตอบซ้ำ/การตั้ง scheduler/บัญชีเจ้าของ

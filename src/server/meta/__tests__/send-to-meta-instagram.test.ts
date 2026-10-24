@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'a'.repeat(40);
@@ -17,6 +17,7 @@ describe('Meta client — Instagram routing & resolution', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     clearInstagramMessagingPageCache();
     __setFetcherForTests(null);
   });
@@ -116,7 +117,8 @@ describe('Meta client — Instagram routing & resolution', () => {
 
   it('Instagram Attachment Upload API resolves linked Facebook Page ID and posts to /{facebook_page_id}/message_attachments', async () => {
     const urls: string[] = [];
-    __setFetcherForTests((async (url: string | URL | Request) => {
+    let uploadForm: FormData | undefined;
+    __setFetcherForTests((async (url: string | URL | Request, init?: RequestInit) => {
       const urlStr = String(url);
       urls.push(urlStr);
       if (urlStr.includes('/me?')) {
@@ -129,6 +131,7 @@ describe('Meta client — Instagram routing & resolution', () => {
         );
       }
       if (urlStr.includes('/message_attachments')) {
+        uploadForm = init?.body as FormData;
         return new Response(JSON.stringify({ attachment_id: 'att-ig-777' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -146,5 +149,142 @@ describe('Meta client — Instagram routing & resolution', () => {
     expect(urls).toHaveLength(2);
     expect(urls[0]).toContain('/v26.0/me?');
     expect(urls[1]).toContain('/v26.0/fb-page-linked-999/message_attachments');
+    expect(uploadForm?.get('platform')).toBe('instagram');
+    expect(JSON.parse(String(uploadForm?.get('message')))).toEqual({
+      attachment: { type: 'image', payload: { is_reusable: true } },
+    });
+    expect(uploadForm?.get('filedata')).toBeInstanceOf(Blob);
+  });
+
+  it('revalidates identity after token rotation even while the previous cache entry is fresh', async () => {
+    const requests: { url: string; method: string }[] = [];
+    let lookups = 0;
+    __setFetcherForTests((async (url, init) => {
+      requests.push({ url: String(url), method: init?.method ?? 'GET' });
+      if (String(url).includes('/me?')) {
+        lookups++;
+        return Response.json({ id: 'linked-page', instagram_business_account: {
+          id: lookups === 1 ? igPage.page_id : 'another-instagram-account',
+        } });
+      }
+      return Response.json({ message_id: 'mid-test' });
+    }) as typeof fetch);
+    const payload = { recipient: { id: 'test-recipient' }, message: { text: 'test' } };
+    expect((await sendToMeta(igPage, payload)).ok).toBe(true);
+    const rotated = { ...igPage, access_token: encryptSecret('different-page-token') };
+    expect((await sendToMeta(rotated, payload)).ok).toBe(false);
+    expect(lookups).toBe(2);
+    expect(requests.filter(r => r.method === 'POST')).toHaveLength(1);
+  });
+
+  it('revalidates identity after the cache expires and blocks a changed linked account', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    let lookups = 0;
+    let posts = 0;
+    __setFetcherForTests((async (url) => {
+      if (String(url).includes('/me?')) {
+        lookups++;
+        return Response.json({ id: 'linked-page', instagram_business_account: {
+          id: lookups === 1 ? igPage.page_id : 'changed-ig',
+        } });
+      }
+      posts++;
+      return Response.json({ message_id: 'mid-test' });
+    }) as typeof fetch);
+    const payload = { message: { text: 'test' } };
+    expect((await sendToMeta(igPage, payload)).ok).toBe(true);
+    now.mockReturnValue(1_000_000 + 5 * 60_000);
+    expect((await sendToMeta(igPage, payload)).ok).toBe(false);
+    expect(lookups).toBe(2);
+    expect(posts).toBe(1);
+  });
+
+  it('keeps transient lookup errors retryable and preserves Meta diagnostics without a POST', async () => {
+    const fetch = vi.fn(async () => Response.json({ error: {
+      code: 2, error_subcode: 456, message: 'Temporarily unavailable', fbtrace_id: 'lookup-trace',
+    } }, { status: 503 }));
+    __setFetcherForTests(fetch as typeof globalThis.fetch);
+    const result = await sendToMeta(igPage, { message: { text: 'test' } });
+    expect(result).toMatchObject({ ok: false, http_status: 503, error: {
+      kind: 'transient', code: 2, subcode: 456, fbtrace_id: 'lookup-trace', window_actually_closed: false,
+    } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/me?'), expect.objectContaining({ method: 'GET' }));
+  });
+
+  it('treats an identity GET timeout as safely retryable and does not cache the failure', async () => {
+    let lookups = 0;
+    let posts = 0;
+    __setFetcherForTests((async (url) => {
+      if (String(url).includes('/me?')) {
+        lookups++;
+        if (lookups === 1) throw new Error('lookup timeout');
+        return Response.json({ id: 'linked-page', instagram_business_account: { id: igPage.page_id } });
+      }
+      posts++;
+      return Response.json({ message_id: 'mid-test' });
+    }) as typeof fetch);
+    const first = await sendToMeta(igPage, { message: { text: 'test' } });
+    expect(first).toMatchObject({ ok: false, error: { kind: 'transient' } });
+    if (!first.ok) expect(first.error.message_th).toContain('ยังไม่ได้ส่งข้อความ');
+    expect(posts).toBe(0);
+    expect((await sendToMeta(igPage, { message: { text: 'test' } })).ok).toBe(true);
+    expect(lookups).toBe(2);
+    expect(posts).toBe(1);
+  });
+
+  it('keeps a permission failure nonretryable with its original code, subcode and trace', async () => {
+    const fetch = vi.fn(async () => Response.json({ error: {
+      code: 200, error_subcode: 2534048, message: 'Permission denied', fbtrace_id: 'permission-trace',
+    } }, { status: 403 }));
+    __setFetcherForTests(fetch as typeof globalThis.fetch);
+    const result = await sendToMeta(igPage, { message: { text: 'test' } });
+    expect(result).toMatchObject({ ok: false, http_status: 403, error: {
+      kind: 'policy', code: 200, subcode: 2534048, fbtrace_id: 'permission-trace',
+    } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('still treats a POST timeout as ambiguous with no endpoint fallback', async () => {
+    const methods: string[] = [];
+    __setFetcherForTests((async (url, init) => {
+      methods.push(init?.method ?? 'GET');
+      if (String(url).includes('/me?')) {
+        return Response.json({ id: 'linked-page', instagram_business_account: { id: igPage.page_id } });
+      }
+      throw new Error('POST timeout');
+    }) as typeof fetch);
+    expect(await sendToMeta(igPage, { message: { text: 'test' } })).toMatchObject({
+      ok: false, error: { kind: 'ambiguous' },
+    });
+    expect(methods).toEqual(['GET', 'POST']);
+  });
+
+  it('does not add Instagram routing to a Facebook attachment upload', async () => {
+    const fetch = vi.fn(async () => Response.json({ attachment_id: 'fb-attachment' }));
+    __setFetcherForTests(fetch as typeof globalThis.fetch);
+    expect((await uploadAttachmentToMeta(fbPage, {
+      bytes: new ArrayBuffer(8), mime: 'image/jpeg', filename: 'test.jpg',
+    })).ok).toBe(true);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('/fb-page-12345/message_attachments'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect((init.body as FormData).has('platform')).toBe(false);
+  });
+
+  it('preserves lookup errors before attachment upload without uploading bytes', async () => {
+    const fetch = vi.fn(async () => Response.json({ error: {
+      code: 4, message: 'Rate limit', fbtrace_id: 'upload-lookup-trace',
+    } }, { status: 429 }));
+    __setFetcherForTests(fetch as typeof globalThis.fetch);
+    expect(await uploadAttachmentToMeta(igPage, {
+      bytes: new ArrayBuffer(8), mime: 'image/jpeg', filename: 'test.jpg',
+    })).toMatchObject({ ok: false, http_status: 429, error: {
+      kind: 'transient', code: 4, fbtrace_id: 'upload-lookup-trace',
+    } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/me?'), expect.objectContaining({ method: 'GET' }));
   });
 });

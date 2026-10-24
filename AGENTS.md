@@ -91,5 +91,5 @@ npm run notify       # รันตัวตรวจแชทค้าง/แ�
 - อ่าน [docs/HANDOFF_ANTIGRAVITY_TH.md](docs/HANDOFF_ANTIGRAVITY_TH.md) และ [docs/WORK_STATUS_TH.md](docs/WORK_STATUS_TH.md) ก่อนสรุปความพร้อม โดยดูวันที่ของหลักฐานเสมอ
 - Production ใช้ Meta App **HubChat `1762855681523459`**; App `2229730894588783` คือ **SuperiCez Studio** ไม่ใช่ตัวเดียวกัน ตรวจ runtime settings ก่อนเปลี่ยนการเชื่อมต่อ
 - Unit tests/build/deployment ผ่าน ไม่ใช่หลักฐานว่า Meta Advanced Access ผ่านหรือข้อความถึงลูกค้าจริงแล้ว
-- การแก้ IG Private Reply อยู่ใน [docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md](docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md); DM ปกติยังต้องตรวจแยก
+- การแก้ IG Private Reply, General DM/Attachment และผลตรวจ cache/error อยู่ใน [docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md](docs/INSTAGRAM_PRIVATE_REPLY_FIX_TH.md); ต้องแยกผล regression ออกจากผลส่งจริงหลังสิทธิ์พร้อม
 - `DEFERRED_REVIEW.md` เก็บประวัติรอบต้นด้วย ให้ใช้ตารางอัปเดตด้านบนก่อน ไม่เปิดงานเก่าซ้ำจากข้อความประวัติ

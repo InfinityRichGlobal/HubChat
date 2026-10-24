@@ -14,6 +14,9 @@ import {
 } from '../comments';
 import * as metaClient from '../client';
 import type { MetaPage } from '../client';
+import { clearInstagramMessagingPageCache } from '../instagram-messaging-page';
+
+beforeEach(() => clearInstagramMessagingPageCache());
 
 vi.mock('../client', async (importOriginal) => {
   const actual = await importOriginal<typeof metaClient>();
